@@ -29,4 +29,13 @@ and can fully replace the base coding instructions with `keep-coding-instruction
 /plugin install coding@ezzabuzaid
 ```
 
-Then `/output-style` → **Progressive Guardrails**.
+Run `/reload-plugins` (or restart) to load it.
+
+## Selecting the style
+
+Output styles are switched with the `/output-style` command:
+
+1. Type `/output-style` and press Enter — a picker lists every installed style.
+2. Choose **Progressive Guardrails**.
+
+The choice persists per project (in `.claude/settings.local.json`) and stays active until you switch. Run `/output-style` again anytime to change it or return to `default`.

@@ -25,4 +25,11 @@ component. Three layers on top of normal coding work:
   enforceable ESLint / TypeScript / CI / Agent-Guidance recommendations, researching the
   real rule before naming it.
 
-After install: `/output-style` → **Progressive Guardrails**.
+## Selecting the style
+
+After installing, run `/reload-plugins`, then switch styles with `/output-style`:
+
+1. Type `/output-style` and press Enter to open the picker.
+2. Choose **Progressive Guardrails**.
+
+The choice persists per project and stays active until you pick another style.
