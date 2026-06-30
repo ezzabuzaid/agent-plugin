@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "ezzabuzaid",
+  "version": "1.0.0",
+  "description": "ezzabuzaid's Claude Code plugins",
+  "owner": {
+    "name": "ezzabuzaid",
+    "email": "ezzabuzaid@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "progressive-guardrails",
+      "description": "Progressive Guardrails output style: insights, terminology corrections, and enforceable repo/agent guardrails.",
+      "source": "./progressive-guardrails",
+      "version": "1.0.0",
+      "category": "development"
+    }
+  ]
+}

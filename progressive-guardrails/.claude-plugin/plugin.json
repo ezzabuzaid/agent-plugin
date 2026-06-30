@@ -1,0 +1,9 @@
+{
+  "name": "progressive-guardrails",
+  "version": "1.0.0",
+  "description": "Progressive Guardrails output style: educational insights, terminology corrections, and enforceable repo/agent guardrails surfaced from coding friction and user feedback.",
+  "author": {
+    "name": "ezzabuzaid",
+    "email": "ezzabuzaid@gmail.com"
+  }
+}
