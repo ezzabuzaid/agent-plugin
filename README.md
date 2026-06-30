@@ -6,14 +6,14 @@ A Claude Code plugin marketplace by [@ezzabuzaid](https://github.com/ezzabuzaid)
 
 ```
 /plugin marketplace add ezzabuzaid/agent-plugin
-/plugin install progressive-guardrails@ezzabuzaid
+/plugin install coding@ezzabuzaid
 ```
 
 (Private clone? Use `git@github.com:ezzabuzaid/agent-plugin.git` in place of the shorthand.)
 
 ## Plugins
 
-### progressive-guardrails
+### coding
 
 The **Progressive Guardrails** output style, shipped as a native `/output-style`
 component. Three layers on top of normal coding work:

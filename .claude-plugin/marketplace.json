@@ -9,9 +9,9 @@
   },
   "plugins": [
     {
-      "name": "progressive-guardrails",
+      "name": "coding",
       "description": "Progressive Guardrails output style: insights, terminology corrections, and enforceable repo/agent guardrails.",
-      "source": "./progressive-guardrails",
+      "source": "./coding",
       "version": "1.0.0",
       "category": "development"
     }

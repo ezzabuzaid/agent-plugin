@@ -69,6 +69,6 @@ console.log(`
 
 Others install with:
   /plugin marketplace add ${isPrivate ? `git@github.com:${SLUG}.git` : SLUG}
-  /plugin install progressive-guardrails@ezzabuzaid
+  /plugin install coding@ezzabuzaid
   → /output-style → Progressive Guardrails
 `);
