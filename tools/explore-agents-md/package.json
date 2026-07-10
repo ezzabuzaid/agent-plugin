@@ -1,0 +1,11 @@
+{
+  "name": "explore-agents-md",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "explore-agents-md": "./cli.ts"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.2.0"
+  }
+}

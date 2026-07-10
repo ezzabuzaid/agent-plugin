@@ -14,7 +14,7 @@ printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Build a custom exec
 npm test
 ```
 
-`cli.ts` (bin: `explore-agents-md`) is a non-interactive explorer that lists
-every CLAUDE.md/AGENTS.md across local project roots; `--json` emits machine
-output. The `reminders-curator` skill (../../skills/reminders-curator) uses it
-to mine repeated guidance out of those files and encode it here as rules.
+The AGENTS.md/CLAUDE.md explorer CLI lives at `../../tools/explore-agents-md/`
+(bin: `explore-agents-md`); the `reminders-curator` skill
+(../../skills/reminders-curator) runs it to mine repeated guidance out of
+those files and encode it here as rules.

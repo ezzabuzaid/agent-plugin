@@ -156,12 +156,39 @@ function describe(folder: FoundFolder): string {
   return `${shortenHome(folder.path)}\n  ${parts.join(' · ')}`;
 }
 
-const { values } = parseArgs({
-  options: {
-    json: { type: 'boolean', default: false },
-    root: { type: 'string', multiple: true },
-  },
-});
+const USAGE = `explore-agents-md — list every folder holding a CLAUDE.md or AGENTS.md
+
+Usage:
+  explore-agents-md [--json] [--root <dir>]...
+
+Options:
+  --json         machine output: raw JSON array, no chrome
+  --root <dir>   override the default search roots (repeatable)
+  --help         show this help
+`;
+
+const parseCliArgs = () => {
+  try {
+    return parseArgs({
+      options: {
+        json: { type: 'boolean', default: false },
+        root: { type: 'string', multiple: true },
+        help: { type: 'boolean', default: false },
+      },
+    }).values;
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    console.error(`\n${USAGE}`);
+    return process.exit(2);
+  }
+};
+
+const values = parseCliArgs();
+
+if (values.help) {
+  console.log(USAGE);
+  process.exit(0);
+}
 
 const roots = values.root && values.root.length > 0 ? values.root : DEFAULT_ROOTS;
 

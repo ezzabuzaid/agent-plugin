@@ -5,7 +5,7 @@ import {
   writeOutput,
 } from '@deepagents/experimental/coding-agent-reminders';
 
-import { ezzsWayOfCodingConfig } from './rules.ts';
+import { ezzsWayOfCodingConfig } from './rules/index.ts';
 
 const raw = await readStdin();
 if (raw.trim().length !== 0) {

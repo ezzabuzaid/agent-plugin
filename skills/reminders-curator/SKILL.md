@@ -14,9 +14,11 @@ more places.
 ## Locations
 
 - Hook + rules: `~/Desktop/January/agent-plugin/hooks/ezzs-way-of-coding/`
-  (`rules.ts` holds `reminderRules`; `rules.test.ts` is the black-box suite;
-  both Claude and Codex execute `hook.ts` on their hook events)
-- Explorer CLI: `cli.ts` in the same folder
+  (rules live in `rules/<theme>.ts` files — evidence, change-safety, testing,
+  collaboration, frontend, infra, failures, defaults — assembled by
+  `rules/index.ts`; `rules.test.ts` is the black-box suite; both Claude and
+  Codex execute `hook.ts` on their hook events)
+- Explorer CLI: `~/Desktop/January/agent-plugin/tools/explore-agents-md/cli.ts`
 - Predicate reference: the package types at
   `node_modules/@deepagents/experimental/dist/coding-agent-reminders/types.d.ts`
   and `predicates/*.d.ts` in that folder — read them before writing a `when`
@@ -26,7 +28,7 @@ more places.
 ### 1. Inventory
 
 ```sh
-node ~/Desktop/January/agent-plugin/hooks/ezzs-way-of-coding/cli.ts --json
+node ~/Desktop/January/agent-plugin/tools/explore-agents-md/cli.ts --json
 ```
 
 Returns every folder holding a CLAUDE.md/AGENTS.md with paths, sizes, and
@@ -58,7 +60,8 @@ proposed trigger.
 
 ### 4. Encode
 
-Add one `ReminderRule` per cluster to `reminderRules` in `rules.ts`:
+Add one `ReminderRule` per cluster to the matching `rules/<theme>.ts` file
+(create a new theme file plus one `rules/index.ts` line when no theme fits):
 
 - **target/events** — prompt rules (`UserPromptSubmit`) for "when asked to X"
   guidance; tool rules (`PostToolUse`/`PostToolUseFailure`) for "when Y
@@ -72,9 +75,9 @@ Add one `ReminderRule` per cluster to `reminderRules` in `rules.ts`:
   topic-ish words alone; a successful file read that merely *mentions* the
   topic will trigger it. Anchor on structured signals (event names, tool
   names, `toolCall({ state })`) or CLI-authored prefixes, the way
-  `batchHasFailedCall` in rules.ts matches `^Error: ` per result instead of
-  grepping the joined batch text. That predicate exists because the word-grep
-  version fired on every file that discussed errors.
+  `batchHasFailedCall` in `rules/failures.ts` matches `^Error: ` per result
+  instead of grepping the joined batch text. That predicate exists because the
+  word-grep version fired on every file that discussed errors.
 - **message** — short, imperative, and carrying the *why*, so the agent can
   apply the rule to situations the pattern authors never saw.
 
@@ -99,7 +102,7 @@ working-tree edits they review in `git diff`.
 
 ## Output
 
-End with a table: rule → files it was mined from → rule id in rules.ts →
+End with a table: rule → files it was mined from → rule id and theme file →
 trigger summary → sources trimmed or pending. Remind the user that running
 sessions snapshot hook config at startup, so new reminders appear from the
 next session.

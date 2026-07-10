@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { evaluateReminderHook } from '@deepagents/experimental/coding-agent-reminders';
 
-import { ezzsWayOfCodingConfig } from './rules.ts';
+import { ezzsWayOfCodingConfig } from './rules/index.ts';
 
 test('does not inject project-specific memory', async () => {
   const output = await evaluateReminderHook(
@@ -207,6 +207,85 @@ test('stop verification stays quiet for status-only turns', async () => {
     output?.hookSpecificOutput?.additionalContext ?? '',
     /\[stop-feedback:stop-verify-before-handoff\]/,
   );
+});
+
+test('stop verification survives prompts that merely contain guard words', async () => {
+  const output = await evaluateReminderHook(
+    { hook_event_name: 'Stop', prompt: 'the deploy failed, stop retrying and fix the config' },
+    ezzsWayOfCodingConfig,
+  );
+
+  assert.match(
+    output?.hookSpecificOutput?.additionalContext ?? '',
+    /\[stop-feedback:stop-verify-before-handoff\]/,
+  );
+});
+
+test('core reminders fire on their events', async () => {
+  const cases = [
+    ['session:session-ezzs-way', { hook_event_name: 'SessionStart' }],
+    [
+      'prompt:bug-reproduce-first',
+      { hook_event_name: 'UserPromptSubmit', prompt: 'Fix the crash when uploading large files.' },
+    ],
+    [
+      'tool-result:tool-failure-root-cause',
+      { hook_event_name: 'PostToolUseFailure', tool_name: 'Read', error: 'ENOENT: no such file' },
+    ],
+    [
+      'tool-result:bash-error-root-cause',
+      {
+        hook_event_name: 'PostToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'rm /tmp/x' },
+        tool_output: 'rm: cannot remove /tmp/x: Permission denied',
+      },
+    ],
+  ];
+
+  for (const [tag, input] of cases) {
+    const output = await evaluateReminderHook(input, ezzsWayOfCodingConfig);
+
+    assert.match(
+      output?.hookSpecificOutput?.additionalContext ?? '',
+      new RegExp(`\\[${tag}\\]`),
+    );
+  }
+});
+
+test('core reminders stay quiet off their events', async () => {
+  const cases = [
+    [
+      'session:session-ezzs-way',
+      { hook_event_name: 'UserPromptSubmit', prompt: 'Fix the crash when uploading large files.' },
+    ],
+    [
+      'prompt:bug-reproduce-first',
+      { hook_event_name: 'UserPromptSubmit', prompt: 'Rename the upload helper for clarity.' },
+    ],
+    [
+      'tool-result:tool-failure-root-cause',
+      { hook_event_name: 'PostToolUse', tool_name: 'Read', tool_output: 'file contents' },
+    ],
+    [
+      'tool-result:bash-error-root-cause',
+      {
+        hook_event_name: 'PostToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'ls' },
+        tool_output: 'README.md package.json src',
+      },
+    ],
+  ];
+
+  for (const [tag, input] of cases) {
+    const output = await evaluateReminderHook(input, ezzsWayOfCodingConfig);
+
+    assert.doesNotMatch(
+      output?.hookSpecificOutput?.additionalContext ?? '',
+      new RegExp(`\\[${tag}\\]`),
+    );
+  }
 });
 
 test('destructive reminder ignores harmless remove wording', async () => {
