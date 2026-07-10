@@ -1,0 +1,15 @@
+{
+  "name": "ezzs-way-of-coding-hook",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "explore-agents-md": "./cli.ts"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.2.0",
+    "@deepagents/experimental": "4.3.0"
+  },
+  "scripts": {
+    "test": "node --test --no-warnings rules.test.ts"
+  }
+}
