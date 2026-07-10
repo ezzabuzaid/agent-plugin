@@ -163,6 +163,61 @@ export const reminderRules: ReminderRule[] = [
     message:
       'Make the artifact, workflow, or runtime shape concrete early. Challenge weak premises, names, and boundaries directly instead of agreeing at an abstract level.',
   },
+  // Mined by reminders-curator (2026-07-10) from guidance repeated across
+  // AGENTS.md/CLAUDE.md files in 2+ repos; per-rule source lists live in the
+  // curation report, and the source files can be trimmed once these prove out.
+  {
+    id: 'preserve-existing-surface',
+    target: 'prompt',
+    events: promptEvents,
+    when: and(
+      contentPattern(
+        /\b(refactor|redesign|rework|simplify|clean ?up|migrate|rebuild|replace|consolidate|streamline|remove|rename)\b/i,
+      ),
+      contentPattern(
+        /\b(features?|ui|ux|screens?|pages?|components?|options?|settings?|buttons?|menus?|flows?|routes?|surface)\b/i,
+      ),
+    ),
+    message:
+      'Do not remove, hide, or rename existing features or UI surface unless explicitly asked — keep the surface intact and stub or annotate what is not wired yet, and do not silently change existing behavior beyond the ask.',
+  },
+  {
+    id: 'builtin-test-runner-discipline',
+    target: 'prompt',
+    events: promptEvents,
+    when: and(
+      contentPattern(/\b(write|add|create|update|fix|generate|cover)\b/i),
+      contentPattern(/\b(tests?|specs?|coverage|e2e)\b/i),
+    ),
+    message:
+      "Use the runtime's built-in test runner and assert (node --test / bun test) — never jest, vitest, or another test library. Keep each test self-contained AAA with teardown in try/finally; no before/after lifecycle hooks and no pre-seeded shared state.",
+  },
+  {
+    id: 'ascii-before-ui',
+    target: 'prompt',
+    events: promptEvents,
+    when: and(
+      contentPattern(/\b(build|implement|add|create|change|redesign|update|make)\b/i),
+      contentPattern(
+        /\b(ui|ux|frontend|screens?|pages?|layouts?|views?|modals?|forms?|dashboards?|widgets?|components?)\b/i,
+      ),
+    ),
+    message:
+      'UI work starts with an ASCII wireframe and explicit user approval before implementation, with the repo design contract (e.g. DESIGN.md) read in full — alignment first prevents rework.',
+  },
+  {
+    id: 'infra-as-code-only',
+    target: 'prompt',
+    events: promptEvents,
+    when: and(
+      contentPattern(/\b(infra|infrastructure|terraform|pulumi|provision|deploy(?:ment)?)\b/i),
+      contentPattern(
+        /\b(cloud|gcp|gcloud|aws|azure|resources?|buckets?|vms?|clusters?|iam|service accounts?)\b/i,
+      ),
+    ),
+    message:
+      'Infrastructure changes go through the IaC tool (terraform/pulumi) following the existing infra patterns — never mutate cloud resources directly via console or raw CLI; IaC owns everything, not CI/CD or manual edits.',
+  },
   {
     id: 'tool-failure-root-cause',
     target: 'tool-result',

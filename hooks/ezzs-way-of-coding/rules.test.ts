@@ -140,6 +140,51 @@ test('batch reconciler fires on failed content-block results and denials', async
   }
 });
 
+test('mined reminders fire on matching prompts', async () => {
+  const cases = [
+    [
+      'preserve-existing-surface',
+      'Refactor the settings page and clean up the options we no longer need.',
+    ],
+    ['builtin-test-runner-discipline', 'Write integration tests for the checkout flow.'],
+    ['ascii-before-ui', 'Build a new dashboard page for usage metrics.'],
+    ['infra-as-code-only', 'Provision a new GCS bucket for artifacts via terraform.'],
+  ];
+
+  for (const [id, prompt] of cases) {
+    const output = await evaluateReminderHook(
+      { hook_event_name: 'UserPromptSubmit', prompt },
+      ezzsWayOfCodingConfig,
+    );
+
+    assert.match(
+      output?.hookSpecificOutput?.additionalContext ?? '',
+      new RegExp(`\\[prompt:${id}\\]`),
+    );
+  }
+});
+
+test('mined reminders stay quiet on near-miss prompts', async () => {
+  const cases = [
+    ['preserve-existing-surface', 'Refactor the date parsing helper for clarity.'],
+    ['builtin-test-runner-discipline', 'Investigate why the production build is failing.'],
+    ['ascii-before-ui', 'Add pagination support to the list endpoint.'],
+    ['infra-as-code-only', 'Deploy the preview build to the static docs host.'],
+  ];
+
+  for (const [id, prompt] of cases) {
+    const output = await evaluateReminderHook(
+      { hook_event_name: 'UserPromptSubmit', prompt },
+      ezzsWayOfCodingConfig,
+    );
+
+    assert.doesNotMatch(
+      output?.hookSpecificOutput?.additionalContext ?? '',
+      new RegExp(`\\[prompt:${id}\\]`),
+    );
+  }
+});
+
 test('destructive reminder ignores harmless remove wording', async () => {
   const output = await evaluateReminderHook(
     {
