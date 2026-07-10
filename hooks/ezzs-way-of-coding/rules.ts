@@ -2,7 +2,6 @@ import {
   always,
   and,
   contentPattern,
-  envFlag,
   not,
   or,
   toolCall,
@@ -252,10 +251,7 @@ export const reminderRules: ReminderRule[] = [
     id: 'stop-verify-before-handoff',
     target: 'stop-feedback',
     events: stopEvents,
-    when: and(
-      envFlag('EZZ_HOOK_ENABLE_STOP_FEEDBACK'),
-      not(contentPattern(/\b(status|pause|stop|only report)\b/i)),
-    ),
+    when: not(contentPattern(/\b(status|pause|stop|only report)\b/i)),
     message:
       'Before stopping, verify the work that changed code or configuration, and report any command you could not run.',
   },

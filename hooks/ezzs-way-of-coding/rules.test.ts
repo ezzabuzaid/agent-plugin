@@ -185,6 +185,30 @@ test('mined reminders stay quiet on near-miss prompts', async () => {
   }
 });
 
+test('stop verification fires ungated on Stop events', async () => {
+  const output = await evaluateReminderHook(
+    { hook_event_name: 'Stop' },
+    ezzsWayOfCodingConfig,
+  );
+
+  assert.match(
+    output?.hookSpecificOutput?.additionalContext ?? '',
+    /\[stop-feedback:stop-verify-before-handoff\]/,
+  );
+});
+
+test('stop verification stays quiet for status-only turns', async () => {
+  const output = await evaluateReminderHook(
+    { hook_event_name: 'Stop', prompt: 'only report status, do not change anything' },
+    ezzsWayOfCodingConfig,
+  );
+
+  assert.doesNotMatch(
+    output?.hookSpecificOutput?.additionalContext ?? '',
+    /\[stop-feedback:stop-verify-before-handoff\]/,
+  );
+});
+
 test('destructive reminder ignores harmless remove wording', async () => {
   const output = await evaluateReminderHook(
     {
