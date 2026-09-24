@@ -3,9 +3,8 @@ import type {
   ReminderRule,
 } from '@deepagents/experimental/coding-agent-reminders';
 
-import { readFile } from 'node:fs/promises';
-
 import { stopEvents } from './events.ts';
+import { readTranscriptEntries } from './transcript.ts';
 
 // A final message that hands a verification gap to the user instead of closing it.
 // A bare "unverified" counts only as a standalone word: not inside a hyphenated
@@ -39,37 +38,11 @@ async function finalAssistantText(input: ClaudeHookInput): Promise<string> {
   if (typeof input.last_assistant_message === 'string')
     return prose(input.last_assistant_message);
   if (!input.transcript_path) return '';
-  let transcript: string;
-  try {
-    transcript = await readFile(input.transcript_path, 'utf8');
-  } catch {
-    return '';
-  }
   let last = '';
-  for (const line of transcript.split('\n')) {
-    let entry: unknown;
-    try {
-      entry = JSON.parse(line);
-    } catch {
+  for await (const entry of readTranscriptEntries(input.transcript_path)) {
+    if (entry.type !== 'assistant' || entry.message?.role !== 'assistant')
       continue;
-    }
-    const message =
-      entry !== null && typeof entry === 'object' && 'message' in entry
-        ? entry.message
-        : undefined;
-    if (
-      entry === null ||
-      typeof entry !== 'object' ||
-      !('type' in entry) ||
-      entry.type !== 'assistant' ||
-      message === null ||
-      typeof message !== 'object' ||
-      !('role' in message) ||
-      message.role !== 'assistant' ||
-      !('content' in message)
-    )
-      continue;
-    const text = textOfContent(message.content);
+    const text = textOfContent(entry.message.content);
     if (text) last = text;
   }
   return prose(last);
