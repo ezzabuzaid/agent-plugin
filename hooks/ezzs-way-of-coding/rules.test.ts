@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import { evaluateReminderHook } from '@deepagents/experimental/coding-agent-reminders';
@@ -298,4 +301,93 @@ test('destructive reminder ignores harmless remove wording', async () => {
   );
 
   assert.equal(output, undefined);
+});
+
+test('stop pushes back on a final message that hands over an unverified gap', async () => {
+  for (const message of [
+    'Caveat: no real ATTACH property appeared in the live probes. Attachment rows are covered by synthetic tests only.',
+    'The permission prompt on macOS 14 remains unverified.',
+    "I couldn't verify the export against real events.",
+    'This path was not tested live.',
+  ]) {
+    const output = await evaluateReminderHook(
+      { hook_event_name: 'Stop', last_assistant_message: message },
+      ezzsWayOfCodingConfig,
+    );
+    assert.match(
+      output?.hookSpecificOutput?.additionalContext ?? '',
+      /\[stop-feedback:live-verify-before-unverified\]/,
+      message,
+    );
+  }
+});
+
+test('stop stays quiet when the final message reports completed live checks', async () => {
+  for (const message of [
+    'Verified live against 960 real events; the second run wrote nothing.',
+    'All tests pass and the probe confirmed the deletion with a fresh read.',
+  ]) {
+    const output = await evaluateReminderHook(
+      { hook_event_name: 'Stop', last_assistant_message: message },
+      ezzsWayOfCodingConfig,
+    );
+    assert.doesNotMatch(
+      output?.hookSpecificOutput?.additionalContext ?? '',
+      /live-verify-before-unverified/,
+      message,
+    );
+  }
+});
+
+test('stop reads the final assistant message from the transcript when the hook omits it', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'ezzs-way-of-coding-verify-'));
+  try {
+    const transcriptPath = join(directory, 'transcript.jsonl');
+    const entries = [
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Earlier, everything was checked.' }] } },
+      { type: 'user', message: { role: 'user', content: 'Ship it?' } },
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', name: 'Bash' },
+            { type: 'text', text: 'Done, but the OAuth consent path remains unverified.' },
+          ],
+        },
+      },
+    ];
+    await writeFile(transcriptPath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`);
+
+    const output = await evaluateReminderHook(
+      { hook_event_name: 'Stop', transcript_path: transcriptPath },
+      ezzsWayOfCodingConfig,
+    );
+
+    assert.match(
+      output?.hookSpecificOutput?.additionalContext ?? '',
+      /\[stop-feedback:live-verify-before-unverified\]/,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('stop ignores talk about the verification rule itself', async () => {
+  for (const message of [
+    'Live-check hook: `live-verify-before-unverified` is active and fired for real.',
+    'The rule id live-verify-before-unverified lives in rules/verification.ts.',
+    'Saved preference: widen a live check before ever calling something unverified.',
+    'Only call it unverified when the environment cannot produce it.',
+  ]) {
+    const output = await evaluateReminderHook(
+      { hook_event_name: 'Stop', last_assistant_message: message },
+      ezzsWayOfCodingConfig,
+    );
+    assert.doesNotMatch(
+      output?.hookSpecificOutput?.additionalContext ?? '',
+      /live-verify-before-unverified/,
+      message,
+    );
+  }
 });
