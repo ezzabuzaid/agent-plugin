@@ -1,6 +1,6 @@
 {
   "name": "coding",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Progressive Guardrails output style, the write-test skill with its four test agents (black-box tests gated on the break they catch, proved by mutation), and the remove-code skill.",
   "author": {
     "name": "ezzabuzaid",

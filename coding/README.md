@@ -53,6 +53,19 @@ tool provides officially, and reaches new goals through the tool's official API 
 
 Run `/reload-plugins` (or restart) to load it.
 
+### Codex
+
+Codex reads the same `.claude-plugin` manifests:
+
+```
+codex plugin marketplace add ezzabuzaid/agent-plugin
+codex plugin add coding@ezzabuzaid
+```
+
+Update with `codex plugin marketplace upgrade ezzabuzaid`. Both skills load. Codex plugins
+can't ship agents, so write-test starts a general subagent with each agent's file as its
+brief. The output style is Claude Code only; Codex ignores it.
+
 ## Selecting the style
 
 Output styles are switched with the `/output-style` command:
