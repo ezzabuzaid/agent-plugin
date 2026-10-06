@@ -26,7 +26,8 @@ component. Three layers on top of normal coding work:
   real rule before naming it.
 
 It also ships the **write-test** skill and its four test agents (discoverer, claim
-comparator, mutation prover, gotcha reviewer). See [coding/README.md](./coding/README.md).
+comparator, mutation prover, gotcha reviewer), and the **remove-code** skill. See
+[coding/README.md](./coding/README.md).
 
 ## Selecting the style
 

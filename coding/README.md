@@ -38,6 +38,12 @@ in [`agents/`](./agents) do the reading and the judging:
 
 The scripts have their own tests: `node --test skills/write-test/scripts/*.test.mjs`.
 
+## remove-code skill
+
+[`skills/remove-code`](./skills/remove-code/SKILL.md) stops you from owning code a
+dependency already owns: it deletes hand-written workarounds, wrappers, and glue that the
+tool provides officially, and reaches new goals through the tool's official API or config.
+
 ## Install
 
 ```
