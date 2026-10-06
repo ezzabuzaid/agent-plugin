@@ -1,7 +1,7 @@
 {
   "name": "coding",
-  "version": "1.0.0",
-  "description": "Progressive Guardrails output style: educational insights, terminology corrections, and enforceable repo/agent guardrails surfaced from coding friction and user feedback.",
+  "version": "1.1.0",
+  "description": "Progressive Guardrails output style, plus the write-test skill with its four test agents: black-box tests gated on the break they catch, proved by mutation.",
   "author": {
     "name": "ezzabuzaid",
     "email": "ezzabuzaid@gmail.com"

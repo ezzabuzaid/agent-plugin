@@ -25,6 +25,9 @@ component. Three layers on top of normal coding work:
   enforceable ESLint / TypeScript / CI / Agent-Guidance recommendations, researching the
   real rule before naming it.
 
+It also ships the **write-test** skill and its four test agents (discoverer, claim
+comparator, mutation prover, gotcha reviewer). See [coding/README.md](./coding/README.md).
+
 ## Selecting the style
 
 After installing, run `/reload-plugins`, then switch styles with `/output-style`:

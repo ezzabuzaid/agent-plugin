@@ -22,6 +22,22 @@ is enabled, Claude Code resolves the chosen style into the system prompt nativel
 and can fully replace the base coding instructions with `keep-coding-instructions: false`
 (this one keeps it `true`, so the guardrails are additive).
 
+## write-test skill
+
+[`skills/write-test`](./skills/write-test/SKILL.md) decides which tests are worth writing
+and how to write them black-box. Each test is gated on the break it catches, its claim is
+checked against the request, and it is trusted only after a mutation proves it. Four agents
+in [`agents/`](./agents) do the reading and the judging:
+
+- **test-discoverer**: maps the repo's runner, surface, seams, and a precedent test.
+- **test-claim-comparator**: checks the claim ledger against the request and the ticket,
+  which it finds and fetches itself. It never reads the tests.
+- **test-mutation-prover**: breaks the source in a scratch copy and reports CAUGHT or
+  SURVIVED per test, using the skill's `scripts/`.
+- **test-gotcha-reviewer**: checks the diff against the skill's gotchas.
+
+The scripts have their own tests: `node --test skills/write-test/scripts/*.test.mjs`.
+
 ## Install
 
 ```

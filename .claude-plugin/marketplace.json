@@ -10,9 +10,9 @@
   "plugins": [
     {
       "name": "coding",
-      "description": "Progressive Guardrails output style: insights, terminology corrections, and enforceable repo/agent guardrails.",
+      "description": "Progressive Guardrails output style, plus the write-test skill and its four test agents.",
       "source": "./coding",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "category": "development"
     }
   ]
