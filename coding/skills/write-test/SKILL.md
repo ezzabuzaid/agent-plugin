@@ -36,10 +36,10 @@ Once you delegate a step, wait for its result rather than doing the same reading
 
 Proving a test means copying the working tree, breaking the source, running one test, and restoring. Every prover used to build that by hand, and the hand-built versions failed the same ways each time (see _Scripts_ in RULINGS). Use these instead, from the prover or from any other agent: `node scripts/<name>`, with `scripts/` relative to this skill's directory. Each script's header comment holds its full contract.
 
-| Script             | Takes                                                                                                                         | Returns                                                                                                                                       |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scratch-copy.mjs` | `--repo <git root>`; optional `--dest`, `--min-free-gb`, `--include-ignored`/`--exclude-ignored <name>`; or `--remove <copy>` | JSON: the copy path, skipped entries, links that resolve outside the copy, missing builds, free disk                                          |
-| `mutate.mjs`       | A JSON spec: the copy, the test command, and mutations as exact-once find/replace edits, each with its claim                  | One JSON line per baseline and mutation: CAUGHT / SURVIVED / INVALID / UNPARSED / TIMEOUT / APPLY-FAILED, test counts, excerpt, restore check |
+| Script             | Takes                                                                                                                                 | Returns                                                                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `scratch-copy.mjs` | `--repo <git root>`; optional `--dest`, `--min-free-gb`, `--include-ignored`/`--exclude-ignored <name>`; or `--remove <copy>`         | JSON: the copy path, skipped entries, links that resolve outside the copy, missing builds, free disk                                          |
+| `mutate.mjs`       | A JSON spec on stdin: the copy's absolute path, the test command, and mutations as exact-once find/replace edits, each with its claim | One JSON line per baseline and mutation: CAUGHT / SURVIVED / INVALID / UNPARSED / TIMEOUT / APPLY-FAILED, test counts, excerpt, restore check |
 
 ## Gate: does this test earn its place?
 

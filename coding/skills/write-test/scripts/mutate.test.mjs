@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { constants as osConstants, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -33,14 +33,16 @@ function copyOf(root, files) {
 }
 
 // Async on purpose: a hung mutate must not block this runner's own timeout.
-async function mutate(root, spec) {
-  const specPath = join(root, `spec-${randomUUID()}.json`);
-  writeFileSync(specPath, JSON.stringify(spec));
-  const child = spawn(process.execPath, [mutateScript, specPath], {
+// The spec goes in on stdin, as a prover pipes it; `cwd` is wherever the
+// prover's shell happens to be.
+async function mutate(root, spec, { cwd = root } = {}) {
+  const child = spawn(process.execPath, [mutateScript], {
+    cwd,
     env: cleanEnv(root),
     signal: AbortSignal.timeout(60_000),
     killSignal: 'SIGKILL',
   });
+  child.stdin.end(JSON.stringify(spec));
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', (chunk) => (stdout += chunk));
@@ -62,6 +64,90 @@ const clampTest = [
   '});',
   '',
 ].join('\n');
+
+test('a run started inside the original tree, with the spec on stdin, reports on stdout and leaves no file in that tree', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
+  try {
+    const { repo, copy } = copyOf(root, { 'apps/cli/src/clamp.mjs': clampSource, 'apps/cli/src/clamp.test.mjs': clampTest });
+    const before = readdirSync(repo, { recursive: true }).sort();
+
+    // Where a prover's shell is left when its `cd` to its scratch area fails.
+    const { status, of } = await mutate(
+      root,
+      {
+        copy,
+        command: [process.execPath, '--test', 'apps/cli/src/'],
+        timeoutSeconds: 60,
+        mutations: [{ id: 'M1', claim: 'clamp caps at ten', edits: [{ file: 'apps/cli/src/clamp.mjs', find: '10', replace: '11' }] }],
+      },
+      { cwd: join(repo, 'apps/cli/src') },
+    );
+
+    assert.equal(status, 0);
+    assert.equal(of('M1').verdict, 'CAUGHT');
+    assert.deepEqual(readdirSync(repo, { recursive: true }).sort(), before);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a relative copy path is refused before any command runs, so the directory the shell is in is never mutated', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
+  try {
+    const { repo } = copyOf(root, { 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
+    const runs = join(root, 'runs.log');
+
+    // From a shell left in the original tree, "." names the original tree.
+    const { status, stderr, lines } = await mutate(
+      root,
+      {
+        copy: '.',
+        command: [process.execPath, '--test', 'src/'],
+        env: { RUNS_FILE: runs },
+        timeoutSeconds: 60,
+        mutations: [{ id: 'M1', claim: 'clamp caps at ten', edits: [{ file: 'src/clamp.mjs', find: '10', replace: '11' }] }],
+      },
+      { cwd: repo },
+    );
+
+    assert.equal(status, 1);
+    assert.match(stderr, /"copy" must be the absolute path/);
+    assert.deepEqual(lines, []);
+    assert.equal(existsSync(runs), false, 'no baseline or mutation ran in the original tree');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a spec file named as an argument is refused at once, without waiting on stdin', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
+  let child;
+  try {
+    const { copy } = copyOf(root, { 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
+    const specPath = join(root, 'spec.json');
+    writeFileSync(specPath, JSON.stringify({ copy, command: [process.execPath, '--test', 'src/'], mutations: [] }));
+
+    // stdin stays open, like a terminal's: a mutate that read it would wait until killed.
+    child = spawn(process.execPath, [mutateScript, specPath], {
+      cwd: root,
+      env: cleanEnv(root),
+      signal: AbortSignal.timeout(10_000),
+      killSignal: 'SIGKILL',
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => (stdout += chunk));
+    child.stderr.on('data', (chunk) => (stderr += chunk));
+    const [status] = await once(child, 'close');
+
+    assert.equal(status, 1);
+    assert.match(stderr, /takes no arguments: pipe the spec to it as JSON on stdin/);
+    assert.equal(stdout, '');
+  } finally {
+    child?.kill('SIGKILL');
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('an edit that does not match exactly once fails to apply, the tests never run, and no earlier edit stays applied', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
@@ -340,9 +426,8 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
         '',
       ].join('\n');
       const { copy } = copyOf(root, { 'src/flag.mjs': 'export const hang = false;\n', 'src/hang.test.mjs': hangTest });
-      const specPath = join(root, 'spec.json');
-      writeFileSync(
-        specPath,
+      child = spawn(process.execPath, [mutateScript], { cwd: root, env: cleanEnv(root), stdio: ['pipe', 'ignore', 'ignore'] });
+      child.stdin.end(
         JSON.stringify({
           copy,
           command: [process.execPath, '--test', 'src/'],
@@ -350,7 +435,6 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
           mutations: [{ id: 'S1', claim: 'the test finishes', edits: [{ file: 'src/flag.mjs', find: 'false', replace: 'true' }] }],
         }),
       );
-      child = spawn(process.execPath, [mutateScript, specPath], { env: cleanEnv(root), stdio: 'ignore' });
       const deadline = Date.now() + 20_000;
       while (!existsSync(pidFile)) {
         assert.ok(Date.now() < deadline, 'the mutated test never started');

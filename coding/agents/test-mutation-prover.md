@@ -12,7 +12,7 @@ You work only in a scratch copy. Never edit the original tree: other agents and 
 Two scripts do the mechanical part. Don't rebuild them by hand. Every hand-built copy and mutate loop failed the same ways: dangling symlinks, BSD `sed -i` no-ops, missing `dist`, full disks, leaked processes. Each script's header comment holds its full contract:
 
 - `node ${CLAUDE_PLUGIN_ROOT}/skills/write-test/scripts/scratch-copy.mjs --repo <root>` makes the copy and checks it.
-- `node ${CLAUDE_PLUGIN_ROOT}/skills/write-test/scripts/mutate.mjs <spec.json>` runs the baselines and mutations against it.
+- `node ${CLAUDE_PLUGIN_ROOT}/skills/write-test/scripts/mutate.mjs`, given the spec as JSON on stdin, runs the baselines and mutations against it.
 
 Run both in the foreground with a 10-minute tool timeout. Never start a run in the background and poll it with `sleep`: a stalled poll once cost an hour. If a set of mutations won't finish in 10 minutes, split it into batches, or start it with the tool's background option and wait for its completion notice.
 
@@ -29,7 +29,15 @@ Run both in the foreground with a 10-minute tool timeout. Never start a run in t
 
 ## Write the spec
 
-Write `spec.json` outside the copy, in your scratch area. For each test:
+The spec goes to `mutate.mjs` on stdin, through a quoted heredoc so the shell expands nothing in it, and the report comes back on stdout. Neither needs a file:
+
+```sh
+node ${CLAUDE_PLUGIN_ROOT}/skills/write-test/scripts/mutate.mjs <<'JSON'
+{ "copy": "<the absolute path scratch-copy printed>", "command": [...], "mutations": [...] }
+JSON
+```
+
+For each test:
 
 1. Build **one** mutation from the claim: the smallest source edit (never in the test, never in build output) that produces exactly the claimed break, such as dropping the catch, stopping the paging, renaming the field, or skipping the write. A mutation the caller suggests is only a suggestion. If it doesn't produce the claimed break, construct one that does and say so.
 2. Give the mutation a command that runs that test alone, through the repo's own target, with caching off. A cache replay of the unmutated result reads as a survival.

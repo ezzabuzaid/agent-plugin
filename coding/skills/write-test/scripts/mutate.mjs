@@ -2,11 +2,17 @@
 // Runs mutations against a scratch copy (made by scratch-copy.mjs) and says,
 // per mutation, whether the tests caught it.
 //
-//   node mutate.mjs <spec.json>
+//   node mutate.mjs <<'JSON'
+//   { ...the spec... }
+//   JSON
 //
-// spec.json:
+// The spec comes on stdin, the report goes to stdout, and `copy` must be
+// absolute, so nothing a run reads or writes depends on the shell's working
+// directory: a prover whose `cd` failed leaves no file in the tree its shell is in.
+//
+// The spec:
 //   {
-//     "copy": "/abs/path/to/copy",
+//     "copy": "/abs/path/to/copy",             // the path scratch-copy printed
 //     "cwd": "packages/queue",                 // optional, relative to the copy
 //     "command": ["npx", "nx", "run", "queue:test", "--skip-nx-cache"],
 //     "env": { "NX_DAEMON": "false" },         // optional, added to this process's env
@@ -37,15 +43,28 @@ import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join } from 'node:path';
+import { text } from 'node:stream/consumers';
 import { stripVTControlCharacters } from 'node:util';
 
-const spec = JSON.parse(readFileSync(process.argv[2], 'utf8'));
-if (!spec.copy || !Array.isArray(spec.command) || !Array.isArray(spec.mutations)) {
-  console.error('spec needs "copy", a "command" argv array, and a "mutations" array');
+function badSpec(reason) {
+  console.error(reason);
   process.exit(1);
 }
-const copy = resolve(spec.copy);
+
+// An argument is most likely a spec file. Refuse it at once rather than read
+// stdin, which may be a terminal that never ends.
+if (process.argv.length > 2) badSpec('mutate.mjs takes no arguments: pipe the spec to it as JSON on stdin');
+const spec = await text(process.stdin)
+  .then(JSON.parse)
+  .catch((error) => badSpec(`the spec on stdin is not JSON: ${error.message}`));
+if (typeof spec?.copy !== 'string' || !Array.isArray(spec.command) || !Array.isArray(spec.mutations)) {
+  badSpec('the spec on stdin needs "copy", a "command" argv array, and a "mutations" array');
+}
+if (!isAbsolute(spec.copy)) {
+  badSpec(`"copy" must be the absolute path scratch-copy printed, not ${JSON.stringify(spec.copy)}`);
+}
+const copy = spec.copy;
 const timeoutMs = (spec.timeoutSeconds ?? 180) * 1000;
 
 const emit = (line) => console.log(JSON.stringify(line));

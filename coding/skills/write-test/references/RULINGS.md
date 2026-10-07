@@ -131,6 +131,10 @@ V3 already said to pass each test with its claim. The mechanism is pasting the l
 
 **Reviewers name mutations; they don't run them.** Reviewers built their own copies and probes: 556 Bash calls over 23 runs, and one symlinked `node_modules` back to the original. Ezz chose on 2026-10-05: reviewers run tests read-only, name the mutation, and the prover runs it.
 
+## After the scripts shipped
+
+**The spec goes in on stdin.** A prover's `cd` into a glob that matched several sessions' scratchpads failed, and the lines after it wrote `spec.json` and `out.txt` by relative path into the user's repo, where its shell was (`44dc6cfe` context-compiler, 2026-10-06). Its brief already said to write the spec in its scratch area. `mutate.mjs` now reads the spec on stdin, reports only on stdout, and refuses a relative `copy`, so no run depends on the shell's working directory: the agent says what to break, and the script decides where.
+
 ## Framework notes (not repo rules)
 
 These matter only in vitest/React/Angular projects: RTL needs `cleanup()` inline in `finally` (`January-text2sql/feedback_rtl_explicit_cleanup.md`); call `userEvent.setup()` before mocking the clipboard (`feedback_userevent_clipboard_order.md`); wrap mounts in `<StrictMode>` when tests pass but the browser fails (`feedback_strictmode_repro.md`); use a real `HttpTestingController` over service stubs (`Kortext-klp-web/feedback_real_services_in_tests.md`).
