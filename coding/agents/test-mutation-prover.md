@@ -43,14 +43,22 @@ For each test:
 2. Give the mutation a command that runs that test alone, through the repo's own target, with caching off. A cache replay of the unmutated result reads as a survival.
 3. If the tests import built output, add `built: { file, contains }`. A mutation the command didn't rebuild is then reported INVALID, not SURVIVED.
 
-Every distinct command gets its own baseline. Read each baseline's `tests.run`: a count higher than the number of tests you named means the target ignored the filter. Narrow the command and run again: build the target's dependencies, then run the same command the target runs, on that one file and test name. An `INVALID-BASELINE` with a `hint` usually means the copy left out something the tests read.
+Configure the actual Node test command with both its normal reporter and `${CLAUDE_PLUGIN_ROOT}/skills/write-test/scripts/node-evidence.mjs`, using an absolute path and one stdout destination per reporter:
+
+```sh
+node --test --test-reporter=spec --test-reporter=/absolute/plugin/skills/write-test/scripts/node-evidence.mjs --test-reporter-destination=stdout --test-reporter-destination=stdout --test-name-pattern='^the named test' test.mjs
+```
+
+Keep the repository's target and build steps; forward these flags where that target runs Node. TAP can replace spec. Keep Node's default process isolation; `--test-isolation=none` provides no per-file evidence and is rejected. Do not use `NODE_OPTIONS` to add the reporter: it combines with explicit flags and can break the destination count. Wrappers must preserve the environment, including the per-run `WRITE_TEST_REPORT_ID` that mutate sets. The reporter uses Node's structured per-file summaries, so a passing test-file placeholder, a zero-match filter and skipped/todo-only tests cannot establish a passing baseline. No evidence also makes the baseline invalid; do not fall back to a human `tests 1` line.
+
+Every distinct command gets its own baseline. Read each baseline's `tests.run`: a count higher than the number of tests you named means the target ignored the filter. Narrow the command and run again: build the target's dependencies, then run the same command the target runs, on that one file and test name. Read its `reason` too: missing evidence requires configuring the reporter, while zero named tests requires fixing the filter or skips. An `INVALID-BASELINE` with a `hint` may mean the copy left out something the tests read.
 
 ## Read the results
 
 - **CAUGHT**: confirm the excerpt shows the test's own assertion or the behavior it drives, not a crash on setup. A test that outlasted the target's own `--test-timeout` counts as caught (`tests.cancelled`); check that a hang is what the claim is about.
 - **SURVIVED**: the test doesn't guard the claimed break. First confirm that the mutated line sits on the test's path (see Gotchas).
-- **INVALID**: the build, the import, or a step other than the tests failed. That proves nothing. Make a mutation that compiles and retry once.
-- **UNPARSED**: the output had no test summary. Classify it yourself from the excerpt, and say you did.
+- **INVALID**: the build, the import, or a step other than the tests failed, or no named tests executed after the mutation. That proves nothing. Make a mutation that compiles and retry once.
+- **UNPARSED**: the output had no structured test evidence. Restore the reporter configuration and rerun; a human summary alone cannot establish which tests executed.
 - **TIMEOUT**: counts as CAUGHT only when the claim is about finishing (a hang, a missed wake-up). Otherwise treat it as INVALID.
 - **APPLY-FAILED**: your `find` text didn't match exactly once. Fix it and rerun.
 - **`drift: true`**: the real tree changed that file after you copied it. Re-copy and rerun before reporting.
