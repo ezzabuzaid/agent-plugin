@@ -80,6 +80,11 @@ Add one `ReminderRule` per cluster to the matching `rules/<theme>.ts` file
   word-grep version fired on every file that discussed errors.
 - **message** — short, imperative, and carrying the *why*, so the agent can
   apply the rule to situations the pattern authors never saw.
+- **model** — when the rule delegates auxiliary work to another AI call, pin
+  Claude Sonnet 5 for Claude and `gpt-6.1-sol` for OpenAI. Use a larger model only when the rule documents a concrete
+  capability gap. A `ReminderRule` only injects context into the active
+  session and has no per-rule model field, so never claim that its message runs
+  on a separate model unless the execution surface actually makes that call.
 
 ### 5. Test
 

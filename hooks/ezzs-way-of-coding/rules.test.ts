@@ -391,3 +391,13 @@ test('stop ignores talk about the verification rule itself', async () => {
     );
   }
 });
+
+test('auxiliary model defaults pin Sonnet and gpt-6.1-sol', async () => {
+  const output = await evaluateReminderHook(
+    { hook_event_name: 'SessionStart' },
+    ezzsWayOfCodingConfig,
+  );
+  const context = output?.hookSpecificOutput?.additionalContext ?? '';
+  assert.match(context, /Claude Sonnet 5 for Claude and gpt-6\.1-sol for OpenAI/);
+  assert.doesNotMatch(context, /Terra|gpt-5\.6-terra/);
+});
