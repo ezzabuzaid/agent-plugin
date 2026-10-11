@@ -30,7 +30,7 @@
 //
 // `file` paths are relative to the copy; `cwd` is where the command runs.
 // Every distinct command runs once unmutated first (its baseline); a command
-// that fails there skips its mutations. Then each mutation: every `find` must
+// without a passing named test skips its mutations. Then each mutation: every `find` must
 // match exactly once or nothing is written; the command runs in its own process
 // group, killed on timeout; the files are restored from the copy's own content
 // and read back to prove it. With the copy's manifest, `drift` says whether the
@@ -39,8 +39,21 @@
 // Prints one JSON line per baseline and per mutation, then a summary line.
 // Verdicts: CAUGHT, SURVIVED, INVALID, UNPARSED, TIMEOUT, APPLY-FAILED, SKIPPED.
 // Exit codes: 0 all restores verified; 3 a restore failed; 1 bad spec.
+//
+// Configure Node's reporters in the command that actually runs the tests:
+//   node --test --test-reporter=spec --test-reporter=/abs/path/node-evidence.mjs \
+//     --test-reporter-destination=stdout --test-reporter-destination=stdout test.mjs
+// With Nx or another wrapper, forward these flags to its test runner while
+// retaining its build steps. Use an absolute reporter path. TAP can replace
+// spec. Keep Node's default process isolation: the reporter needs its per-file
+// summaries. Do not inject reporters through NODE_OPTIONS: Node combines those with
+// explicit reporter flags, which can mismatch the reporter destinations.
+// Baselines without structured evidence, or with no passing named test, are
+// INVALID-BASELINE. A mutation with zero executed tests is INVALID, not SURVIVED.
+// WRITE_TEST_REPORT_ID correlates each command's evidence; wrappers must pass
+// that environment variable through. Human summary counts are not evidence.
 import { execFileSync, spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { constants as osConstants } from 'node:os';
 import { isAbsolute, join } from 'node:path';
@@ -83,15 +96,24 @@ const leftOutHint = manifest?.ignoredLeftOut?.length
   ? `the copy left out ${manifest.ignoredLeftOut.join(', ')}; if the command needs one, re-copy with --include-ignored <name>`
   : undefined;
 
-// node:test prints its totals as `ℹ fail 1` (spec reporter) or `# fail 1` (TAP).
-// A test that outlasts --test-timeout counts as cancelled, not failed.
-function totals(output) {
-  const count = (name) => {
-    const match = output.match(new RegExp(`^(?:ℹ|#) ${name} (\\d+)$`, 'm'));
-    return match ? Number(match[1]) : null;
-  };
-  const run = count('tests');
-  return run === null ? null : { run, pass: count('pass'), fail: count('fail'), cancelled: count('cancelled') ?? 0 };
+// Human reporters count an empty test file as a pass. Only the companion
+// reporter's structured per-file summaries establish that named tests ran.
+function totals(output, reportId) {
+  const prefix = `write-test:${reportId}:`;
+  const reports = output.split('\n').filter((line) => line.startsWith(prefix));
+  if (!reports.length) return null;
+  const result = { run: 0, pass: 0, fail: 0, cancelled: 0 };
+  for (const line of reports) {
+    let counts;
+    try {
+      counts = JSON.parse(line.slice(prefix.length));
+    } catch {
+      return null;
+    }
+    if (!Object.keys(result).every((key) => Number.isSafeInteger(counts?.[key]) && counts[key] >= 0)) return null;
+    for (const key of Object.keys(result)) result[key] += counts[key];
+  }
+  return result;
 }
 
 function excerpt(output) {
@@ -133,9 +155,10 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
 // starts (test workers, a hung grandchild) can be stopped together.
 function run(command) {
   return new Promise((done) => {
+    const reportId = randomUUID();
     const child = spawn(command[0], command.slice(1), {
       cwd: join(copy, spec.cwd ?? '.'),
-      env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0', ...spec.env },
+      env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0', ...spec.env, WRITE_TEST_REPORT_ID: reportId },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     });
@@ -156,7 +179,7 @@ function run(command) {
       clearTimeout(timer);
       active.pgid = null;
       const text = stripVTControlCharacters(output);
-      done({ exit, output: text, tests: totals(text), timedOut: killedPids !== undefined, killedPids });
+      done({ exit, output: text, tests: totals(text, reportId), timedOut: killedPids !== undefined, killedPids });
     });
   });
 }
@@ -182,14 +205,17 @@ const SETUP_FAILURES = [
 ];
 
 function classify(result) {
-  if (result.exit === 0) return { verdict: 'SURVIVED' };
   for (const pattern of SETUP_FAILURES) {
     const match = result.output.match(pattern);
     if (match) return { verdict: 'INVALID', reason: `failed before any assertion: ${match[0].trim()}` };
   }
   // A reporter that writes only to a file leaves nothing to count; say so
   // rather than guess, and let the excerpt speak.
-  if (!result.tests) return { verdict: 'UNPARSED', reason: `exit ${result.exit}, and no test summary in the output` };
+  if (!result.tests) return { verdict: 'UNPARSED', reason: `exit ${result.exit}, and no structured test evidence; configure node-evidence.mjs as a Node test reporter` };
+  if (result.tests.pass + result.tests.fail + result.tests.cancelled === 0) {
+    return { verdict: 'INVALID', reason: 'no named tests executed; check the filter, skips and test registration' };
+  }
+  if (result.exit === 0) return { verdict: 'SURVIVED' };
   if (result.tests.fail + result.tests.cancelled === 0) {
     return { verdict: 'INVALID', reason: `exit ${result.exit}, but no test failed` };
   }
@@ -240,7 +266,7 @@ for (const command of [spec.command, ...spec.mutations.map(commandOf)]) {
   const key = JSON.stringify(command);
   if (baselines.has(key)) continue;
   const result = await run(command);
-  const passed = result.exit === 0;
+  const passed = result.exit === 0 && result.tests?.pass > 0 && result.tests.fail === 0 && result.tests.cancelled === 0;
   baselines.set(key, passed);
   emit({
     kind: 'baseline',
@@ -248,7 +274,12 @@ for (const command of [spec.command, ...spec.mutations.map(commandOf)]) {
     verdict: passed ? 'PASS' : 'INVALID-BASELINE',
     exit: result.exit,
     tests: result.tests,
-    ...(passed ? {} : { excerpt: excerpt(result.output), hint: leftOutHint }),
+    ...(passed ? {} : {
+      reason: result.exit !== 0 ? `command exited ${result.exit}`
+        : !result.tests ? 'no structured test evidence; configure node-evidence.mjs as a Node test reporter'
+          : 'no named tests passed; check the filter, skips and test registration',
+      excerpt: excerpt(result.output), hint: leftOutHint,
+    }),
   });
 }
 
@@ -261,7 +292,7 @@ for (const mutation of spec.mutations) {
     emit({ kind: 'mutation', id, claim, ...line, drift: drifted(mutation.edits) });
   };
   if (!baselines.get(JSON.stringify(commandOf(mutation)))) {
-    report({ verdict: 'SKIPPED', reason: 'its command fails without any mutation (INVALID-BASELINE)' });
+    report({ verdict: 'SKIPPED', reason: 'its command has no valid passing baseline (INVALID-BASELINE)' });
     continue;
   }
   const applied = apply(mutation.edits);
