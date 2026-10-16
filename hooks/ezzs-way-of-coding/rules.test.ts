@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -515,6 +515,187 @@ test('stop ignores talk about the verification rule itself', async () => {
       message,
     );
   }
+});
+
+// Claude Code keeps a subagent's transcript next to the parent session's:
+// <session>.jsonl -> <session>/subagents/agent-<agent_id>.jsonl.
+async function preHandback(
+  agentEntries: unknown[],
+  input: Record<string, unknown>,
+) {
+  const directory = await mkdtemp(join(tmpdir(), 'ezzs-way-of-coding-handback-'));
+  try {
+    const transcriptPath = join(directory, 'session.jsonl');
+    await writeFile(transcriptPath, `${JSON.stringify({ type: 'user', message: { role: 'user', content: 'Delegate the probe.' } })}\n`);
+    await mkdir(join(directory, 'session', 'subagents'), { recursive: true });
+    await writeFile(
+      join(directory, 'session', 'subagents', 'agent-a1.jsonl'),
+      `${agentEntries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+    return await evaluateReminderHook(
+      {
+        hook_event_name: 'PreToolUse',
+        transcript_path: transcriptPath,
+        agent_id: 'a1',
+        agent_type: 'general-purpose',
+        tool_use_id: 'toolu_current',
+        ...input,
+      },
+      ezzsWayOfCodingConfig,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+const brief = { type: 'user', message: { role: 'user', content: 'Probe the export and report.' } };
+const handback = (id: string, message: string) => ({
+  type: 'assistant',
+  message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'SubagentHandback', input: { message } }] },
+});
+// A subagent's work before it hands back: a tool call, its result, an attachment.
+const work = [
+  { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_bash', name: 'Bash', input: { command: 'npm test' } }] } },
+  { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_bash', content: 'pass 12' }] } },
+  { type: 'attachment' },
+];
+const refused = (id: string) => ({
+  type: 'user',
+  message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, is_error: true, content: 'Your report hands an unverified gap to your caller.' }] },
+});
+const delivered = (id: string) => ({
+  type: 'user',
+  message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text: '{"success":true,"message":"Report delivered to your caller."}' }] }] },
+});
+const unverifiedReport = 'Done. The OAuth consent path remains unverified.';
+
+test('a subagent hand-back that reports an unverified gap is refused the first time', async () => {
+  const output = await preHandback([brief, ...work], {
+    tool_name: 'SubagentHandback',
+    tool_input: { message: unverifiedReport },
+  });
+
+  assert.equal(output?.hookSpecificOutput?.permissionDecision, 'deny');
+  assert.match(
+    output?.hookSpecificOutput?.permissionDecisionReason ?? '',
+    /hands an unverified gap to your caller[\s\S]*run the live check[\s\S]*exact blocker[\s\S]*call SubagentHandback again; that call goes through/,
+  );
+});
+
+test('a first hand-back is refused even when the transcript already holds that same call', async () => {
+  const output = await preHandback([brief, ...work, handback('toolu_current', unverifiedReport)], {
+    tool_name: 'SubagentHandback',
+    tool_input: { message: unverifiedReport },
+  });
+
+  assert.equal(output?.hookSpecificOutput?.permissionDecision, 'deny');
+});
+
+test('a second hand-back in the same turn goes through, so a subagent that cannot verify is not stuck', async () => {
+  for (const between of [
+    [],
+    [{ type: 'user', isMeta: true, message: { role: 'user', content: '[handback-send-enforce] Your report has not been delivered. Call SubagentHandback({message: <your full report>}) now; the call ends your run.' } }],
+    [{ type: 'user', isMeta: true, origin: { kind: 'task-notification' }, message: { role: 'user', content: '[SYSTEM NOTIFICATION - NOT USER INPUT]\nA background task finished.' } }],
+    [{ type: 'user', isMeta: true, origin: { kind: 'peer' }, message: { role: 'user', content: 'Another Claude session sent a message while you were working:\nThe prover finished.' } }],
+    [{ type: 'user', isMeta: true, message: { role: 'user', content: '<system-reminder>\nYour final report is delivered through SubagentHandback.\n</system-reminder>' } }],
+  ]) {
+    const output = await preHandback(
+      [brief, ...work, handback('toolu_first', unverifiedReport), refused('toolu_first'), ...between],
+      {
+        tool_name: 'SubagentHandback',
+        tool_input: { message: `${unverifiedReport} Blocker: the consent screen needs the user's Google account.` },
+      },
+    );
+
+    assert.equal(output?.hookSpecificOutput?.permissionDecision, undefined, JSON.stringify(between));
+  }
+});
+
+test('a resumed subagent is refused again on its first unverified hand-back of the new task', async () => {
+  for (const resume of [
+    { type: 'user', isMeta: true, origin: { kind: 'coordinator' }, message: { role: 'user', content: 'The coordinator sent a message while you were working:\nNow probe the import path.' } },
+    { type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } },
+  ]) {
+    const output = await preHandback(
+      [brief, ...work, handback('toolu_first', 'Verified live against 960 real events.'), delivered('toolu_first'), resume, ...work],
+      { tool_name: 'SubagentHandback', tool_input: { message: unverifiedReport } },
+    );
+
+    assert.equal(output?.hookSpecificOutput?.permissionDecision, 'deny', JSON.stringify(resume));
+  }
+});
+
+test('a hand-back that reports completed live checks goes through', async () => {
+  for (const message of [
+    'Verified live against 960 real events; the second run wrote nothing.',
+    'Added the `live-verify-before-unverified` guard; the live probe denied the first call.',
+    'Set the status to `unverified` after the probe passed.',
+  ]) {
+    const output = await preHandback([brief], {
+      tool_name: 'SubagentHandback',
+      tool_input: { message },
+    });
+
+    assert.equal(output?.hookSpecificOutput?.permissionDecision, undefined, message);
+  }
+});
+
+test('an unverified hand-back goes through when the subagent transcript cannot be read', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'ezzs-way-of-coding-handback-'));
+  try {
+    const transcriptPath = join(directory, 'session.jsonl');
+    const agentsPath = join(directory, 'session', 'subagents');
+    await writeFile(transcriptPath, `${JSON.stringify(brief)}\n`);
+    await mkdir(join(agentsPath, 'agent-a-directory.jsonl'), { recursive: true });
+    await writeFile(join(agentsPath, 'agent-a-garbled.jsonl'), '{"type":"user","message":{"ro\n');
+    await writeFile(join(agentsPath, 'agent-a-null.jsonl'), `${JSON.stringify(brief)}\nnull\n`);
+    await writeFile(join(agentsPath, 'agent-a-readable.jsonl'), `${JSON.stringify(brief)}\n`);
+
+    for (const input of [
+      { transcript_path: transcriptPath, agent_id: 'a-missing' },
+      { transcript_path: transcriptPath, agent_id: 'a-directory' },
+      { transcript_path: transcriptPath, agent_id: 'a-garbled' },
+      { transcript_path: transcriptPath, agent_id: 'a-null' },
+      { transcript_path: transcriptPath },
+      { agent_id: 'a-readable' },
+      { transcript_path: join(directory, 'session.jsonX'), agent_id: 'a-readable' },
+    ]) {
+      const output = await evaluateReminderHook(
+        {
+          hook_event_name: 'PreToolUse',
+          tool_name: 'SubagentHandback',
+          tool_use_id: 'toolu_current',
+          tool_input: { message: unverifiedReport },
+          ...input,
+        },
+        ezzsWayOfCodingConfig,
+      );
+
+      assert.equal(output?.hookSpecificOutput?.permissionDecision, undefined, JSON.stringify(input));
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('a hand-back without a text report goes through', async () => {
+  for (const toolInput of [{}, { message: ['remains unverified'] }, undefined]) {
+    const output = await preHandback([brief], {
+      tool_name: 'SubagentHandback',
+      tool_input: toolInput,
+    });
+
+    assert.equal(output?.hookSpecificOutput?.permissionDecision, undefined, String(JSON.stringify(toolInput)));
+  }
+});
+
+test('another tool whose message reports an unverified gap goes through', async () => {
+  const output = await preHandback([brief, ...work], {
+    tool_name: 'SendMessage',
+    tool_input: { to: 'lead', message: unverifiedReport },
+  });
+
+  assert.equal(output?.hookSpecificOutput?.permissionDecision, undefined);
 });
 
 test('auxiliary model defaults pin Sonnet and gpt-6.1-sol', async () => {

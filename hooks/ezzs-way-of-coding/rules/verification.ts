@@ -1,10 +1,12 @@
 import type {
   ClaudeHookInput,
+  GuardRule,
   ReminderRule,
 } from '@deepagents/experimental/coding-agent-reminders';
+import { join } from 'node:path';
 
 import { stopEvents } from './events.ts';
-import { readTranscriptEntries } from './transcript.ts';
+import { readTranscriptEntries, type TranscriptEntry } from './transcript.ts';
 
 // A final message that hands a verification gap to the user instead of closing it.
 // A bare "unverified" counts only as a standalone word: not inside a hyphenated
@@ -64,6 +66,85 @@ export const verificationRules: ReminderRule[] = [
       'Your final message reports something as unverified, untested live, or covered only by synthetic tests. Do not hand that gap to the user; close it before stopping.',
       '- Run the live check now: widen the probe to the full history instead of a sample window, create real objects in the real app (then delete them and confirm with a fresh read), and use earlier evidence that the data exists.',
       '- Leave it unverified only when the environment genuinely cannot produce it. Then name the exact blocker (missing permission, credential, account, hardware, or a user action) and what the user must do to unblock it. "I did not check" is not a blocker.',
+    ].join('\n'),
+  },
+];
+
+// Where a turn of a subagent starts: its brief, or a message its caller sent to
+// resume it. Claude Code also writes meta user entries in the middle of a turn
+// (system reminders, task notifications, peer messages, the hand-back nudge
+// after a stop), and those do not start a turn.
+function startsAgentTurn(entry: TranscriptEntry): boolean {
+  if (entry.type !== 'user' || entry.message?.role !== 'user') return false;
+  if (entry.isMeta === true) return entry.origin?.kind === 'coordinator';
+  const { content } = entry.message;
+  if (typeof content === 'string') return content.length > 0;
+  return (
+    Array.isArray(content) &&
+    content.some((block) => block?.type === 'text') &&
+    !content.some((block) => block?.type === 'tool_result')
+  );
+}
+
+function handbackIds(entry: TranscriptEntry): string[] {
+  const content = entry.message?.content;
+  if (entry.type !== 'assistant' || !Array.isArray(content)) return [];
+  return content
+    .filter(
+      (block) => block?.type === 'tool_use' && block.name === 'SubagentHandback',
+    )
+    .map((block) => String(block.id));
+}
+
+// True when the subagent already tried to hand back earlier in its current turn.
+// The call being judged is left out by its tool_use_id, because Claude Code may
+// or may not have written it to the transcript yet. Unknown means "yes", so a
+// missing or unreadable transcript never blocks a hand-back.
+async function handedBackThisTurn(input: ClaudeHookInput): Promise<boolean> {
+  const { transcript_path: sessionPath, agent_id: agentId } = input;
+  if (
+    typeof sessionPath !== 'string' ||
+    !sessionPath.endsWith('.jsonl') ||
+    typeof agentId !== 'string' ||
+    !agentId
+  )
+    return true;
+  const agentPath = join(
+    sessionPath.slice(0, -'.jsonl'.length),
+    'subagents',
+    `agent-${agentId}.jsonl`,
+  );
+  let read = false;
+  let earlier = false;
+  for await (const entry of readTranscriptEntries(agentPath)) {
+    read = true;
+    if (startsAgentTurn(entry)) earlier = false;
+    else if (handbackIds(entry).some((id) => id !== input.tool_use_id))
+      earlier = true;
+  }
+  return !read || earlier;
+}
+
+export const verificationGuards: GuardRule[] = [
+  {
+    id: 'live-verify-before-handback',
+    // The library denies when a guard throws; this guard must fail open.
+    when: async (input) => {
+      try {
+        const message = input.tool_input?.message;
+        return (
+          input.tool_name === 'SubagentHandback' &&
+          typeof message === 'string' &&
+          unverifiedClaim.test(prose(message)) &&
+          !(await handedBackThisTurn(input))
+        );
+      } catch {
+        return false;
+      }
+    },
+    deny: [
+      'Your report hands an unverified gap to your caller. Close it before you hand back: run the live check now.',
+      '- Leave it unverified only when the environment genuinely cannot produce it. Then name the exact blocker (missing permission, credential, account, hardware, or a user action) in the report and call SubagentHandback again; that call goes through.',
     ].join('\n'),
   },
 ];

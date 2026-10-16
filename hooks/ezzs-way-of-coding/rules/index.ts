@@ -12,7 +12,7 @@ import { failuresRules } from './failures.ts';
 import { frontendRules } from './frontend.ts';
 import { infraRules } from './infra.ts';
 import { testingRules } from './testing.ts';
-import { verificationRules } from './verification.ts';
+import { verificationGuards, verificationRules } from './verification.ts';
 
 export const reminderRules: ReminderRule[] = [
   ...defaultsRules,
@@ -26,7 +26,7 @@ export const reminderRules: ReminderRule[] = [
   ...verificationRules,
 ];
 
-export const guardRules: GuardRule[] = [];
+export const guardRules: GuardRule[] = [...verificationGuards];
 
 export const ezzsWayOfCodingConfig: ReminderHookConfig = {
   reminders: reminderRules,

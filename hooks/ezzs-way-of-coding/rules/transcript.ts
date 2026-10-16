@@ -5,6 +5,9 @@ export type TranscriptEntry = {
   type?: string;
   isMeta?: boolean;
   sourceToolAssistantUUID?: string | null;
+  origin?: {
+    kind?: string;
+  };
   message?: {
     role?: string;
     content?: unknown;
