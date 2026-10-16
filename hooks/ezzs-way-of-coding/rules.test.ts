@@ -513,6 +513,64 @@ test('core reminders stay quiet off their events', async () => {
   }
 });
 
+async function bashReminder(command: string, stdout: string, stderr = '') {
+  const output = await evaluateReminderHook(
+    {
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Bash',
+      tool_input: { command },
+      tool_response: { stdout, stderr, interrupted: false, isImage: false, noOutputExpected: false },
+    },
+    ezzsWayOfCodingConfig,
+  );
+  return output?.hookSpecificOutput?.additionalContext ?? '';
+}
+
+// Each stdout below is an excerpt of a real Bash result that exited 0 and got
+// this reminder, from a Claude Code session transcript.
+test('bash error reminder ignores successful output that mentions failure words', async () => {
+  const cases = [
+    ['grep -nE "events:|id:" rules/*.ts', "rules/failures.ts:50:  {\nrules/failures.ts:51:    id: 'bash-error-root-cause',"],
+    ['node --test rules.test.ts', 'ℹ tests 44\nℹ pass 44\nℹ fail 0\nℹ cancelled 0'],
+    ["sed -n '1,80p' rules/failures.ts", '// PostToolBatch entries carry no structured error marker: the CLI drops the\n// of a file that merely mentions "error" or "failed".'],
+    ['python3 -I scan.py', 'transcript lines mentioning bash-error-root-cause: 39'],
+    ['python3 -I results.py', 'RESULT     is_error=True PreToolUse:SubagentHandback hook error: Your report hands an unverified gap to your caller.'],
+    ['grep -n "failed" dist/index.js', '33:        errorReason: `Guard "${rule.id}" failed to evaluate; denying by default.`\n    } catch (error) {\n      console.error(`Reminder "${rule.id}" evaluation failed`, error);'],
+    ['git log -1 --format=%B', 'not start one. A missing or unreadable transcript, or any error, allows'],
+    ["agent-backlog remove 104 --yes 2>&1 | tail -3; agent-backlog show 104 2>&1 | tail -3", '■  Backlog item #104 was not found.'],
+    ['file README.md', 'README.md: ASCII text'],
+  ];
+
+  for (const [command, stdout] of cases) {
+    assert.doesNotMatch(await bashReminder(command, stdout), /bash-error-root-cause/, stdout);
+  }
+});
+
+test('bash error reminder fires on error lines a successful command hides', async () => {
+  const cases = [
+    // Real results from the same transcript: the stage failed, `| head` and `; echo` exited 0.
+    ["grep -oE '.{0,400}subagentEffort:.{0,300}' \"$s\" | head -3; echo", 'ugrep: error: error at position 93\n^\\n\\x80-\\xbf][\\x80-\\xbf]*){0,300}\n    exceeds complexity limits___/'],
+    ["grep -oE '.{0,300}iy.{0,300}' \"$s\" | head -2; echo '== next =='", 'grep: maximum repetition exceeds 255\n\n== next =='],
+    ['git status || true', 'fatal: not a git repository (or any of the parent directories): .git'],
+    ['python3 -I job.py; echo done', 'Traceback (most recent call last):\n  File "job.py", line 1, in <module>\ndone'],
+    ['node build.js; echo done', 'TypeError: x is not a function\n    at build.js:1:1\ndone'],
+    ['npm install || true', 'npm ERR! code ERESOLVE'],
+    ['foo; echo done', 'zsh: command not found: foo\ndone'],
+    ['npx tsc --noEmit | head -5', "rules.test.ts(497,47): error TS2345: Argument of type 'string' is not assignable."],
+    ['ls x 2>&1 | cat', "ls: cannot access 'x': No such file or directory"],
+  ];
+
+  for (const [command, stdout] of cases) {
+    assert.match(await bashReminder(command, stdout), /\[tool-result:bash-error-root-cause\]/, stdout);
+  }
+});
+
+test('bash error reminder fires on a failure word in a separate stderr', async () => {
+  const context = await bashReminder('make all', 'built 3 targets', 'warning: step lint failed, continuing');
+
+  assert.match(context, /\[tool-result:bash-error-root-cause\]/);
+});
+
 test('destructive reminder ignores harmless remove wording', async () => {
   const output = await evaluateReminderHook(
     {
