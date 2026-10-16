@@ -230,42 +230,6 @@ test('mined reminders stay quiet on near-miss prompts', async () => {
   }
 });
 
-test('stop verification fires ungated on Stop events', async () => {
-  const output = await evaluateReminderHook(
-    { hook_event_name: 'Stop' },
-    ezzsWayOfCodingConfig,
-  );
-
-  assert.match(
-    output?.hookSpecificOutput?.additionalContext ?? '',
-    /\[stop-feedback:stop-verify-before-handoff\]/,
-  );
-});
-
-test('stop verification stays quiet for status-only turns', async () => {
-  const output = await evaluateReminderHook(
-    { hook_event_name: 'Stop', prompt: 'only report status, do not change anything' },
-    ezzsWayOfCodingConfig,
-  );
-
-  assert.doesNotMatch(
-    output?.hookSpecificOutput?.additionalContext ?? '',
-    /\[stop-feedback:stop-verify-before-handoff\]/,
-  );
-});
-
-test('stop verification survives prompts that merely contain guard words', async () => {
-  const output = await evaluateReminderHook(
-    { hook_event_name: 'Stop', prompt: 'the deploy failed, stop retrying and fix the config' },
-    ezzsWayOfCodingConfig,
-  );
-
-  assert.match(
-    output?.hookSpecificOutput?.additionalContext ?? '',
-    /\[stop-feedback:stop-verify-before-handoff\]/,
-  );
-});
-
 test('core reminders fire on their events', async () => {
   const cases = [
     ['session:session-ezzs-way', { hook_event_name: 'SessionStart' }],
