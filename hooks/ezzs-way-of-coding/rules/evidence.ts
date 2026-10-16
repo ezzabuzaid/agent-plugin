@@ -6,6 +6,7 @@ import {
 } from '@deepagents/experimental/coding-agent-reminders';
 
 import { promptEvents } from './events.ts';
+import { asksToBuild } from './intent.ts';
 
 export const evidenceRules: ReminderRule[] = [
   {
@@ -23,8 +24,11 @@ export const evidenceRules: ReminderRule[] = [
     target: 'prompt',
     events: promptEvents,
     when: and(
-      contentPattern(
-        /\b(implement|build|add|change|refactor|wire|create|extend|integrate|introduc(?:e|ing)|replace|write|propos(?:e|ing)|design(?:ing)?)\b/i,
+      or(
+        asksToBuild,
+        contentPattern(
+          /\b(refactor|wire|extend|integrate|introduc(?:e|ing)|replace|write|propos(?:e|ing)|design(?:ing)?)\b/i,
+        ),
       ),
       or(
         contentPattern(

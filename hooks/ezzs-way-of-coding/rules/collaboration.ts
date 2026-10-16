@@ -1,12 +1,13 @@
 import {
-  always,
   and,
   type ClaudeHookInput,
   contentPattern,
+  or,
   type ReminderRule,
 } from '@deepagents/experimental/coding-agent-reminders';
 
 import { promptEvents } from './events.ts';
+import { asksToBuild } from './intent.ts';
 import { readTranscriptEntries, type TranscriptEntry } from './transcript.ts';
 
 /**
@@ -68,7 +69,10 @@ export const collaborationRules: ReminderRule[] = [
     id: 'source-before-new-implementation',
     target: 'prompt',
     events: ['UserPromptSubmit'],
-    when: always,
+    when: or(
+      asksToBuild,
+      contentPattern(/\b(extend|integrate|wire|refactor|replace|fix)\b/i),
+    ),
     message:
       'Look for a similar implementation in the codebase first. If none exists, probe the relevant behavior and read its source code before implementing it.',
   },

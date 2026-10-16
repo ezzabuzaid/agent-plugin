@@ -1,9 +1,40 @@
 import {
   always,
+  type ClaudeHookInput,
   type ReminderRule,
 } from '@deepagents/experimental/coding-agent-reminders';
 
 import { sessionEvents } from './events.ts';
+import { readTranscriptEntries } from './transcript.ts';
+
+type Agent = 'claude' | 'codex';
+
+/**
+ * A Codex rollout opens with a `session_meta` entry; a Claude transcript never
+ * has one. The `turn_context` entries that the stop audit counts come only
+ * after the first user message, so they cannot name the agent on the first
+ * prompt. A missing or empty transcript names no agent.
+ */
+async function transcriptAgent(
+  input: ClaudeHookInput,
+): Promise<Agent | undefined> {
+  if (!input.transcript_path) return undefined;
+
+  for await (const entry of readTranscriptEntries(input.transcript_path)) {
+    return entry.type === 'session_meta' ? 'codex' : 'claude';
+  }
+
+  return undefined;
+}
+
+const agentIs =
+  (agent: Agent | undefined) =>
+  async (input: ClaudeHookInput): Promise<boolean> =>
+    (await transcriptAgent(input)) === agent;
+
+const HARVEST_SCAN =
+  'SESSION HARVEST: Scan recent messages for unsaved user preferences, corrections, or clarifications.';
+const HARVEST_QUIET = 'If nothing is new, do nothing silently.';
 
 export const defaultsRules: ReminderRule[] = [
   {
@@ -24,8 +55,33 @@ export const defaultsRules: ReminderRule[] = [
     id: 'session-harvest',
     target: 'prompt',
     events: ['UserPromptSubmit'],
-    when: always,
-    message:
-      'SESSION HARVEST: Scan recent messages for unsaved user preferences, corrections, or clarifications. If any, save them to auto-memory and update MEMORY.md. If a skill was used and the user gave feedback on it, save a reflection to ~/.claude/skills-reflections/<YYYY-MM-DD>-<skill-name>.md. If nothing is new, do nothing silently.',
+    when: agentIs('claude'),
+    message: [
+      HARVEST_SCAN,
+      'If any, save them to auto-memory and update MEMORY.md. If a skill was used and the user gave feedback on it, save a reflection to ~/.claude/skills-reflections/<YYYY-MM-DD>-<skill-name>.md.',
+      HARVEST_QUIET,
+    ].join(' '),
+  },
+  {
+    id: 'session-harvest',
+    target: 'prompt',
+    events: ['UserPromptSubmit'],
+    when: agentIs('codex'),
+    message: [
+      HARVEST_SCAN,
+      'If any, save each one as an ad-hoc memory note at ~/.codex/memories/extensions/ad_hoc/notes/<YYYYMMDDTHHMMSS>-<slug>.md; Codex consolidates those notes into its memories. If a skill was used and the user gave feedback on it, save that feedback as a note too and name the skill.',
+      HARVEST_QUIET,
+    ].join(' '),
+  },
+  {
+    id: 'session-harvest',
+    target: 'prompt',
+    events: ['UserPromptSubmit'],
+    when: agentIs(undefined),
+    message: [
+      HARVEST_SCAN,
+      'If any, save them to this agent’s persistent memory. If a skill was used and the user gave feedback on it, save that feedback and name the skill.',
+      HARVEST_QUIET,
+    ].join(' '),
   },
 ];

@@ -284,6 +284,21 @@ test('source reminder stays scoped to user message submit', async () => {
   );
 });
 
+test('source reminder stays quiet on a prompt that asks for no implementation', async () => {
+  for (const prompt of ['yes', 'commit it', 'What does this hook do?']) {
+    const output = await evaluateReminderHook(
+      { hook_event_name: 'UserPromptSubmit', prompt },
+      ezzsWayOfCodingConfig,
+    );
+
+    assert.doesNotMatch(
+      output?.hookSpecificOutput?.additionalContext ?? '',
+      /\[prompt:source-before-new-implementation\]/,
+      prompt,
+    );
+  }
+});
+
 test('root sessions receive out-of-scope capture guidance', async () => {
   for (const hookEventName of ['SessionStart', 'Setup']) {
     const output = await evaluateReminderHook(
@@ -626,6 +641,44 @@ test('the /wait-what register ignores a transcript that only quotes the skill', 
     );
   } finally {
     await rm(transcriptDirectory, { recursive: true, force: true });
+  }
+});
+
+test('session harvest names Codex memory paths in a Codex session', async () => {
+  const context = await evaluateWithTranscript(
+    [
+      { type: 'session_meta', payload: { id: 'session-1', originator: 'codex_cli_rs' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user' } },
+    ],
+    'yes',
+  );
+
+  assert.match(context, /\[prompt:session-harvest\]/);
+  assert.match(context, /~\/\.codex\/memories\/extensions\/ad_hoc\/notes\//);
+  assert.doesNotMatch(context, /~\/\.claude|auto-memory/);
+});
+
+test('session harvest names Claude memory paths in a Claude session', async () => {
+  const context = await evaluateWithTranscript(
+    [{ type: 'user', message: { role: 'user', content: 'First request' } }],
+    'yes',
+  );
+
+  assert.match(context, /\[prompt:session-harvest\]/);
+  assert.match(context, /~\/\.claude\/skills-reflections\//);
+  assert.doesNotMatch(context, /~\/\.codex/);
+});
+
+test('session harvest names no agent paths without a readable transcript', async () => {
+  for (const transcriptPath of [undefined, '/missing/transcript.jsonl']) {
+    const output = await evaluateReminderHook(
+      { hook_event_name: 'UserPromptSubmit', transcript_path: transcriptPath, prompt: 'yes' },
+      ezzsWayOfCodingConfig,
+    );
+
+    const context = output?.hookSpecificOutput?.additionalContext ?? '';
+    assert.equal(context.match(/\[prompt:session-harvest\]/g)?.length, 1);
+    assert.doesNotMatch(context, /~\/\.claude|~\/\.codex/);
   }
 });
 

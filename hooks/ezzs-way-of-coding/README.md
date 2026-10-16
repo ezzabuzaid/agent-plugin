@@ -10,7 +10,15 @@ project checkout.
 Per-turn session harvesting and the shared Claude/Codex coding defaults also
 live in this rule set. Both agents use this one repo-owned hook; no separate
 `~/.claude/hooks/session-harvest.sh` or `~/.codex/hooks/session-harvest.sh`
-copy is required.
+copy is required. The session harvest names the memory paths of the agent that
+runs it. A Codex transcript starts with a `session_meta` entry, so a Codex
+session gets the Codex ad-hoc memory note path. Any other transcript gets the
+Claude auto-memory and skill-reflection paths. Without a readable transcript,
+the harvest names no paths.
+
+The reminder to look for a similar implementation first fires only on a prompt
+that asks to build or change behavior. A reply such as "yes" or "commit it"
+does not get it.
 
 ```sh
 printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Build a custom executor."}' \
