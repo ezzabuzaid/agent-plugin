@@ -102,7 +102,7 @@ test('repo-owned rules preserve the migrated Claude and Codex guidance', async (
   assert.match(sessionContext, /latest Node\.js and JavaScript\/TypeScript features/);
   assert.match(sessionContext, /Challenge contradictions and weak premises directly/);
   assert.match(sessionContext, /prioritize truth over agreement/);
-  assert.match(sessionContext, /delegates auxiliary work to an AI/);
+  assert.match(sessionContext, /code or config you build calls an AI/);
   assert.match(sessionContext, /Claude Sonnet 5/);
   assert.match(sessionContext, /gpt-6\.1-sol/);
   assert.match(sessionContext, /concrete capability gap/);
@@ -309,6 +309,7 @@ test('root sessions receive out-of-scope capture guidance', async () => {
     const context = output?.hookSpecificOutput?.additionalContext ?? '';
     assert.match(context, /\[session:capture-out-of-scope-followups\]/);
     assert.match(context, /agent-backlog/);
+    assert.match(context, /Do not file upstream bug reports or dev-tooling audit items[^\n]*mention each one once in your reply/i);
     assert.doesNotMatch(context, /deduplicat|duplicate|equivalent open item/i);
   }
 });
@@ -367,6 +368,7 @@ test('root stop audits out-of-scope follow-ups every third Codex assistant messa
     );
     assert.match(thirdMessageContext, /Do not invent work/);
     assert.match(thirdMessageContext, /agent-backlog remove <id> --yes/);
+    assert.match(thirdMessageContext, /Do not file upstream bug reports or dev-tooling audit items[^\n]*mention each one once in your reply/i);
     assert.match(thirdMessageContext, /If storage or removal fails/);
     assert.doesNotMatch(
       thirdMessageContext,
@@ -1197,12 +1199,13 @@ test('another tool whose message reports an unverified gap goes through', async 
   assert.equal(output?.hookSpecificOutput?.permissionDecision, undefined);
 });
 
-test('auxiliary model defaults pin Sonnet and gpt-6.1-sol', async () => {
+test('auxiliary model defaults pin Sonnet and gpt-6.1-sol for code the user builds, and subagents run Opus 5.5', async () => {
   const output = await evaluateReminderHook(
     { hook_event_name: 'SessionStart' },
     ezzsWayOfCodingConfig,
   );
   const context = output?.hookSpecificOutput?.additionalContext ?? '';
   assert.match(context, /Claude Sonnet 5 for Claude and gpt-6\.1-sol for OpenAI/);
+  assert.match(context, /Claude Code subagents[^\n]*run Opus 5\.5[^\n]*CLAUDE_CODE_SUBAGENT_MODEL_FORCE/);
   assert.doesNotMatch(context, /Terra|gpt-5\.6-terra/);
 });

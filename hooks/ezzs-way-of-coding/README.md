@@ -37,7 +37,9 @@ the global `agent-backlog` command stores all repositories' items in one
 database at `~/.agent-backlog/backlog.sqlite`. Subagent findings are left for
 the root agent to store. The stop audit runs after every third completed
 assistant response, captures out-of-scope follow-ups, and removes backlog items
-completed or explicitly closed by the conversation. Items are
+completed or explicitly closed by the conversation. Upstream bug reports and
+dev-tooling audit items (agent hooks, agent settings, test tooling) do not go
+to the backlog. The agent mentions each one once in its reply. Items are
 classified on two axes: `--kind feature|defect|risk|debt` (Unicorn Project
 investment categories — what the item is) and `--work-type
 business|internal|change|unplanned` (Phoenix Project four types — how the

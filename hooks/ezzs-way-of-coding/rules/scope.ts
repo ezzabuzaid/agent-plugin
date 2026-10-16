@@ -66,6 +66,7 @@ export const scopeRules: ReminderRule[] = [
       '- When the work exposes a concrete, actionable follow-up that is valuable but unnecessary to complete the active request, do not expand the task. Add it with `agent-backlog`, briefly report the captured item, then continue the active task.',
       '- Classify each stored item on both axes: `--kind feature|defect|risk|debt` (what the item is) and `--work-type business|internal|change|unplanned` (how the work entered: planned follow-ups are usually `internal` or `change`; incident-driven ones `unplanned`).',
       '- Required blockers and explicit user additions remain in scope. Do not capture vague suggestions, speculative cleanup, or completed work.',
+      '- Do not file upstream bug reports or dev-tooling audit items (agent hooks, agent settings, test tooling) with `agent-backlog`. Mention each one once in your reply instead.',
       '- If `agent-backlog` fails, do not claim the item was stored; follow its configuration guidance or report the failure.',
     ].join('\n'),
   },
@@ -75,6 +76,6 @@ export const scopeRules: ReminderRule[] = [
     events: ['Stop'],
     when: everyThirdAssistantMessage,
     message:
-      'Before stopping, capture each concrete, actionable follow-up outside the active request with `agent-backlog`. Remove any backlog item that this conversation completed or explicitly closed by running `agent-backlog remove <id> --yes`. Do not invent work or capture blockers, vague cleanup, or completed work as new items. If storage or removal fails, report the failure.',
+      'Before stopping, capture each concrete, actionable follow-up outside the active request with `agent-backlog`. Remove any backlog item that this conversation completed or explicitly closed by running `agent-backlog remove <id> --yes`. Do not invent work or capture blockers, vague cleanup, or completed work as new items. Do not file upstream bug reports or dev-tooling audit items (agent hooks, agent settings, test tooling); mention each one once in your reply instead. If storage or removal fails, report the failure.',
   },
 ];
