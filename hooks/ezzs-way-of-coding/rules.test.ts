@@ -273,6 +273,30 @@ test('mined reminders stay quiet on near-miss prompts', async () => {
   }
 });
 
+test('source reminder fires on user message submit', async () => {
+  const output = await evaluateReminderHook(
+    { hook_event_name: 'UserPromptSubmit', prompt: 'Implement the requested change.' },
+    ezzsWayOfCodingConfig,
+  );
+
+  const context = output?.hookSpecificOutput?.additionalContext ?? '';
+  assert.match(context, /\[prompt:source-before-new-implementation\]/);
+  assert.match(context, /similar implementation/);
+  assert.match(context, /probe the relevant behavior and read its source code/);
+});
+
+test('source reminder stays scoped to user message submit', async () => {
+  const output = await evaluateReminderHook(
+    { hook_event_name: 'UserPromptExpansion', prompt: 'Continue.' },
+    ezzsWayOfCodingConfig,
+  );
+
+  assert.doesNotMatch(
+    output?.hookSpecificOutput?.additionalContext ?? '',
+    /\[prompt:source-before-new-implementation\]/,
+  );
+});
+
 test('core reminders fire on their events', async () => {
   const cases = [
     ['session:session-ezzs-way', { hook_event_name: 'SessionStart' }],

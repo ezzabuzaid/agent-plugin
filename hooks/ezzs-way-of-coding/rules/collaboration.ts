@@ -1,4 +1,5 @@
 import {
+  always,
   and,
   contentPattern,
   type ReminderRule,
@@ -19,5 +20,13 @@ export const collaborationRules: ReminderRule[] = [
     ),
     message:
       'Make the artifact, workflow, or runtime shape concrete early. Challenge weak premises, names, and boundaries directly instead of agreeing at an abstract level.',
+  },
+  {
+    id: 'source-before-new-implementation',
+    target: 'prompt',
+    events: ['UserPromptSubmit'],
+    when: always,
+    message:
+      'Look for a similar implementation in the codebase first. If none exists, probe the relevant behavior and read its source code before implementing it.',
   },
 ];
