@@ -37,9 +37,15 @@ function prose(text: string): string {
 async function finalAssistantText(input: ClaudeHookInput): Promise<string> {
   if (typeof input.last_assistant_message === 'string')
     return prose(input.last_assistant_message);
-  if (!input.transcript_path) return '';
+  // On SubagentStop, transcript_path is the parent session's; the subagent's own
+  // transcript is agent_transcript_path.
+  const transcriptPath =
+    input.hook_event_name === 'SubagentStop'
+      ? input.agent_transcript_path
+      : input.transcript_path;
+  if (typeof transcriptPath !== 'string' || !transcriptPath) return '';
   let last = '';
-  for await (const entry of readTranscriptEntries(input.transcript_path)) {
+  for await (const entry of readTranscriptEntries(transcriptPath)) {
     if (entry.type !== 'assistant' || entry.message?.role !== 'assistant')
       continue;
     const text = textOfContent(entry.message.content);

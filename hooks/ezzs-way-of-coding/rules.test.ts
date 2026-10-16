@@ -373,6 +373,131 @@ test('stop reads the final assistant message from the transcript when the hook o
   }
 });
 
+test('subagent stop ignores an unverified gap in the parent session transcript', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'ezzs-way-of-coding-verify-'));
+  try {
+    const parentTranscriptPath = join(directory, 'parent.jsonl');
+    const agentTranscriptPath = join(directory, 'agent.jsonl');
+    await writeFile(
+      parentTranscriptPath,
+      `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'The OAuth consent path remains unverified.' }] } })}\n`,
+    );
+    const agentEntries = [
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'The export is still unverified; probing now.' }] } },
+      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Verified live against 960 real events.' }] } },
+    ];
+    await writeFile(
+      agentTranscriptPath,
+      `${agentEntries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+
+    const output = await evaluateReminderHook(
+      {
+        hook_event_name: 'SubagentStop',
+        transcript_path: parentTranscriptPath,
+        agent_transcript_path: agentTranscriptPath,
+      },
+      ezzsWayOfCodingConfig,
+    );
+
+    assert.doesNotMatch(
+      output?.hookSpecificOutput?.additionalContext ?? '',
+      /live-verify-before-unverified/,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('subagent stop pushes back on an unverified gap in its own transcript', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'ezzs-way-of-coding-verify-'));
+  try {
+    const parentTranscriptPath = join(directory, 'parent.jsonl');
+    const agentTranscriptPath = join(directory, 'agent.jsonl');
+    await writeFile(
+      parentTranscriptPath,
+      `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Verified live against 960 real events.' }] } })}\n`,
+    );
+    await writeFile(
+      agentTranscriptPath,
+      `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Done, but the OAuth consent path remains unverified.' }] } })}\n`,
+    );
+
+    const output = await evaluateReminderHook(
+      {
+        hook_event_name: 'SubagentStop',
+        transcript_path: parentTranscriptPath,
+        agent_transcript_path: agentTranscriptPath,
+      },
+      ezzsWayOfCodingConfig,
+    );
+
+    assert.match(
+      output?.hookSpecificOutput?.additionalContext ?? '',
+      /\[stop-feedback:live-verify-before-unverified\]/,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('subagent stop without its own transcript never judges the parent session transcript', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'ezzs-way-of-coding-verify-'));
+  try {
+    const parentTranscriptPath = join(directory, 'parent.jsonl');
+    await writeFile(
+      parentTranscriptPath,
+      `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'The OAuth consent path remains unverified.' }] } })}\n`,
+    );
+
+    for (const agentTranscriptPath of [undefined, '']) {
+      const output = await evaluateReminderHook(
+        {
+          hook_event_name: 'SubagentStop',
+          transcript_path: parentTranscriptPath,
+          agent_transcript_path: agentTranscriptPath,
+        },
+        ezzsWayOfCodingConfig,
+      );
+
+      assert.doesNotMatch(
+        output?.hookSpecificOutput?.additionalContext ?? '',
+        /live-verify-before-unverified/,
+        String(agentTranscriptPath),
+      );
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('subagent stop judges its final message over its own transcript', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'ezzs-way-of-coding-verify-'));
+  try {
+    const agentTranscriptPath = join(directory, 'agent.jsonl');
+    await writeFile(
+      agentTranscriptPath,
+      `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Done, but the OAuth consent path remains unverified.' }] } })}\n`,
+    );
+
+    const output = await evaluateReminderHook(
+      {
+        hook_event_name: 'SubagentStop',
+        agent_transcript_path: agentTranscriptPath,
+        last_assistant_message: 'Verified live against 960 real events.',
+      },
+      ezzsWayOfCodingConfig,
+    );
+
+    assert.doesNotMatch(
+      output?.hookSpecificOutput?.additionalContext ?? '',
+      /live-verify-before-unverified/,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('stop ignores talk about the verification rule itself', async () => {
   for (const message of [
     'Live-check hook: `live-verify-before-unverified` is active and fired for real.',
