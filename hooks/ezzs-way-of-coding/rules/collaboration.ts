@@ -13,11 +13,14 @@ import { readTranscriptEntries, type TranscriptEntry } from './transcript.ts';
  * A slash command is recorded as a user entry whose `message.content` is a
  * plain string carrying the `<command-name>` tag. Tool results and injected
  * skill bodies use array content, so the string check alone keeps a transcript
- * that merely quotes the skill from arming the register. The prefix is left
- * open because the command answers to `/mattpocock-skills:wait-what` today and
- * to `/wait-what` once the skill is owned locally.
+ * that merely quotes the skill from arming the register. The skill is the
+ * user-level `~/.claude/skills/wait-what/SKILL.md`, so the command is
+ * `/wait-what`; a plugin copy adds a `<plugin>:` prefix. The pattern matches
+ * that command name and nothing else, so a command such as `/wait-what-notes`
+ * does not arm the register.
  */
-const WAIT_WHAT_INVOCATION = /<command-name>[^<]*wait-what/;
+const WAIT_WHAT_INVOCATION =
+  /<command-name>\/(?:[\w-]+:)?wait-what<\/command-name>/;
 
 function invokesWaitWhat(entry: TranscriptEntry): boolean {
   const content = entry.message?.content;
@@ -29,9 +32,11 @@ function invokesWaitWhat(entry: TranscriptEntry): boolean {
 }
 
 /**
- * The skill itself sets `disable-model-invocation: true`, so a model turn can
- * never reload it. Only the transcript records that the user invoked it, which
- * is what keeps the register alive after the turn it was asked for.
+ * The model can invoke the skill too, but only when its description matches
+ * the turn. A user who runs `/wait-what` asks for the register for the whole
+ * session. Only the transcript records that request, so the rule reads it on
+ * every prompt. The register has no off switch: once the command ran, it stays
+ * on for the rest of the session. A new session starts with it off.
  */
 async function waitWhatRegisterIsActive(
   input: ClaudeHookInput,
@@ -73,6 +78,6 @@ export const collaborationRules: ReminderRule[] = [
     events: ['UserPromptSubmit'],
     when: waitWhatRegisterIsActive,
     message:
-      'The /wait-what register is active for the rest of this session, not only the turn it was invoked on. Write every reply in ASD-STE100 Simplified Technical English: short sentences, active voice, one idea per sentence, no ambiguous pronouns. Use the ubiquitous language of the repository, taken from its AGENTS.md or CLAUDE.md and from the code; do not source terms from product documents that a pivot or a rename has made stale, and do not assume a CONTEXT.md that the repository does not have. Lead with the context, then the facts, then the assumption the conclusion depends on, then the conclusion.',
+      'The /wait-what register stays on for the rest of this session, not only the turn it was invoked on. Write every reply as the wait-what skill says: ASD-STE100 Simplified Technical English with the project’s ubiquitous language. Follow that skill for where the terms come from.',
   },
 ];

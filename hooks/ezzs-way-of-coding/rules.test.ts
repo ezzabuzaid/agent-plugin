@@ -513,25 +513,13 @@ test('destructive reminder ignores harmless remove wording', async () => {
   );
 });
 
-test('the /wait-what register stays active on every turn after it was invoked', async () => {
+async function evaluateWithTranscript(entries: object[], prompt: string) {
   const transcriptDirectory = await mkdtemp(
     join(tmpdir(), 'ezzs-way-of-coding-register-'),
   );
 
   try {
     const transcriptPath = join(transcriptDirectory, 'transcript.jsonl');
-    const entries = [
-      { type: 'user', message: { role: 'user', content: 'First request' } },
-      {
-        type: 'user',
-        message: {
-          role: 'user',
-          content:
-            '<command-message>mattpocock-skills:wait-what</command-message>\n<command-name>/mattpocock-skills:wait-what</command-name>',
-        },
-      },
-      { type: 'user', message: { role: 'user', content: 'Second request' } },
-    ];
     await writeFile(
       transcriptPath,
       `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
@@ -541,17 +529,49 @@ test('the /wait-what register stays active on every turn after it was invoked', 
       {
         hook_event_name: 'UserPromptSubmit',
         transcript_path: transcriptPath,
-        prompt: 'Now build the connector',
+        prompt,
       },
       ezzsWayOfCodingConfig,
     );
-
-    const context = output?.hookSpecificOutput?.additionalContext ?? '';
-    assert.match(context, /\[prompt:wait-what-register\]/);
-    assert.match(context, /Simplified Technical English/);
-    assert.doesNotMatch(context, /Limerence|text2sql|Space/);
+    return output?.hookSpecificOutput?.additionalContext ?? '';
   } finally {
     await rm(transcriptDirectory, { recursive: true, force: true });
+  }
+}
+
+const commandEntry = (commandName: string) => ({
+  type: 'user',
+  message: {
+    role: 'user',
+    content: `<command-message>${commandName.slice(1)}</command-message>\n<command-name>${commandName}</command-name>`,
+  },
+});
+
+test('the /wait-what register stays active on every turn after it was invoked', async () => {
+  for (const commandName of ['/wait-what', '/some-plugin:wait-what']) {
+    const context = await evaluateWithTranscript(
+      [
+        { type: 'user', message: { role: 'user', content: 'First request' } },
+        commandEntry(commandName),
+        { type: 'user', message: { role: 'user', content: 'Second request' } },
+      ],
+      'Now build the connector',
+    );
+
+    assert.match(context, /\[prompt:wait-what-register\]/, commandName);
+    assert.match(context, /wait-what skill/);
+    assert.doesNotMatch(context, /Limerence|text2sql|Space/);
+  }
+});
+
+test('the /wait-what register ignores a command whose name only contains wait-what', async () => {
+  for (const commandName of ['/wait-what-notes', '/not-wait-what']) {
+    const context = await evaluateWithTranscript(
+      [commandEntry(commandName)],
+      'Carry on',
+    );
+
+    assert.doesNotMatch(context, /wait-what-register/, commandName);
   }
 });
 
