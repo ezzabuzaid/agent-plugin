@@ -31,9 +31,18 @@ function textOfContent(content: unknown): string {
     .join('\n');
 }
 
-// Code spans name things (rule ids, flags); they are not claims about the work.
+// Text that mentions a word does not claim it (the use–mention distinction).
+// Fenced code blocks quote output or messages, code spans name things (rule
+// ids, flags), and double quotes cite a word ("unverified") rather than say it.
+// A quote stays on one line, so a stray quote mark cannot hide the rest.
 function prose(text: string): string {
-  return text.replaceAll(/`[^`]*`/g, ' ');
+  return text
+    .replaceAll(
+      /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[^\n]*$|(?![\s\S]))/gm,
+      ' ',
+    )
+    .replaceAll(/`[^`]*`/g, ' ')
+    .replaceAll(/"[^"\n]*"|“[^”\n]*”/g, ' ');
 }
 
 async function finalAssistantText(input: ClaudeHookInput): Promise<string> {

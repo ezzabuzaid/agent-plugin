@@ -977,6 +977,36 @@ test('stop ignores talk about the verification rule itself', async () => {
 
 // Claude Code keeps a subagent's transcript next to the parent session's:
 // <session>.jsonl -> <session>/subagents/agent-<agent_id>.jsonl.
+// A word inside a fenced block or double quotes is mentioned, not claimed.
+const mentionsOfUnverified = [
+  'The probe now reports "unverified" when the export has no live row, and it found one.',
+  'The probe now reports “unverified” when the export has no live row, and it found one.',
+  [
+    'The guard refused my first hand-back with this text:',
+    '```',
+    'Your report hands an unverified gap to your caller.',
+    '```',
+    'I ran the live check and it passed.',
+  ].join('\n'),
+  ['The deny text reads:', '~~~', 'The permission prompt remains unverified.', '~~~', 'All checks ran live.'].join('\n'),
+];
+
+test('stop ignores a verification word that the final message only quotes', async () => {
+  for (const message of mentionsOfUnverified) {
+    const output = await evaluateReminderHook(
+      { hook_event_name: 'Stop', last_assistant_message: message },
+      ezzsWayOfCodingConfig,
+    );
+    assert.doesNotMatch(output?.hookSpecificOutput?.additionalContext ?? '', /live-verify-before-unverified/, message);
+  }
+
+  const claim = await evaluateReminderHook(
+    { hook_event_name: 'Stop', last_assistant_message: 'The probe reports the export as unverified.' },
+    ezzsWayOfCodingConfig,
+  );
+  assert.match(claim?.hookSpecificOutput?.additionalContext ?? '', /\[stop-feedback:live-verify-before-unverified\]/);
+});
+
 async function preHandback(
   agentEntries: unknown[],
   input: Record<string, unknown>,
@@ -1080,6 +1110,17 @@ test('a resumed subagent is refused again on its first unverified hand-back of t
     );
 
     assert.equal(output?.hookSpecificOutput?.permissionDecision, 'deny', JSON.stringify(resume));
+  }
+});
+
+test('a hand-back that only quotes a verification word goes through', async () => {
+  for (const message of mentionsOfUnverified) {
+    const output = await preHandback([brief, ...work], {
+      tool_name: 'SubagentHandback',
+      tool_input: { message },
+    });
+
+    assert.notEqual(output?.hookSpecificOutput?.permissionDecision, 'deny', message);
   }
 });
 
