@@ -7,6 +7,11 @@ This is Ezz's global Claude Code and Codex application of
 `4.3.0` package installed in this directory. It has no runtime dependency on a
 project checkout.
 
+Per-turn session harvesting and the shared Claude/Codex coding defaults also
+live in this rule set. Both agents use this one repo-owned hook; no separate
+`~/.claude/hooks/session-harvest.sh` or `~/.codex/hooks/session-harvest.sh`
+copy is required.
+
 ```sh
 printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Build a custom executor."}' \
   | node hook.ts

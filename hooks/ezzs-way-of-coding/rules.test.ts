@@ -8,7 +8,7 @@ import { evaluateReminderHook } from '@deepagents/experimental/coding-agent-remi
 
 import { ezzsWayOfCodingConfig } from './rules/index.ts';
 
-test('does not inject project-specific memory', async () => {
+test('session harvest stays generic instead of injecting project-specific memory', async () => {
   const output = await evaluateReminderHook(
     {
       hook_event_name: 'UserPromptSubmit',
@@ -18,7 +18,9 @@ test('does not inject project-specific memory', async () => {
     ezzsWayOfCodingConfig,
   );
 
-  assert.equal(output, undefined);
+  const context = output?.hookSpecificOutput?.additionalContext ?? '';
+  assert.match(context, /\[prompt:session-harvest\]/);
+  assert.doesNotMatch(context, /AuthX|OAuth|text2sql/);
 });
 
 test('coding reminders trigger from behavior, not repository path', async () => {
@@ -99,6 +101,47 @@ test('package API reminder prefers primitive composition over a new abstraction'
   assert.doesNotMatch(
     nearMissOutput?.hookSpecificOutput?.additionalContext ?? '',
     /\[prompt:package-api-first\]/,
+  );
+});
+
+test('repo-owned rules preserve the migrated Claude and Codex guidance', async () => {
+  const sessionOutput = await evaluateReminderHook(
+    { hook_event_name: 'SessionStart' },
+    ezzsWayOfCodingConfig,
+  );
+  const sessionContext =
+    sessionOutput?.hookSpecificOutput?.additionalContext ?? '';
+
+  assert.match(sessionContext, /latest Node\.js and JavaScript\/TypeScript features/);
+  assert.match(sessionContext, /Challenge contradictions and weak premises directly/);
+  assert.match(sessionContext, /prioritize truth over agreement/);
+  assert.match(sessionContext, /delegates auxiliary work to an AI/);
+  assert.match(sessionContext, /Claude Sonnet 5/);
+  assert.match(sessionContext, /gpt-6\.1-sol/);
+  assert.match(sessionContext, /concrete capability gap/);
+
+  const testPromptOutput = await evaluateReminderHook(
+    {
+      hook_event_name: 'UserPromptSubmit',
+      prompt: 'Write tests for the package integration.',
+    },
+    ezzsWayOfCodingConfig,
+  );
+  const testPromptContext =
+    testPromptOutput?.hookSpecificOutput?.additionalContext ?? '';
+
+  assert.match(testPromptContext, /integration and black-box tests/);
+  assert.match(testPromptContext, /public contract/);
+  assert.match(testPromptContext, /private or protected internals/);
+
+  const expansionOutput = await evaluateReminderHook(
+    { hook_event_name: 'UserPromptExpansion', prompt: 'Continue.' },
+    ezzsWayOfCodingConfig,
+  );
+
+  assert.doesNotMatch(
+    expansionOutput?.hookSpecificOutput?.additionalContext ?? '',
+    /\[prompt:session-harvest\]/,
   );
 });
 
@@ -306,7 +349,10 @@ test('destructive reminder ignores harmless remove wording', async () => {
     ezzsWayOfCodingConfig,
   );
 
-  assert.equal(output, undefined);
+  assert.doesNotMatch(
+    output?.hookSpecificOutput?.additionalContext ?? '',
+    /\[prompt:guard-destructive-mutations\]/,
+  );
 });
 
 test('stop pushes back on a final message that hands over an unverified gap', async () => {
