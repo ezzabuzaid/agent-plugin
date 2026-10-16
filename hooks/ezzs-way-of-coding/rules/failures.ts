@@ -77,14 +77,20 @@ const COMMAND_PREFIXES = new Set([
 // Programs the command runs, by name. A Unix tool prefixes its diagnostics with
 // its own name (`ls: cannot access 'x'`, `grep: maximum repetition exceeds
 // 255`), and a line that starts with one of these names is such a diagnostic.
+// A heredoc body is data for a program, not a command, so it is left out.
+const HEREDOC_BODY = /<<-?\s*(['"]?)(\w+)\1([^\n]*)\n[\s\S]*?\n\s*\2(?=\n|$)/g;
+
 function programsOf(command: string): Set<string> {
   const programs = new Set<string>();
-  for (const segment of command.split(/\|\|?|&&|;|\n|\$\(|`|\(/)) {
+  const commands = command.replaceAll(HEREDOC_BODY, '$3');
+  for (const segment of commands.split(/\|\|?|&&|;|\n|\$\(|`|\(/)) {
     const words = segment.trim().split(/\s+/);
-    const program = words.find(
-      (word) => !COMMAND_PREFIXES.has(word) && !/^\w+=/.test(word),
-    );
-    if (program) programs.add(program.split('/').at(-1) ?? program);
+    const program = words
+      .find((word) => !COMMAND_PREFIXES.has(word) && !/^\w+=/.test(word))
+      ?.split('/')
+      .at(-1);
+    // A word that ends in `/` has no name; an empty name would match every line.
+    if (program) programs.add(program);
   }
   return programs;
 }

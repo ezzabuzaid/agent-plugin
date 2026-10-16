@@ -539,6 +539,8 @@ test('bash error reminder ignores successful output that mentions failure words'
     ['git log -1 --format=%B', 'not start one. A missing or unreadable transcript, or any error, allows'],
     ["agent-backlog remove 104 --yes 2>&1 | tail -3; agent-backlog show 104 2>&1 | tail -3", '■  Backlog item #104 was not found.'],
     ['file README.md', 'README.md: ASCII text'],
+    ["node -e 'const a = 1;\n// prints a\nconsole.log(a)'", '1'],
+    ["python3 - <<'EOF'\nstatus = 'ok'\nprint(f'status: {status}')\nEOF", 'status: ok'],
   ];
 
   for (const [command, stdout] of cases) {
