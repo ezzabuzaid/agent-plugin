@@ -26,9 +26,10 @@ those files and encode it here as rules.
 
 Out-of-scope follow-up capture works in every repository with no configuration:
 the global `agent-backlog` command stores all repositories' items in one
-database at `~/.agent-backlog/backlog.sqlite`. The reminders deduplicate
-against the current repository backlog and leave subagent findings for the
-root agent to store once. Items are
+database at `~/.agent-backlog/backlog.sqlite`. Subagent findings are left for
+the root agent to store. The stop audit runs after every third completed
+assistant response, captures out-of-scope follow-ups, and removes backlog items
+completed or explicitly closed by the conversation. Items are
 classified on two axes: `--kind feature|defect|risk|debt` (Unicorn Project
 investment categories — what the item is) and `--work-type
 business|internal|change|unplanned` (Phoenix Project four types — how the

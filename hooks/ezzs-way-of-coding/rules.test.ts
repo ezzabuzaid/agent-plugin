@@ -297,6 +297,145 @@ test('source reminder stays scoped to user message submit', async () => {
   );
 });
 
+test('root sessions receive out-of-scope capture guidance', async () => {
+  for (const hookEventName of ['SessionStart', 'Setup']) {
+    const output = await evaluateReminderHook(
+      { hook_event_name: hookEventName },
+      ezzsWayOfCodingConfig,
+    );
+
+    const context = output?.hookSpecificOutput?.additionalContext ?? '';
+    assert.match(context, /\[session:capture-out-of-scope-followups\]/);
+    assert.match(context, /agent-backlog/);
+    assert.doesNotMatch(context, /deduplicat|duplicate|equivalent open item/i);
+  }
+});
+
+test('subagents leave out-of-scope backlog writes to the root agent', async () => {
+  for (const hookEventName of ['SubagentStart', 'SubagentStop']) {
+    const output = await evaluateReminderHook(
+      { hook_event_name: hookEventName },
+      ezzsWayOfCodingConfig,
+    );
+
+    assert.doesNotMatch(
+      output?.hookSpecificOutput?.additionalContext ?? '',
+      /(?:capture|audit)-out-of-scope-followups/,
+    );
+  }
+});
+
+test('root stop audits out-of-scope follow-ups every third Codex assistant message', async (t) => {
+  const transcriptDirectory = await mkdtemp(
+    join(tmpdir(), 'ezzs-way-of-coding-codex-'),
+  );
+  const transcriptPath = join(transcriptDirectory, 'transcript.jsonl');
+  t.after(() => rm(transcriptDirectory, { recursive: true, force: true }));
+
+  const evaluateStop = async () => {
+    const output = await evaluateReminderHook(
+      { hook_event_name: 'Stop', transcript_path: transcriptPath },
+      ezzsWayOfCodingConfig,
+    );
+    return output?.hookSpecificOutput?.additionalContext ?? '';
+  };
+  const writeTurns = async (turnIds: string[]) => {
+    const entries = turnIds.map((turnId) => ({
+      type: 'turn_context',
+      payload: { turn_id: turnId },
+    }));
+    await writeFile(
+      transcriptPath,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+  };
+
+  await writeTurns(['turn-1']);
+  assert.doesNotMatch(await evaluateStop(), /audit-out-of-scope-followups/);
+
+  await writeTurns(['turn-1', 'turn-2']);
+  assert.doesNotMatch(await evaluateStop(), /audit-out-of-scope-followups/);
+
+  await writeTurns(['turn-1', 'turn-2', 'turn-3', 'turn-3']);
+  const thirdMessageContext = await evaluateStop();
+  assert.match(
+    thirdMessageContext,
+    /\[stop-feedback:audit-out-of-scope-followups\]/,
+  );
+  assert.match(thirdMessageContext, /Do not invent work/);
+  assert.match(thirdMessageContext, /agent-backlog remove <id> --yes/);
+  assert.match(thirdMessageContext, /If storage or removal fails/);
+  assert.doesNotMatch(
+    thirdMessageContext,
+    /deduplicat|duplicate|equivalent open item/i,
+  );
+
+  await writeTurns(['turn-1', 'turn-2', 'turn-3', 'turn-4']);
+  assert.doesNotMatch(await evaluateStop(), /audit-out-of-scope-followups/);
+
+  await writeTurns([
+    'turn-1',
+    'turn-2',
+    'turn-3',
+    'turn-4',
+    'turn-5',
+    'turn-6',
+  ]);
+  assert.match(await evaluateStop(), /audit-out-of-scope-followups/);
+});
+
+test('root stop cadence counts Claude turns without counting tool results or meta messages', async (t) => {
+  const transcriptDirectory = await mkdtemp(
+    join(tmpdir(), 'ezzs-way-of-coding-claude-'),
+  );
+  const transcriptPath = join(transcriptDirectory, 'transcript.jsonl');
+  t.after(() => rm(transcriptDirectory, { recursive: true, force: true }));
+
+  const entries = [
+    { type: 'user', message: { role: 'user', content: 'First request' } },
+    {
+      type: 'user',
+      sourceToolAssistantUUID: 'assistant-1',
+      message: { role: 'user', content: [{ type: 'tool_result' }] },
+    },
+    { type: 'user', message: { role: 'user', content: 'Second request' } },
+    {
+      type: 'user',
+      isMeta: true,
+      message: { role: 'user', content: [{ type: 'text', text: 'Skill context' }] },
+    },
+    { type: 'user', message: { role: 'user', content: 'Third request' } },
+  ];
+  await writeFile(
+    transcriptPath,
+    `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+  );
+
+  const output = await evaluateReminderHook(
+    { hook_event_name: 'Stop', transcript_path: transcriptPath },
+    ezzsWayOfCodingConfig,
+  );
+
+  assert.match(
+    output?.hookSpecificOutput?.additionalContext ?? '',
+    /\[stop-feedback:audit-out-of-scope-followups\]/,
+  );
+});
+
+test('root stop audit stays quiet without a readable transcript', async () => {
+  for (const transcriptPath of [undefined, '/missing/transcript.jsonl']) {
+    const output = await evaluateReminderHook(
+      { hook_event_name: 'Stop', transcript_path: transcriptPath },
+      ezzsWayOfCodingConfig,
+    );
+
+    assert.doesNotMatch(
+      output?.hookSpecificOutput?.additionalContext ?? '',
+      /audit-out-of-scope-followups/,
+    );
+  }
+});
+
 test('core reminders fire on their events', async () => {
   const cases = [
     ['session:session-ezzs-way', { hook_event_name: 'SessionStart' }],
