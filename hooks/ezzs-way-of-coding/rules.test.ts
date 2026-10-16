@@ -60,6 +60,48 @@ test('coding reminders trigger from behavior, not repository path', async () => 
   }
 });
 
+test('package API reminder prefers primitive composition over a new abstraction', async () => {
+  const matchingOutput = await evaluateReminderHook(
+    {
+      hook_event_name: 'UserPromptSubmit',
+      prompt: 'Propose a new abstraction for composing this SDK API.',
+    },
+    ezzsWayOfCodingConfig,
+  );
+  const matchingContext =
+    matchingOutput?.hookSpecificOutput?.additionalContext ?? '';
+
+  assert.match(matchingContext, /\[prompt:package-api-first\]/);
+  assert.match(matchingContext, /essential behavior/);
+  assert.match(matchingContext, /existing primitives and compositions/);
+  assert.match(matchingContext, /installed packages or local workspace packages/);
+  assert.match(matchingContext, /actual installed API surface/);
+  assert.match(
+    matchingContext,
+    /exports, type declarations, source, docs, and call sites/,
+  );
+  assert.match(
+    matchingContext,
+    /small snippet, test, runtime introspection, or targeted search/,
+  );
+  assert.match(matchingContext, /Prefer the proven package API/);
+  assert.match(matchingContext, /training data, README memory, manifests, or guesses/);
+  assert.match(matchingContext, /concrete capability gap/);
+
+  const nearMissOutput = await evaluateReminderHook(
+    {
+      hook_event_name: 'UserPromptSubmit',
+      prompt: 'Propose a release plan for this project.',
+    },
+    ezzsWayOfCodingConfig,
+  );
+
+  assert.doesNotMatch(
+    nearMissOutput?.hookSpecificOutput?.additionalContext ?? '',
+    /\[prompt:package-api-first\]/,
+  );
+});
+
 test('batch reconciler ignores successful results that merely mention failures', async () => {
   const output = await evaluateReminderHook(
     {

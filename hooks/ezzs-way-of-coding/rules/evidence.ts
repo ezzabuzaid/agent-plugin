@@ -24,19 +24,19 @@ export const evidenceRules: ReminderRule[] = [
     events: promptEvents,
     when: and(
       contentPattern(
-        /\b(implement|build|add|change|refactor|wire|create|extend|integrate|introduce|replace|write)\b/i,
+        /\b(implement|build|add|change|refactor|wire|create|extend|integrate|introduc(?:e|ing)|replace|write|propos(?:e|ing)|design(?:ing)?)\b/i,
       ),
       or(
         contentPattern(
           /\b(package|dependency|library|SDK|client|plugin|provider|framework|module|API)\b/i,
         ),
         contentPattern(
-          /\b(custom|wrapper|adapter|helper|watcher|executor|script|cache|storage|fetch)\b/i,
+          /\b(custom|wrapper|adapter|helper|watcher|executor|script|cache|storage|fetch|abstraction|primitive|composition)\b/i,
         ),
       ),
     ),
     message:
-      'Before writing local machinery, inspect the repository’s established pattern and the package or tool’s exports, types, source, docs, and call sites. Prove the native surface with a targeted probe and introduce a new abstraction only when it cannot satisfy the contract.',
+      'Before hand-rolling local behavior or proposing new machinery, reduce the requested concept to its essential behavior. Map that behavior onto the repository’s established patterns and the existing primitives and compositions of installed packages or local workspace packages. Inspect the actual installed API surface first: exports, type declarations, source, docs, and call sites. Prove it with a small snippet, test, runtime introspection, or targeted search. Prefer the proven package API when it satisfies the contract; do not assume capabilities or limitations from training data, README memory, manifests, or guesses. Introduce a new abstraction only after demonstrating a concrete capability gap.',
   },
   {
     id: 'evidence-before-claims',
