@@ -34,3 +34,13 @@ classified on two axes: `--kind feature|defect|risk|debt` (Unicorn Project
 investment categories — what the item is) and `--work-type
 business|internal|change|unplanned` (Phoenix Project four types — how the
 work entered the system).
+
+The `/wait-what` register outlives the turn that asked for it. The skill behind
+that command sets `disable-model-invocation: true`, so no model turn can reload
+it and its instruction would otherwise reach one reply only. The
+`wait-what-register` rule reads the session transcript instead. It arms once a
+user entry carries a `<command-name>` tag naming the command, then restates the
+register on every later `UserPromptSubmit`. Entries whose content is an array —
+tool results and injected skill bodies — never arm it, so a transcript that only
+quotes the skill stays quiet. The transcript is the session state, so a new
+session starts with the register off and a resumed session keeps it on.
