@@ -25,8 +25,8 @@
 //   1  failed; nothing is left behind
 //
 // --remove refuses any directory without this script's manifest, kills the
-// processes whose command line names the copy (an nx daemon started there), and
-// deletes it.
+// processes whose command line names the copy (an nx daemon started there),
+// except its own caller chain, and deletes it.
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -105,14 +105,22 @@ function removeCopy(copy) {
 
 // Processes started from the copy (an nx daemon, plugin workers) outlive the run
 // that started them. The copy's path is unique, so matching it in argv touches
-// only those processes; never match anything broader.
+// only those processes; never match anything broader. The caller's own chain
+// often names the copy too (`sh -c "… --remove <copy> && next"`), so this
+// process and its ancestors are never killed.
 function killProcessesUsing(copy) {
   const paths = [copy, realpathSync(copy)];
-  const pids = execFileSync('ps', ['-A', '-o', 'pid=,command='], { encoding: 'utf8' })
+  const processes = execFileSync('ps', ['-A', '-o', 'pid=,ppid=,command='], { encoding: 'utf8' })
     .split('\n')
-    .map((line) => line.trim().match(/^(\d+)\s+(.*)$/))
-    .filter((match) => match && Number(match[1]) !== process.pid && paths.some((path) => match[2].includes(path)))
-    .map((match) => Number(match[1]));
+    .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(.*)$/))
+    .filter(Boolean)
+    .map(([, pid, ppid, command]) => ({ pid: Number(pid), ppid: Number(ppid), command }));
+  const parentOf = new Map(processes.map(({ pid, ppid }) => [pid, ppid]));
+  const lineage = new Set();
+  for (let pid = process.pid; pid > 0 && !lineage.has(pid); pid = parentOf.get(pid) ?? 0) lineage.add(pid);
+  const pids = processes
+    .filter(({ pid, command }) => !lineage.has(pid) && paths.some((path) => command.includes(path)))
+    .map(({ pid }) => pid);
   for (const pid of pids) process.kill(pid, 'SIGKILL');
   return pids;
 }

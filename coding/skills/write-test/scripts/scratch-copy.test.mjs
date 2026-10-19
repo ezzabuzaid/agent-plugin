@@ -316,6 +316,38 @@ test('--remove kills a process running from the copy, leaves a process outside i
   }
 });
 
+test('--remove run from a shell whose command names the copy leaves that shell running and still kills a process from the copy', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-copy-')));
+  let fromCopy;
+  try {
+    const repo = join(root, 'repo');
+    mkdirSync(repo);
+    writeFileSync(join(repo, 'a.txt'), 'a\n');
+    git(repo, 'init', '-q');
+    const dest = join(root, `copy-${randomUUID()}`);
+    assert.equal(scratchCopy(['--repo', repo, '--dest', dest, '--min-free-gb', '0'], root).status, 0);
+    fromCopy = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)', join(dest, 'daemon')], { stdio: 'ignore' });
+    await once(fromCopy, 'spawn');
+
+    // How agents chain cleanup: the calling shell's own argv names the copy.
+    const shell = spawnSync('/bin/sh', ['-c', `"${process.execPath}" "${script}" --remove "${dest}" && echo after-remove`], {
+      env: cleanEnv(root),
+      encoding: 'utf8',
+    });
+
+    assert.equal(shell.signal, null);
+    assert.equal(shell.status, 0);
+    const [report, after] = shell.stdout.trim().split('\n');
+    assert.deepEqual(JSON.parse(report).killedPids, [fromCopy.pid]);
+    assert.equal(after, 'after-remove');
+    await once(fromCopy, 'exit', { signal: AbortSignal.timeout(5000) });
+    assert.equal(existsSync(dest), false);
+  } finally {
+    fromCopy?.kill('SIGKILL');
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('uncommitted edits and untracked files are copied with their working-tree content', () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-copy-')));
   try {
