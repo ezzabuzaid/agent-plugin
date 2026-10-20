@@ -861,3 +861,28 @@ test('real named tests survive a project wrapper and file-like names without cou
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// --test-force-exit exits once the first reporter on a shared destination ends,
+// so the evidence reporter must write its line before then.
+test('a Node run with --test-force-exit still yields structured evidence beside the human reporter', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
+  try {
+    const { copy } = copyOf(root, { 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
+
+    const { status, lines, of } = await mutate(root, {
+      copy,
+      command: nodeTests(['--test-force-exit', 'src/']),
+      timeoutSeconds: 60,
+      mutations: [{ id: 'F1', claim: 'clamp caps at ten', edits: [{ file: 'src/clamp.mjs', find: '10', replace: '11' }] }],
+    });
+
+    assert.equal(status, 0);
+    const baseline = lines.find((line) => line.kind === 'baseline');
+    assert.equal(baseline.verdict, 'PASS');
+    assert.deepEqual(baseline.tests, { run: 1, pass: 1, fail: 0, cancelled: 0 });
+    assert.equal(of('F1').verdict, 'CAUGHT');
+    assert.deepEqual(of('F1').tests, { run: 1, pass: 0, fail: 1, cancelled: 0 });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
