@@ -367,9 +367,11 @@ test('root stop audits out-of-scope follow-ups every third Codex assistant messa
       /\[stop-feedback:audit-out-of-scope-followups\]/,
     );
     assert.match(thirdMessageContext, /Do not invent work/);
-    assert.match(thirdMessageContext, /agent-backlog remove <id> --yes/);
+    assert.match(thirdMessageContext, /agent-backlog done <id>/);
+    assert.match(thirdMessageContext, /Never run `agent-backlog remove`/);
+    assert.doesNotMatch(thirdMessageContext, /agent-backlog remove <id>/);
     assert.match(thirdMessageContext, /Do not file upstream bug reports or dev-tooling audit items[^\n]*mention each one once in your reply/i);
-    assert.match(thirdMessageContext, /If storage or removal fails/);
+    assert.match(thirdMessageContext, /If storing or closing fails/);
     assert.doesNotMatch(
       thirdMessageContext,
       /deduplicat|duplicate|equivalent open item/i,

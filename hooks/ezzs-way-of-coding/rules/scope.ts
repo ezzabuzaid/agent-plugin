@@ -76,6 +76,6 @@ export const scopeRules: ReminderRule[] = [
     events: ['Stop'],
     when: everyThirdAssistantMessage,
     message:
-      'Before stopping, capture each concrete, actionable follow-up outside the active request with `agent-backlog`. Remove any backlog item that this conversation completed or explicitly closed by running `agent-backlog remove <id> --yes`. Do not invent work or capture blockers, vague cleanup, or completed work as new items. Do not file upstream bug reports or dev-tooling audit items (agent hooks, agent settings, test tooling); mention each one once in your reply instead. If storage or removal fails, report the failure.',
+      'Before stopping, capture each concrete, actionable follow-up outside the active request with `agent-backlog`. Close each backlog item that this conversation completed or explicitly closed: append a closing note (what settled it, the commit, how it was verified) with `agent-backlog update <id> --description=<old description and note>`, then run `agent-backlog done <id>`. Never run `agent-backlog remove`: a closed item and its notes are the record later sessions search. Do not invent work or capture blockers, vague cleanup, or completed work as new items. Do not file upstream bug reports or dev-tooling audit items (agent hooks, agent settings, test tooling); mention each one once in your reply instead. If storing or closing fails, report the failure.',
   },
 ];
