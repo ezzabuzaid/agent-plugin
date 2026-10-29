@@ -9,8 +9,9 @@ instructions (`keep-coding-instructions: true`):
 - **Term checks** — flags when a word in your request conflicts with what the rest of
   the request describes, and proceeds on the likely intended term (or asks if ambiguous).
 - **Guardrail blocks** — turns recurring pitfalls and your corrections into concrete,
-  enforceable ESLint / TypeScript / CI / Agent-Guidance recommendations, researching the
-  real rule before naming it.
+  enforceable ESLint / TypeScript / Git hook / CI / Agent hook / Permission rule /
+  Agent-Guidance recommendations. The guardrail skill picks the tool and confirms the check
+  exists.
 
 ## How it works
 
@@ -44,6 +45,15 @@ The scripts have their own tests: `node --test skills/write-test/scripts/*.test.
 dependency already owns: it deletes hand-written workarounds, wrappers, and glue that the
 tool provides officially, and reaches new goals through the tool's official API or config.
 
+## guardrail skill
+
+[`skills/guardrail`](./skills/guardrail/SKILL.md) turns a rule stated in words into a
+check that a machine runs, or says why no machine can run one. It writes the violation that
+a machine would see, picks the highest exact rung (eliminate, block, catch late, remind),
+prefers a check that already exists, and proves that the check fires.
+[`REFERENCE.md`](./skills/guardrail/REFERENCE.md) maps each place where a violation lives to
+its tool.
+
 ## Install
 
 ```
@@ -62,7 +72,7 @@ codex plugin marketplace add ezzabuzaid/agent-plugin
 codex plugin add coding@ezzabuzaid
 ```
 
-Update with `codex plugin marketplace upgrade ezzabuzaid`. Both skills load. Codex plugins
+Update with `codex plugin marketplace upgrade ezzabuzaid`. All three skills load. Codex plugins
 can't ship agents, so write-test starts a general subagent with each agent's file as its
 brief. The output style is Claude Code only; Codex ignores it.
 

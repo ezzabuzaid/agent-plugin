@@ -31,11 +31,13 @@ component. Three layers on top of normal coding work:
 - **Term checks** — flags when a word in your request conflicts with what the rest of
   the request describes.
 - **Guardrail blocks** — turns recurring pitfalls and your corrections into concrete,
-  enforceable ESLint / TypeScript / CI / Agent-Guidance recommendations, researching the
-  real rule before naming it.
+  enforceable ESLint / TypeScript / Git hook / CI / Agent hook / Permission rule /
+  Agent-Guidance recommendations. The guardrail skill picks the tool and confirms the check
+  exists.
 
 It also ships the **write-test** skill and its four test agents (discoverer, claim
-comparator, mutation prover, gotcha reviewer), and the **remove-code** skill. See
+comparator, mutation prover, gotcha reviewer), the **remove-code** skill, and the
+**guardrail** skill, which turns a rule stated in words into a check that a machine runs. See
 [coding/README.md](./coding/README.md).
 
 ## Selecting the style

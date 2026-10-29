@@ -49,14 +49,9 @@ Guardrail blocks turn repeated friction into mechanical repo or agent guardrails
 - you hit a recurring or preventable pitfall (JavaScript, TypeScript, React, Node.js, package, CI, or workflow) during the task, or
 - the user's feedback, correction, preference, or process rule points to a repeatable failure mode.
 
-Route each recommendation to the narrowest enforcement surface:
+For each candidate, follow the guardrail skill (coding plugin). It picks the tool and the rung, confirms that the check exists and is exact, and names its home. When that research would crowd the turn, spawn a subagent to do it.
 
-- `ESLint` — local AST/code-pattern issues.
-- `TypeScript` — type-system, tsconfig, or modeling issues.
-- `CI` — automatic execution or coverage in PR/main workflows.
-- `Agent Guidance` — behavioral, process, or preference feedback nothing mechanical can enforce.
-
-Emit all fired surfaces in a single `★ Guardrail` callout — same visual treatment as Insights, top and bottom borders, only the surfaces that fired, each a bold sub-header with 1-3 bullets:
+Emit all fired tools in a single `★ Guardrail` callout — same visual treatment as Insights, top and bottom borders, only the tools that fired, each a bold sub-header with 1-3 bullets. The sub-header is the tool the skill picked: `ESLint`, `TypeScript`, `Git hook`, `CI`, `Agent hook`, `Permission rule`, or `Agent Guidance` (for a rule no machine can check, or the remainder of one):
 
 ```md
 `★ Guardrail ─────────────────────────────────────────`
@@ -64,13 +59,13 @@ Emit all fired surfaces in a single `★ Guardrail` callout — same visual trea
 
 - Enable `<rule-name>`: What this would have caught, tied to this change or user correction. Note plugin/install requirement if not already available.
 
-**TypeScript**
+**Git hook**
 
-- Tighten `<tsconfig flag or type-system pattern>`: What stricter type behavior this would enforce, tied to this change or user correction.
+- Add `<hook and check>`: What the commit or push would have refused, tied to this change or user correction.
 
-**CI**
+**Agent hook**
 
-- Verify `<check/target/workflow>`: What should already run automatically to prevent this reaching PR/main, tied to this change or user correction.
+- Add `<hook event and guard>`: What agent action it would have blocked, tied to this change or user correction.
 
 **Agent Guidance**
 
@@ -82,20 +77,7 @@ Emit all fired surfaces in a single `★ Guardrail` callout — same visual trea
 
 - Emit only concrete, enforceable recommendations. Skip generic, speculative, broad, or style-only advice like "be careful".
 - One issue, one surface — unless a second surface adds independent enforcement value.
-- Classify a user-feedback trigger first: mechanical → `ESLint`/`TypeScript`/`CI`; process or preference → `Agent Guidance` only.
-- CI: if a check may already exist, recommend verifying the existing workflow runs the target; propose a new check only when coverage is missing.
-- Never name a rule, flag, target, or workflow from memory. When unsure it exists, spawn a subagent to confirm it — repo config first (ESLint: installed plugins plus `personal.eslint.config.mjs` and `tools/eslint-rules/`; TypeScript: `tsconfig*.json` and the compiler's real flags; CI: `nx.json`, each `project.json`, and `.github/workflows/`), then the docs or web. Recommend only what research confirms; otherwise describe the check instead of naming it.
-- Prefer repo-installed tools; if a recommendation needs a new tool/plugin, say so.
 - Tie every suggestion to a real code path, review finding, or user request.
 - Start each bullet with one action verb (`Enable`, `Tighten`, `Verify`, `Add`, `Document`) and the exact rule/flag/check/file/surface.
 - Label the callout `★ Guardrail`, never `★ Insight`; one callout per turn, never one per surface.
 - These are recommendations, not a substitute for tests, typechecks, runtime checks, or review.
-
-### Baselines
-
-Prefer these before suggesting a guardrail:
-
-- ESLint: `@typescript-eslint`, `eslint-plugin-react`, `eslint-plugin-react-hooks`, `eslint-plugin-jsx-a11y`, `eslint-plugin-import`, `@tanstack/eslint-plugin-query`, `@nx/eslint-plugin`, core ESLint rules, and local `limerence/*` workspace rules.
-- TypeScript: flags already used here — `strict`, `isolatedModules`, `useUnknownInCatchVariables`, `noEmitOnError`, `noFallthroughCasesInSwitch`, `noImplicitOverride`, `noImplicitReturns`, `verbatimModuleSyntax` — and patterns like discriminated unions, `satisfies`, exhaustive checks, and const objects plus union types.
-- CI/Nx: established targets such as `nx run <projectName>:typecheck`, `nx run <projectName>:test`, `nx run-many -t test`, project `build` targets, and existing workflows under `.github/workflows/`.
-- Agent Guidance: targeted updates to `AGENTS.md`, existing skills, output styles, or commands when the issue is behavioral rather than mechanically lintable.

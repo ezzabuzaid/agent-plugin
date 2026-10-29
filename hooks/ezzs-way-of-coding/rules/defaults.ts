@@ -34,6 +34,8 @@ const agentIs =
 
 const HARVEST_SCAN =
   'SESSION HARVEST: Scan recent messages for unsaved user preferences, corrections, or clarifications.';
+const HARVEST_ROUTE =
+  'Before saving a correction, ask whether a machine could check it (a type, lint rule, git hook, CI step, agent hook or permission rule). If yes, follow the guardrail skill; if its check is not built in this session, save the memory and name the follow-up that will build it.';
 const HARVEST_QUIET = 'If nothing is new, do nothing silently.';
 
 export const defaultsRules: ReminderRule[] = [
@@ -59,6 +61,7 @@ export const defaultsRules: ReminderRule[] = [
     when: agentIs('claude'),
     message: [
       HARVEST_SCAN,
+      HARVEST_ROUTE,
       'If any, save them to auto-memory and update MEMORY.md. If a skill was used and the user gave feedback on it, save a reflection to ~/.claude/skills-reflections/<YYYY-MM-DD>-<skill-name>.md.',
       HARVEST_QUIET,
     ].join(' '),
@@ -70,6 +73,7 @@ export const defaultsRules: ReminderRule[] = [
     when: agentIs('codex'),
     message: [
       HARVEST_SCAN,
+      HARVEST_ROUTE,
       'If any, save each one as an ad-hoc memory note at ~/.codex/memories/extensions/ad_hoc/notes/<YYYYMMDDTHHMMSS>-<slug>.md; Codex consolidates those notes into its memories. If a skill was used and the user gave feedback on it, save that feedback as a note too and name the skill.',
       HARVEST_QUIET,
     ].join(' '),
@@ -81,6 +85,7 @@ export const defaultsRules: ReminderRule[] = [
     when: agentIs(undefined),
     message: [
       HARVEST_SCAN,
+      HARVEST_ROUTE,
       'If any, save them to this agent’s persistent memory. If a skill was used and the user gave feedback on it, save that feedback and name the skill.',
       HARVEST_QUIET,
     ].join(' '),

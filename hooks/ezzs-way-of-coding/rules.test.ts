@@ -733,6 +733,31 @@ test('session harvest names Claude memory paths in a Claude session', async () =
   assert.doesNotMatch(context, /~\/\.codex/);
 });
 
+test('session harvest sends a correction a machine could check to the guardrail skill in every agent', async () => {
+  const codexContext = await evaluateWithTranscript(
+    [
+      { type: 'session_meta', payload: { id: 'session-1', originator: 'codex_cli_rs' } },
+      { type: 'response_item', payload: { type: 'message', role: 'user' } },
+    ],
+    'yes',
+  );
+  const claudeContext = await evaluateWithTranscript(
+    [{ type: 'user', message: { role: 'user', content: 'First request' } }],
+    'yes',
+  );
+  const noTranscriptOutput = await evaluateReminderHook(
+    { hook_event_name: 'UserPromptSubmit', prompt: 'yes' },
+    ezzsWayOfCodingConfig,
+  );
+  const noTranscriptContext =
+    noTranscriptOutput?.hookSpecificOutput?.additionalContext ?? '';
+
+  for (const context of [codexContext, claudeContext, noTranscriptContext]) {
+    assert.match(context, /\[prompt:session-harvest\]/);
+    assert.match(context, /follow the guardrail skill/);
+  }
+});
+
 test('session harvest names no agent paths without a readable transcript', async () => {
   for (const transcriptPath of [undefined, '/missing/transcript.jsonl']) {
     const output = await evaluateReminderHook(
