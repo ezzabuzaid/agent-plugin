@@ -42,10 +42,10 @@ Start at rung 1. Take the first rung where the check is exact. If two checks are
 
 1. **Run the test.** Done when: you have the violation, its place and the measured hit count, or the rule went back to the caller.
 2. **Pick the rung.** Done when: you named the highest rung with an exact check, and why each higher rung fails.
-3. **Prefer what exists.** Look in this order: a check that the repo already configures; a built-in or core rule or option; a maintained package; custom code last. For a package, search the registry and read the plugin's rule list. Look at its maintenance and its last publish. If a broader existing rule can cover the case after a small change to the code, change the code before you write an exact custom rule. Never name a rule, flag, target or hook event from memory. Confirm in the tool's docs or source that it exists. Done when: each name you give has a source.
-4. **Name the home.** Read the destination policy from the user's instructions (CLAUDE.md) or from the repo's AGENTS.md. For example, a rule that is true for every repo can have a different home than a rule for one repo. When a package owns the tool, follow the docs of that package. Never invent a home. Done when: the home is a file or a package that the policy names.
+3. **Prefer what exists.** Look in this order: a check that the repo already configures; a built-in or core rule or option; a maintained package; custom code last. For a package, search the registry and read the plugin's rule list. Look at its maintenance and its last publish. If a broader existing rule can cover the case after a small change to the code, change the code before you write an exact custom rule. Never name a rule, flag, target or hook event from memory. Confirm in the tool's docs or source that it exists. Before you change an existing default, rule or config, find out why it is so: search the history (git log, ADRs, the backlog, memories). If it was a deliberate choice, return the change to the caller as a decision. Done when: each name you give has a source.
+4. **Name the home.** Read the destination policy from the user's instructions (CLAUDE.md) or from the repo's AGENTS.md. For example, a rule that is true for every repo can have a different home than a rule for one repo. When a package owns the tool, follow the docs of that package. Never invent a home. If the policy names no home for this kind of tool, propose the narrowest home that covers every place where the rule applies, and mark it `proposed` for the caller. Done when: the home is a file or a package that the policy names, or a marked proposal.
 5. **Confirm the trigger.** Find what runs the check: a CI step, a target that depends on lint, a pre-commit hook or a registered agent hook. If nothing runs it, the check is only a reminder. Done when: you named the gate and the event that starts it.
-6. **Prove it.** Make a probe that violates the rule, and see the check fail. Run the good case, and see it pass. For a rule set in config, confirm the value that wins, for example with `eslint --print-config <file>`. ESLint flat config replaces the options of a rule by its key, and a later config object silently replaces an earlier one. Done when: you have the output of the failing probe and of the passing good case.
+6. **Prove it.** Make a probe that violates the rule, and see the check fail. Run the good case, and see it pass. For a rule set in config, confirm the value that wins, for example with `eslint --print-config <file>`. ESLint flat config replaces the options of a rule by its key, and a later config object silently replaces an earlier one. Done when: you have the output of the failing probe and of the passing good case. If you cannot run the probe (for example, the task is read-only), write why and the exact command that runs it.
 7. **Split the remainder.** The part of the rule that the check does not cover stays a reminder. Done when: you return the remainder in the output, or write `none`.
 
 ## Output
@@ -59,10 +59,10 @@ violation: <one concrete example a machine would see>
 lives in:  <types | code | workspace files | commit | commit message | push | CI | remote repo | agent command | agent edit | turn end | none>
 rung:      <eliminate | block | catch late | remind>
 tool:      existing: <name> | new: <name> — <why nothing existing fits>
-home:      <file or package, per the destination policy>
+home:      <file or package, per the destination policy> | proposed: <home>
 exact:     <yes | no> — <hits on good code, measured: N of M>
 trigger:   <what runs it>
-proof:     <probe that failed; good case that passed>
+proof:     <probe that failed; good case that passed> | not run: <why>; <command that runs it>
 remainder: <what no check covers, returned to the caller> | none
 ```
 
