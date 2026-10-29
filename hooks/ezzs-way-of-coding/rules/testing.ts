@@ -30,6 +30,6 @@ export const testingRules: ReminderRule[] = [
       contentPattern(/\b(tests?|specs?|coverage|e2e)\b/i),
     ),
     message:
-      "Use the runtime's built-in test runner and assert (node --test / bun test) — never jest, vitest, or another test library. Exercise real behavior through integration and black-box tests against the public contract; if a test must reach into private or protected internals, rewrite it. Keep each test self-contained AAA with teardown in try/finally; no before/after lifecycle hooks and no pre-seeded shared state.",
+      "Use the runtime's built-in test runner and assert (node --test / bun test). In a Vite-based app, favour Vitest instead: it runs the app's own Vite config and transforms (JSX, CSS, aliases). Never jest or another test library. Exercise real behavior through integration and black-box tests against the public contract; if a test must reach into private or protected internals, rewrite it. Keep each test self-contained AAA with teardown in try/finally; no before/after lifecycle hooks and no pre-seeded shared state.",
   },
 ];
