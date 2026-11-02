@@ -80,7 +80,7 @@ Nothing about a repo's test setup is fixed, so `test-discoverer` maps it fresh e
 ## Gotchas
 
 - **The test assembles its own inputs or wiring** → it can't detect the subject failing to provide them; an empty spread stays green. Drive the real entry point.
-- **The test needs a factory, option, export, `?` on a type, or env branch in production code** → the test exercises a composition no user runs, and the impossible branch spreads to every consumer. Change the test. If it still can't reach the behavior, report that.
+- **The test needs a factory, option, export, `?` on a type, or env branch in production code** → the test exercises a composition no user runs, and the impossible branch spreads to every consumer. Change the test. If it still can't reach the behavior, report that. The one exception is a clock: a library that waits or reads the time takes it as an input ([RULINGS.md](references/RULINGS.md), "The clock is an input, not a seam").
 - **App wiring gets extracted so a test can reach it** → the one file that shows how the app is assembled gets harder to read. Keep it inline and verify by running the entry for real.
 - **It asserts request shape, helper calls, or call counts between internal modules** → it fails on harmless refactors and misses real breaks. Assert what a consumer reads, or what crossed the boundary.
 - **A boundary stub answers everything** → a dropped field still passes. Make the stub answer only what the request asked for.

@@ -28,7 +28,9 @@ Every gate question and gotcha in [SKILL.md](../SKILL.md) comes from a correctio
 
 **Wiring stays inline.** _"inline exportAllStreams man"_ and, on extracting the error handler, _"I refuse. get the error handler back inline not in another file."_ If the entry loses its test seam, drop the entry-level test and run the entry for real. `experiments-context-compiler/entry-scripts-stay-inline.md`, `January-text2sql/feedback-app-plumbing-stays-inline-in-app-ts.md`
 
-**Don't downgrade production to keep a mock green.** If `mock.timers` can't intercept `node:timers/promises`, the test is at the wrong layer. `January-deepagents/feedback_modern_apis_tests_test_public_behavior.md`
+**Don't downgrade production to keep a mock green.** If `mock.timers` can't intercept `node:timers/promises`, the test is at the wrong layer. For time, the fix is the clock input below, not a test at another layer. `January-deepagents/feedback_modern_apis_tests_test_public_behavior.md`
+
+**The clock is an input, not a seam.** _"clock as an input."_ (2026-11-02). A census found 2,278 tests in 19 repositories that depend on time. They slept, asserted elapsed times, and waited up to 65 seconds. Real time can not reach a long fixed wait, an exact order under load, a check that nothing happened, or a wall clock that jumps. Node has no interception for time in one test, as msw has for HTTP. Thus a library that waits or reads the time takes the clock as a required input, the way it takes a store. The type has only the members that the library calls. An app entry gives `globalThis`. A test gives `createClock()` of `@sinonjs/fake-timers` and moves it with `await clock.tickAsync(ms)`. This ruling is the one exception to "No test seams" and "No fakes", and only for the clock. Global fake timers (`mock.timers`, `install()`) stay wrong: they change the process of the test. A decision about "now" stays a function that takes the time as an argument. `experiments-mutex/time-primitives-standard.md`, zukhruf `docs/adr/0004-a-library-that-waits-takes-the-clock-as-an-input.md`
 
 ## Arrange with real things
 
@@ -36,7 +38,7 @@ Every gate question and gotcha in [SKILL.md](../SKILL.md) comes from a correctio
 
 **Stubs are a last resort.** _"stubs and mocks only for losers. they are last resort. we do black box testing."_ Run the real Better Auth server on its memory adapter over loopback. Integration tests that seeded rows straight into Prisma were green while the live flow failed with a 400: _"enough with tests that give false positives. do black box testing, man"_. `January-text2sql/feedback-black-box-tests-stubs-last-resort.md`
 
-**No fakes, even if the task asks for one.** _"always real test no fake or in memory even if the task says so."_ If a branch can't be reproduced for real, give Ezz the choice: extend the API, write a test-local real helper, or accept the gap. `January-deepagents/feedback_no_fakes_in_tests.md`. Assert observable state, not `mock.fn()` counts: `January-text2sql/feedback_integration_tests_no_mocks.md`
+**No fakes, even if the task asks for one.** _"always real test no fake or in memory even if the task says so."_ If a branch can't be reproduced for real, give Ezz the choice: extend the API, write a test-local real helper, or accept the gap. The clock is the one exception (see "The clock is an input, not a seam"). `January-deepagents/feedback_no_fakes_in_tests.md`. Assert observable state, not `mock.fn()` counts: `January-text2sql/feedback_integration_tests_no_mocks.md`
 
 **Intercept at the wire.** A fake exporter hid a real OpenAI Traces 400 because it skipped `JSON.stringify`. `nock` on the endpoint runs the real encoder. (That memory's `beforeEach(nock.cleanAll)` is overridden by the no-hooks rule. Clean up in `finally`.) `January-deepagents/feedback_no_fakes_use_nock.md`
 
