@@ -862,6 +862,39 @@ test('real named tests survive a project wrapper and file-like names without cou
   }
 });
 
+// Like Nx's --output-style=stream, Turborepo or `pnpm -r`: every line the tests
+// print reaches mutate behind the project's name.
+test('a runner that prefixes every output line with the project name still yields the evidence, and a caught mutation is CAUGHT', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
+  try {
+    const prefixing = [
+      "import { spawn } from 'node:child_process';",
+      "import { createInterface } from 'node:readline';",
+      "const child = spawn(process.execPath, process.argv.slice(2), { stdio: ['ignore', 'pipe', 'pipe'] });",
+      "for (const stream of [child.stdout, child.stderr]) createInterface({ input: stream }).on('line', (line) => console.log(`proj: ${line}`));",
+      "child.on('close', (status) => (process.exitCode = status));",
+      '',
+    ].join('\n');
+    const { copy } = copyOf(root, { 'run.mjs': prefixing, 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
+
+    const { status, lines, of } = await mutate(root, {
+      copy,
+      command: [process.execPath, 'run.mjs', ...nodeTests(['src/']).slice(1)],
+      timeoutSeconds: 60,
+      mutations: [{ id: 'P1', claim: 'clamp caps at ten', edits: [{ file: 'src/clamp.mjs', find: '10', replace: '11' }] }],
+    });
+
+    assert.equal(status, 0);
+    const baseline = lines.find((line) => line.kind === 'baseline');
+    assert.equal(baseline.verdict, 'PASS');
+    assert.deepEqual(baseline.tests, { run: 1, pass: 1, fail: 0, cancelled: 0 });
+    assert.equal(of('P1').verdict, 'CAUGHT');
+    assert.deepEqual(of('P1').tests, { run: 1, pass: 0, fail: 1, cancelled: 0 });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // --test-force-exit exits once the first reporter on a shared destination ends,
 // so the evidence reporter must write its line before then.
 test('a Node run with --test-force-exit still yields structured evidence beside the human reporter', async () => {

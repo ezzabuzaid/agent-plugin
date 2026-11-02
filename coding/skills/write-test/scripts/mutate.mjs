@@ -51,7 +51,9 @@
 // Baselines without structured evidence, or with no passing named test, are
 // INVALID-BASELINE. A mutation with zero executed tests is INVALID, not SURVIVED.
 // WRITE_TEST_REPORT_ID correlates each command's evidence; wrappers must pass
-// that environment variable through. Human summary counts are not evidence.
+// that environment variable through. A wrapper may put text in front of each
+// line, such as Nx's `<project>: ` with --output-style=stream; the evidence is
+// found anywhere in its line. Human summary counts are not evidence.
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -98,15 +100,19 @@ const leftOutHint = manifest?.ignoredLeftOut?.length
 
 // Human reporters count an empty test file as a pass. Only the companion
 // reporter's structured per-file summaries establish that named tests ran.
+// The record runs from its marker to the end of the line, wherever the marker
+// sits: runners such as Nx's stream output style, Turborepo and `pnpm -r` put
+// the project's name in front of every line. The marker holds this run's
+// random id, so no other output can match it.
 function totals(output, reportId) {
-  const prefix = `write-test:${reportId}:`;
-  const reports = output.split('\n').filter((line) => line.startsWith(prefix));
+  const marker = `write-test:${reportId}:`;
+  const reports = output.split('\n').filter((line) => line.includes(marker));
   if (!reports.length) return null;
   const result = { run: 0, pass: 0, fail: 0, cancelled: 0 };
   for (const line of reports) {
     let counts;
     try {
-      counts = JSON.parse(line.slice(prefix.length));
+      counts = JSON.parse(line.slice(line.indexOf(marker) + marker.length));
     } catch {
       return null;
     }
