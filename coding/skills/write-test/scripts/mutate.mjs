@@ -1,19 +1,35 @@
 #!/usr/bin/env node
-// Runs mutations against a scratch copy (made by scratch-copy.mjs) and says,
-// per mutation, whether the tests caught it.
+// Runs mutations and says, per mutation, whether the tests caught it.
 //
 //   node mutate.mjs <<'JSON'
 //   { ...the spec... }
 //   JSON
 //
-// The spec comes on stdin, the report goes to stdout, and `copy` must be
-// absolute, so nothing a run reads or writes depends on the shell's working
-// directory: a prover whose `cd` failed leaves no file in the tree its shell is in.
+// A mutant lives in one of two places:
+// - In memory (no "copy"): each mutant exists only in the Node processes of its
+//   own run. mutant-hook.mjs, loaded through NODE_OPTIONS=--import, edits a
+//   file's source as Node loads it, so nothing is copied, written, rebuilt or
+//   restored, and other sessions keep building and testing the same tree. It
+//   reaches every Node process the run starts with its environment, a
+//   TypeScript source before Node strips its types, and require() as well as
+//   import. Edit the file the tests load: a source they import directly, or a
+//   dependency's built output. A file no process loaded is INVALID ("never
+//   loaded"); so is a process that clears its environment before loading it.
+// - In a scratch copy ("copy", made by scratch-copy.mjs): the edits are written
+//   into the copy and restored after each run. Use it for what a Node load hook
+//   cannot reach: CSS, JSON or Rust files, claims only a type checker can see,
+//   and code a bundler such as Vite transforms before Node loads it.
+//
+// The spec comes on stdin, the report goes to stdout, and the directory the
+// command runs in is absolute, so nothing a run reads or writes depends on the
+// shell's working directory: a prover whose `cd` failed leaves no file in the
+// tree its shell is in.
 //
 // The spec:
 //   {
-//     "copy": "/abs/path/to/copy",             // the path scratch-copy printed
-//     "cwd": "packages/queue",                 // optional, relative to the copy
+//     "copy": "/abs/path/to/copy",             // optional, the path scratch-copy printed
+//     "cwd": "/abs/dir",                       // where the command runs: absolute in memory;
+//                                              // with a copy, optional and relative to it
 //     "command": ["npx", "nx", "run", "queue:test", "--skip-nx-cache"],
 //     "env": { "NX_DAEMON": "false" },         // optional, added to this process's env
 //     "timeoutSeconds": 180,                   // per run, default 180
@@ -23,22 +39,24 @@
 //         "claim": "ledger row: what breaks",
 //         "edits": [{ "file": "src/index.ts", "find": "exact text", "replace": "new text" }],
 //         "command": [...],                    // optional override, baselined on its own
-//         "built": { "file": "dist/index.js", "contains": "new text" }  // optional
+//         "built": { "file": "dist/index.js", "contains": "new text" }  // optional, copy only
 //       }
 //     ]
 //   }
 //
-// `file` paths are relative to the copy; `cwd` is where the command runs.
+// `file` paths are relative to the copy, or in memory to `cwd` (or absolute).
 // Every distinct command runs once unmutated first (its baseline); a command
 // without a passing named test skips its mutations. Then each mutation: every `find` must
-// match exactly once or nothing is written; the command runs in its own process
-// group, killed on timeout; the files are restored from the copy's own content
-// and read back to prove it. With the copy's manifest, `drift` says whether the
-// real tree changed a mutated file since the copy was made.
+// match exactly once or nothing runs; the command runs in its own process
+// group, killed on timeout. In a copy, the files are restored from the copy's
+// own content and read back to prove it, and with the copy's manifest `drift`
+// says whether the real tree changed a mutated file since the copy was made.
+// In memory, `drift` says whether a mutated file changed during its run.
 //
 // Prints one JSON line per baseline and per mutation, then a summary line.
 // Verdicts: CAUGHT, SURVIVED, INVALID, UNPARSED, TIMEOUT, APPLY-FAILED, SKIPPED.
-// Exit codes: 0 all restores verified; 3 a restore failed; 1 bad spec.
+// Exit codes: 0 all restores verified (nothing to restore in memory); 3 a
+// restore failed; 1 bad spec.
 //
 // Configure Node's reporters in the command that actually runs the tests:
 //   node --test --test-reporter=spec --test-reporter=/abs/path/node-evidence.mjs \
@@ -56,10 +74,11 @@
 // found anywhere in its line. Human summary counts are not evidence.
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { constants as osConstants } from 'node:os';
-import { isAbsolute, join } from 'node:path';
+import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { constants as osConstants, tmpdir } from 'node:os';
+import { isAbsolute, join, resolve } from 'node:path';
 import { text } from 'node:stream/consumers';
+import { pathToFileURL } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
 
 function badSpec(reason) {
@@ -73,19 +92,29 @@ if (process.argv.length > 2) badSpec('mutate.mjs takes no arguments: pipe the sp
 const spec = await text(process.stdin)
   .then(JSON.parse)
   .catch((error) => badSpec(`the spec on stdin is not JSON: ${error.message}`));
-if (typeof spec?.copy !== 'string' || !Array.isArray(spec.command) || !Array.isArray(spec.mutations)) {
-  badSpec('the spec on stdin needs "copy", a "command" argv array, and a "mutations" array');
-}
-if (!isAbsolute(spec.copy)) {
-  badSpec(`"copy" must be the absolute path scratch-copy printed, not ${JSON.stringify(spec.copy)}`);
+if (!Array.isArray(spec?.command) || !Array.isArray(spec.mutations)) {
+  badSpec('the spec on stdin needs a "command" argv array and a "mutations" array');
 }
 const copy = spec.copy;
+if (copy !== undefined && (typeof copy !== 'string' || !isAbsolute(copy))) {
+  badSpec(`"copy" must be the absolute path scratch-copy printed, not ${JSON.stringify(copy)}`);
+}
+const inMemory = copy === undefined;
+if (inMemory && (typeof spec.cwd !== 'string' || !isAbsolute(spec.cwd))) {
+  badSpec(`without "copy", "cwd" must be the absolute directory the command runs in, not ${JSON.stringify(spec.cwd)}`);
+}
+if (inMemory && spec.mutations.some((mutation) => mutation.built)) {
+  badSpec('"built" checks the build output of a copy; in memory nothing is built, so edit the built file itself');
+}
+const workdir = inMemory ? spec.cwd : join(copy, spec.cwd ?? '.');
+const pathOf = (file) => (inMemory ? resolve(spec.cwd, file) : join(copy, file));
 const timeoutMs = (spec.timeoutSeconds ?? 180) * 1000;
 
 const emit = (line) => console.log(JSON.stringify(line));
 
 // The manifest scratch-copy wrote: what it left out, and each source file's hash.
 const manifest = (() => {
+  if (inMemory) return null;
   try {
     return JSON.parse(readFileSync(join(copy, '.write-test-copy.json'), 'utf8'));
   } catch {
@@ -159,12 +188,12 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
 
 // Runs the command as the leader of its own process group, so everything it
 // starts (test workers, a hung grandchild) can be stopped together.
-function run(command) {
+function run(command, mutantEnv = {}) {
   return new Promise((done) => {
     const reportId = randomUUID();
     const child = spawn(command[0], command.slice(1), {
-      cwd: join(copy, spec.cwd ?? '.'),
-      env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0', ...spec.env, WRITE_TEST_REPORT_ID: reportId },
+      cwd: workdir,
+      env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0', ...spec.env, ...mutantEnv, WRITE_TEST_REPORT_ID: reportId },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
     });
@@ -239,19 +268,64 @@ function notInBuild(built) {
 }
 
 // Applies every edit to the files' text in memory first, so a mutation whose
-// edits don't all match leaves the copy untouched.
-function apply(edits) {
+// edits don't all match changes nothing and runs nothing.
+function mutatedTexts(edits) {
   const original = new Map();
   const mutated = new Map();
   for (const [index, { file, find, replace }] of edits.entries()) {
-    if (!original.has(file)) original.set(file, readFileSync(join(copy, file), 'utf8'));
+    if (!original.has(file)) original.set(file, readFileSync(pathOf(file), 'utf8'));
     const text = mutated.get(file) ?? original.get(file);
     const count = text.split(find).length - 1;
     if (count !== 1) return { error: `edit ${index + 1} (${file}): find matched ${count} times, expected exactly 1` };
     mutated.set(file, text.replace(find, () => replace));
   }
-  for (const [file, text] of mutated) writeFileSync(join(copy, file), text);
-  return { original };
+  return { original, mutated };
+}
+
+// The hook that carries an in-memory mutant into the run's Node processes. It
+// joins whatever NODE_OPTIONS the run already has, never replacing them.
+const hook = pathToFileURL(join(import.meta.dirname, 'mutant-hook.mjs')).href;
+const inheritedNodeOptions = { ...process.env, ...spec.env }.NODE_OPTIONS;
+
+const urlOf = (file) => {
+  try {
+    return pathToFileURL(realpathSync(pathOf(file))).href;
+  } catch {
+    return null;
+  }
+};
+
+// Runs one mutant that exists only in the memory of the run's processes. Each
+// process that loads a mutated file logs it; a mutant no process loaded proves
+// nothing, so it is INVALID rather than SURVIVED.
+async function proveInMemory(mutation, original) {
+  const log = join(tmpdir(), `write-test-mutant-${randomUUID()}.jsonl`);
+  const edits = mutation.edits.map((edit) => ({ ...edit, file: pathOf(edit.file) }));
+  const result = await run(commandOf(mutation), {
+    WRITE_TEST_MUTANT: JSON.stringify({ log, edits }),
+    NODE_OPTIONS: [inheritedNodeOptions, `--import=${hook}`].filter(Boolean).join(' '),
+  });
+  const loads = existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line)) : [];
+  rmSync(log, { force: true });
+  const drift = [...original].some(([file, text]) => !existsSync(pathOf(file)) || readFileSync(pathOf(file), 'utf8') !== text);
+  const evidence = {
+    loadedBy: new Set(loads.filter((load) => load.applied).map((load) => load.pid)).size,
+    drift,
+    exit: result.exit,
+    tests: result.tests,
+    excerpt: excerpt(result.output),
+  };
+  const mismatch = loads.find((load) => !load.applied);
+  if (mismatch) {
+    return { verdict: 'INVALID', reason: `find does not match exactly once in the source Node loaded from ${mismatch.url}`, ...evidence };
+  }
+  const loaded = new Set(loads.map((load) => load.url));
+  const unloaded = [...original.keys()].filter((file) => !loaded.has(urlOf(file)));
+  if (unloaded.length) {
+    return { verdict: 'INVALID', reason: `mutant never loaded: no process of the run loaded ${unloaded.join(', ')}`, ...evidence };
+  }
+  if (result.timedOut) return { verdict: 'TIMEOUT', killedPids: result.killedPids, ...evidence };
+  return { ...classify(result), ...evidence };
 }
 
 // Writes the copy's own text back and reads it again to prove it. A failure is
@@ -295,17 +369,22 @@ for (const mutation of spec.mutations) {
   const { id, claim } = mutation;
   const report = (line) => {
     counts[line.verdict] = (counts[line.verdict] ?? 0) + 1;
-    emit({ kind: 'mutation', id, claim, ...line, drift: drifted(mutation.edits) });
+    emit({ kind: 'mutation', id, claim, drift: drifted(mutation.edits), ...line });
   };
   if (!baselines.get(JSON.stringify(commandOf(mutation)))) {
     report({ verdict: 'SKIPPED', reason: 'its command has no valid passing baseline (INVALID-BASELINE)' });
     continue;
   }
-  const applied = apply(mutation.edits);
+  const applied = mutatedTexts(mutation.edits);
   if (applied.error) {
     report({ verdict: 'APPLY-FAILED', reason: applied.error });
     continue;
   }
+  if (inMemory) {
+    report(await proveInMemory(mutation, applied.original));
+    continue;
+  }
+  for (const [file, text] of applied.mutated) writeFileSync(join(copy, file), text);
   active.original = applied.original;
   const result = await run(commandOf(mutation));
   const restoring = restore(applied.original);

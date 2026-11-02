@@ -33,8 +33,9 @@ in [`agents/`](./agents) do the reading and the judging:
 - **test-discoverer**: maps the repo's runner, surface, seams, and a precedent test.
 - **test-claim-comparator**: checks the claim ledger against the request and the ticket,
   which it finds and fetches itself. It never reads the tests.
-- **test-mutation-prover**: breaks the source in a scratch copy and reports CAUGHT or
-  SURVIVED per test, using the skill's `scripts/`.
+- **test-mutation-prover**: breaks the source in the memory of the test processes (or in a
+  scratch copy, for what Node cannot load) and reports CAUGHT or SURVIVED per test, using
+  the skill's `scripts/`.
 - **test-gotcha-reviewer**: checks the diff against the skill's gotchas.
 
 The scripts have their own tests: `node --test skills/write-test/scripts/*.test.mjs`.
