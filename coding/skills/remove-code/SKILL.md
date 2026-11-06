@@ -116,7 +116,13 @@ offers, never that your removal is safe.
 
 - Capture the **baseline first** — run the repo's checks before touching anything and note
   what already fails, so a pre-existing or concurrent failure cannot be mistaken for yours.
-- Prefer an executable assertion the repo already owns over reasoning from source.
+- Prefer an executable assertion the repo already owns over reasoning from source, and
+  **confirm it reaches the site**: read the test, or break the site and watch it fail. A
+  suite that passes is not evidence it touches your change.
+- **No test reaches the site → write one first**, through `coding:write-test`, before the
+  edit. It passes on the old code (or goes RED first where the change alters behaviour on
+  purpose) and still passes after. A probe run once in the shell proves the day, not the
+  future: it is not the observation.
 - After a bulk edit, **grep the old shape to zero**. A patch that reports success is not
   evidence the sites are gone.
 - Name the proof boundary honestly: if two of seventeen touched projects were executed, say
@@ -128,14 +134,18 @@ repo-wide grep after a rename — from the repo's own agent instructions
 (`AGENTS.md` / `CLAUDE.md`) before you need them, not while reporting. A repo that
 documents none is itself a finding worth handing back.
 
-**Done when:** every removal has a named, executed observation, or is listed as *unproven*
-at the top of the report — not as a closing caveat.
+**Done when:** every removal is observed by a test that reaches it — one the repo owns, or one
+written first. *Unproven* is only for a site no test can reach; say why, at the top of the
+report — not as a closing caveat.
 
 *Why:* one run closed with "build ✓, eslint ✓, prettier ✓, `fmt -check` ✓" having just
 shipped staging logs stamped `environment: "production"` into the production stream. One
 batched eleven edits across four files before its first verification and had to unwind the
 first edit from a fourteen-error pile. One spent five turns proving a red build belonged to
-another agent because no baseline was taken.
+another agent because no baseline was taken. One applied a dozen native-API swaps across a
+monorepo, proving four of them (a content-type parser with a behaviour change among them) by
+shell probes that were never committed, so nothing guards them now (Ezz, 2026-11-06: "does
+the skill write regression test before it changes things?").
 
 ### 6. Self-audit — apply all of the above to what the change ADDED
 
