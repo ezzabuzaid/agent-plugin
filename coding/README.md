@@ -55,6 +55,23 @@ prefers a check that already exists, and proves that the check fires.
 [`REFERENCE.md`](./skills/guardrail/REFERENCE.md) maps each place where a violation lives to
 its tool.
 
+## node-native skill
+
+[`skills/node-native`](./skills/node-native/SKILL.md) reads a repo and reports what the
+current Node LTS already does for it: dependencies with a native replacement (chalk →
+`util.styleText`), hand-written code that re-implements a native API (a `deferred()` helper →
+`Promise.withResolvers`), and calls to APIs that Node deprecated. The current LTS is the only
+yardstick; the repo's declared Node version is ignored. Every claim comes from a probe that
+ran: each module in [`catalog/`](./skills/node-native/catalog) runs a package and Node on the
+same input and compares the results, row by row. The scan is read-only; `remove-code` applies
+its findings.
+
+[`skills/node-native-refresh`](./skills/node-native-refresh/SKILL.md) runs only when you
+start it, after a new LTS ships. It rebuilds the surface snapshot (every API the LTS ships)
+and runs every probe again, so a gap that Node has closed shows up as `gap-closed`.
+
+The scripts have their own tests: `node --test skills/node-native/scripts/*.test.mjs`.
+
 ## Install
 
 ```
