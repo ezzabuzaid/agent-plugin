@@ -545,6 +545,10 @@ test('bash error reminder ignores successful output that mentions failure words'
     ['file README.md', 'README.md: ASCII text'],
     ["node -e 'const a = 1;\n// prints a\nconsole.log(a)'", '1'],
     ["python3 - <<'EOF'\nstatus = 'ok'\nprint(f'status: {status}')\nEOF", 'status: ok'],
+    // Text that quotes a tsc diagnostic is not a diagnostic.
+    ["sed -n '50,60p' rules/failures.ts", "  /(?:^|\\): )error TS\\d+: /, // rules.ts(4,2): error TS2345: ..."],
+    ['node --test readme.test.ts | tail -4', '    actual: "readme-api.mts(42,10): error TS2304: Cannot find name \'WallClock\'.\\n",'],
+    ['grep -n "error TS" rules.test.ts', `rules.test.ts:565:    ['npx tsc --noEmit | head -5', "rules.test.ts(497,47): error TS2345: Argument of type 'string' is not assignable."],`],
   ];
 
   for (const [command, stdout] of cases) {
@@ -563,6 +567,11 @@ test('bash error reminder fires on error lines a successful command hides', asyn
     ['npm install || true', 'npm ERR! code ERESOLVE'],
     ['foo; echo done', 'zsh: command not found: foo\ndone'],
     ['npx tsc --noEmit | head -5', "rules.test.ts(497,47): error TS2345: Argument of type 'string' is not assignable."],
+    ['npx tsc --noEmit | head -5', "error TS5083: Cannot read file '/repo/tsconfig.json'."],
+    // Nx's stream output style puts the project name in front of each line.
+    ['npx nx run elt:build | tail -3', "semantic-layer-elt: src/pipeline.ts(71,29): error TS2345: Argument of type '{ history: SQLiteSyncHistory; }' is not assignable."],
+    // tsc --pretty colors the location and the word error.
+    ['npx tsc --noEmit --pretty | head -5', "\x1b[96ma.ts\x1b[0m:\x1b[93m1\x1b[0m:\x1b[93m7\x1b[0m - \x1b[91merror\x1b[0m\x1b[90m TS2322: \x1b[0mType 'string' is not assignable to type 'number'."],
     ['ls x 2>&1 | cat', "ls: cannot access 'x': No such file or directory"],
   ];
 

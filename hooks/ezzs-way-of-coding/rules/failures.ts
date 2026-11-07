@@ -1,3 +1,5 @@
+import { stripVTControlCharacters } from 'node:util';
+
 import {
   always,
   type ClaudeHookInput,
@@ -53,9 +55,16 @@ const DIAGNOSTIC_LINE = [
   /^Traceback \(most recent call last\):/,
   /^(?:[\w$]+\.)*(?:[A-Z]\w*)?(?:Error|Exception): /, // TypeError: x is not a function
   /^npm (?:ERR!|error) /,
-  /(?:^|\): )error TS\d+: /, // rules.ts(4,2): error TS2345: ...
   /^(?:ba|z|k|da)?sh: /, // zsh: command not found: foo
 ];
+// tsc prints `a.ts(1,7): error TS2322: ...`, `a.ts:1:7 - error TS2322: ...`
+// with --pretty, and `error TS5083: ...` for a diagnostic with no file. Nx's
+// stream output style puts `<project>: ` in front of each line. Only a line
+// that starts with that shape counts, so text that quotes a diagnostic, such as
+// this comment printed by sed or grep, does not. --pretty colors the location
+// and the word error, so the shape is matched without the colors.
+const TSC_DIAGNOSTIC =
+  /^(?:[\w@./-]+: )?(?:[^\s("'`]+\(\d+,\d+\): |[^\s:"'`]+:\d+:\d+ - )?error TS\d+: /;
 const STDERR_FAILURE =
   /\b(?:error|fatal|failed|exception|traceback|not found|permission denied|no such file or directory|cannot)\b/i;
 
@@ -113,6 +122,7 @@ const bashOutputHasDiagnostic: HookPredicate = (ctx: ClaudeHookInput) => {
   const programs = programsOf(typeof command === 'string' ? command : '');
   const isDiagnostic = (line: string) =>
     DIAGNOSTIC_LINE.some((shape) => shape.test(line)) ||
+    TSC_DIAGNOSTIC.test(stripVTControlCharacters(line)) ||
     programs.has(/^([\w.-]+): /.exec(line)?.[1] ?? '');
   return (
     stdout.split('\n').some(isDiagnostic) ||
