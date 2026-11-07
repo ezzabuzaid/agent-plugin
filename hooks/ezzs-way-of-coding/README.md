@@ -20,6 +20,16 @@ The reminder to look for a similar implementation first fires only on a prompt
 that asks to build or change behavior. A reply such as "yes" or "commit it"
 does not get it.
 
+Claude Code runs `UserPromptSubmit` also for a turn that a subagent hand-back,
+a message from another Claude session or a background-task notification
+starts. The payload has no field for the origin, but Claude Code frames each of
+these prompts (`<agent-message …>`, `<cross-session-message …>`,
+`<task-notification>`). The prompt rules and the session harvest read only a
+prompt that the user typed. The `/wait-what` register does not read the prompt
+text, so it stays on for every turn. The UI and dependency reminders fire on a
+phrase, such as "build a dashboard page" or "update the packages", not on two
+words anywhere in a long prompt.
+
 ```sh
 printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Build a custom executor."}' \
   | node hook.ts
