@@ -1,9 +1,33 @@
-import { contentPattern } from '@deepagents/experimental/coding-agent-reminders';
+import {
+  contentPattern,
+  not,
+} from '@deepagents/experimental/coding-agent-reminders';
+
+/**
+ * Claude Code runs UserPromptSubmit for each turn it starts, also for a turn
+ * that a subagent hand-back, a message from another Claude session or a
+ * background-task notification starts. The hook payload has no field that
+ * tells these apart (Claude Code 2.1.319 sends session_id, transcript_path,
+ * cwd, prompt_id, permission_mode, agent_id, agent_type, effort, prompt and
+ * session_title). Claude Code frames each of these prompts, and the frame is
+ * the start of `prompt`: `<agent-message …>` or `<cross-session-message …>`,
+ * with or without the line `Another Claude session sent a message:` in front,
+ * and `<task-notification>`. The transcript records the origin of the same
+ * entries as `origin.kind` `peer` and `task-notification`; no prompt whose
+ * origin is `human` starts with a frame. A relayed report talks about pages,
+ * packages and failures in its own words, so a prompt rule reads only what the
+ * user typed.
+ */
+export const typedByUser = not(
+  contentPattern(
+    /^(?:Another Claude session sent a message:\n)?<(?:agent-message|cross-session-message) |^<task-notification>\n/,
+  ),
+);
 
 /**
  * The prompt asks the agent to build or change behavior. These are the verbs
- * that package-api-first, ascii-before-ui and source-before-new-implementation
- * share; each rule adds its own extra verbs with `or`.
+ * that package-api-first and source-before-new-implementation share; each rule
+ * adds its own extra verbs with `or`.
  */
 export const asksToBuild = contentPattern(
   /\b(implement|build|add|create|change)\b/i,

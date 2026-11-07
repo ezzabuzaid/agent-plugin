@@ -5,6 +5,7 @@ import {
 } from '@deepagents/experimental/coding-agent-reminders';
 
 import { promptEvents } from './events.ts';
+import { typedByUser } from './intent.ts';
 
 export const infraRules: ReminderRule[] = [
   // Mined from virtual-care/infra + global CLAUDE.md (reminders-curator, 2026-07-10).
@@ -13,6 +14,7 @@ export const infraRules: ReminderRule[] = [
     target: 'prompt',
     events: promptEvents,
     when: and(
+      typedByUser,
       contentPattern(/\b(infra|infrastructure|terraform|pulumi|provision|deploy(?:ment)?)\b/i),
       contentPattern(
         /\b(cloud|gcp|gcloud|aws|azure|resources?|buckets?|vms?|clusters?|iam|service accounts?)\b/i,

@@ -223,6 +223,12 @@ test('mined reminders fire on matching prompts', async () => {
     ],
     ['builtin-test-runner-discipline', 'Write integration tests for the checkout flow.'],
     ['ascii-before-ui', 'Build a new dashboard page for usage metrics.'],
+    ['ascii-before-ui', 'Redesign the settings screen.'],
+    ['ascii-before-ui', "I'll create a simple page from which I will list all the links."],
+    ['ascii-before-ui', 'Add a confirmation modal before the delete.'],
+    ['dependency-upgrade-discipline', 'Update openai frameworks and related packages to see if the tickets still stand.'],
+    ['dependency-upgrade-discipline', 'Bump zod to the latest version.'],
+    ['dependency-upgrade-discipline', 'Which dependencies are outdated?'],
     ['infra-as-code-only', 'Provision a new GCS bucket for artifacts via terraform.'],
   ];
 
@@ -244,6 +250,16 @@ test('mined reminders stay quiet on near-miss prompts', async () => {
     ['preserve-existing-surface', 'Refactor the date parsing helper for clarity.'],
     ['builtin-test-runner-discipline', 'Investigate why the production build is failing.'],
     ['ascii-before-ui', 'Add pagination support to the list endpoint.'],
+    // A UI word and a build word far apart in one prompt, from prompts that
+    // got the reminder for no UI work.
+    ['ascii-before-ui', 'Change the retry count, then check that the docs site still has the same page.'],
+    ['ascii-before-ui', 'Build the package and send me the error from the last page of the log.'],
+    ['ascii-before-ui', "what is this\n\n    if (createHash('sha256').update(page.text).digest('hex') !== sha256)"],
+    ['ascii-before-ui', 'Make sure the release notes mention the new page.'],
+    // A package word and a version word far apart in one prompt.
+    ['dependency-upgrade-discipline', 'Pull the latest main and run the SDK tests.'],
+    ['dependency-upgrade-discipline', 'Package the CLI and print its version.'],
+    ['dependency-upgrade-discipline', 'Update the plan file, then publish the package.'],
     ['infra-as-code-only', 'Deploy the preview build to the static docs host.'],
   ];
 
@@ -714,6 +730,55 @@ test('the /wait-what register ignores a transcript that only quotes the skill', 
     );
   } finally {
     await rm(transcriptDirectory, { recursive: true, force: true });
+  }
+});
+
+// A body that asks for UI, dependency, test and fix work, so that the prompt
+// rules fire on it when the user types it.
+const RELAYED_BODY =
+  'Build a new dashboard page, upgrade the outdated SDK package versions, write tests for the checkout flow and fix the failing build.';
+
+// Claude Code runs UserPromptSubmit for each turn, also for a turn that a
+// subagent hand-back, a peer session or a background task starts. These are the
+// prompts it sends for them, from session transcripts.
+const RELAYED_PROMPTS = [
+  `Another Claude session sent a message:\n<agent-message from="a648d7e2a36a348d0">\n[Subagent hand-back] The report follows:\n  ${RELAYED_BODY}\n</agent-message>`,
+  `<agent-message from="a1a5defabbab40d16">\n[Subagent hand-back] The report follows:\n  ${RELAYED_BODY}\n</agent-message>`,
+  `Another Claude session sent a message:\n<cross-session-message from="uds:/tmp/cc-socks/84391.sock" from-name="evals-design" from-mode="prompting">\n${RELAYED_BODY}\n</cross-session-message>`,
+  `<cross-session-message from="uds:/tmp/cc-socks/84391.sock" from-name="evals-design" from-mode="prompting">\n${RELAYED_BODY}\n</cross-session-message>`,
+  `<task-notification>\n<task-id>b9i2ob8yk</task-id>\n<status>completed</status>\n<summary>${RELAYED_BODY}</summary>\n</task-notification>`,
+];
+
+test('prompt reminders fire on what the user typed', async () => {
+  const output = await evaluateReminderHook(
+    { hook_event_name: 'UserPromptSubmit', prompt: RELAYED_BODY },
+    ezzsWayOfCodingConfig,
+  );
+
+  const context = output?.hookSpecificOutput?.additionalContext ?? '';
+  for (const id of [
+    'ascii-before-ui',
+    'dependency-upgrade-discipline',
+    'builtin-test-runner-discipline',
+    'bug-reproduce-first',
+    'session-harvest',
+  ]) {
+    assert.match(context, new RegExp(`\\[prompt:${id}\\]`));
+  }
+});
+
+test('prompt reminders stay quiet on a turn that a hand-back, a peer message or a task notification starts', async () => {
+  for (const prompt of RELAYED_PROMPTS) {
+    const output = await evaluateReminderHook(
+      { hook_event_name: 'UserPromptSubmit', prompt },
+      ezzsWayOfCodingConfig,
+    );
+
+    assert.doesNotMatch(
+      output?.hookSpecificOutput?.additionalContext ?? '',
+      /\[prompt:/,
+      prompt,
+    );
   }
 });
 

@@ -5,6 +5,7 @@ import {
 } from '@deepagents/experimental/coding-agent-reminders';
 
 import { promptEvents } from './events.ts';
+import { typedByUser } from './intent.ts';
 
 export const testingRules: ReminderRule[] = [
   {
@@ -12,6 +13,7 @@ export const testingRules: ReminderRule[] = [
     target: 'prompt',
     events: promptEvents,
     when: and(
+      typedByUser,
       contentPattern(/\b(refactor|migrate|migration|move|restructure|rewrite)\b/i),
       contentPattern(
         /\b(existing|behavior|flow|interaction|component|system|architecture)\b/i,
@@ -26,6 +28,7 @@ export const testingRules: ReminderRule[] = [
     target: 'prompt',
     events: promptEvents,
     when: and(
+      typedByUser,
       contentPattern(/\b(write|add|create|update|fix|generate|cover)\b/i),
       contentPattern(/\b(tests?|specs?|coverage|e2e)\b/i),
     ),

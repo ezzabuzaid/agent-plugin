@@ -5,6 +5,7 @@ import {
 } from '@deepagents/experimental/coding-agent-reminders';
 
 import { promptEvents } from './events.ts';
+import { typedByUser } from './intent.ts';
 
 export const changeSafetyRules: ReminderRule[] = [
   // Mined from 7+ AGENTS.md files (reminders-curator, 2026-07-10).
@@ -13,6 +14,7 @@ export const changeSafetyRules: ReminderRule[] = [
     target: 'prompt',
     events: promptEvents,
     when: and(
+      typedByUser,
       contentPattern(
         /\b(refactor|redesign|rework|simplify|clean ?up|migrate|rebuild|replace|consolidate|streamline|remove|rename)\b/i,
       ),
@@ -28,6 +30,7 @@ export const changeSafetyRules: ReminderRule[] = [
     target: 'prompt',
     events: promptEvents,
     when: and(
+      typedByUser,
       contentPattern(
         /\b(delete|remove|drop|truncate|prune|purge|wipe|destroy|cleanup|clean up)\b/i,
       ),
@@ -42,9 +45,16 @@ export const changeSafetyRules: ReminderRule[] = [
     id: 'dependency-upgrade-discipline',
     target: 'prompt',
     events: promptEvents,
+    // The upgrade verb and the package word must be one phrase, in one
+    // sentence: "update openai frameworks and related packages", "bump zod to
+    // the latest", "which dependencies are outdated". As two words anywhere in
+    // the prompt, they also matched "SDK" with "latest main" and "package" with
+    // "version" in a pasted hand-off.
     when: and(
-      contentPattern(/\b(dependency|dependencies|package|packages|library|SDK)\b/i),
-      contentPattern(/\b(upgrade|update|outdated|bump|latest|version|sweep)\b/i),
+      typedByUser,
+      contentPattern(
+        /\b(?:upgrade|update|bump)\s+(?:\S*[^\s.;!?]\s+){0,4}(?:dependency|dependencies|deps|packages?|library|libraries|SDKs?|to (?:the )?latest)\b|\b(?:dependency|dependencies|deps|packages?|library|libraries|SDKs?)\s+(?:\S*[^\s.;!?]\s+){0,2}(?:outdated|upgrades?|updates?|bumps?)\b/i,
+      ),
     ),
     message:
       'Read the current manifests, lockfile, and installed versions before changing dependencies. Prefer the smallest viable safe upgrade lane and separate breaking or migration work explicitly.',

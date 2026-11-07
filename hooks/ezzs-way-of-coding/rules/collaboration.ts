@@ -7,7 +7,7 @@ import {
 } from '@deepagents/experimental/coding-agent-reminders';
 
 import { promptEvents } from './events.ts';
-import { asksToBuild } from './intent.ts';
+import { asksToBuild, typedByUser } from './intent.ts';
 import { readTranscriptEntries, type TranscriptEntry } from './transcript.ts';
 
 /**
@@ -57,6 +57,7 @@ export const collaborationRules: ReminderRule[] = [
     target: 'prompt',
     events: promptEvents,
     when: and(
+      typedByUser,
       contentPattern(/\b(product|architecture|design|concept|proposal|plan)\b/i),
       contentPattern(
         /\b(discuss|talk|evaluate|review|envision|picture|make sense|what do you think|finalize)\b/i,
@@ -69,9 +70,12 @@ export const collaborationRules: ReminderRule[] = [
     id: 'source-before-new-implementation',
     target: 'prompt',
     events: ['UserPromptSubmit'],
-    when: or(
-      asksToBuild,
-      contentPattern(/\b(extend|integrate|wire|refactor|replace|fix)\b/i),
+    when: and(
+      typedByUser,
+      or(
+        asksToBuild,
+        contentPattern(/\b(extend|integrate|wire|refactor|replace|fix)\b/i),
+      ),
     ),
     message:
       'Look for a similar implementation in the codebase first. If none exists, probe the relevant behavior and read its source code before implementing it.',

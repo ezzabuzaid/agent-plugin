@@ -1,10 +1,12 @@
 import {
   always,
+  and,
   type ClaudeHookInput,
   type ReminderRule,
 } from '@deepagents/experimental/coding-agent-reminders';
 
 import { sessionEvents } from './events.ts';
+import { typedByUser } from './intent.ts';
 import { readTranscriptEntries } from './transcript.ts';
 
 type Agent = 'claude' | 'codex';
@@ -58,7 +60,7 @@ export const defaultsRules: ReminderRule[] = [
     id: 'session-harvest',
     target: 'prompt',
     events: ['UserPromptSubmit'],
-    when: agentIs('claude'),
+    when: and(typedByUser, agentIs('claude')),
     message: [
       HARVEST_SCAN,
       HARVEST_ROUTE,
@@ -70,7 +72,7 @@ export const defaultsRules: ReminderRule[] = [
     id: 'session-harvest',
     target: 'prompt',
     events: ['UserPromptSubmit'],
-    when: agentIs('codex'),
+    when: and(typedByUser, agentIs('codex')),
     message: [
       HARVEST_SCAN,
       HARVEST_ROUTE,
@@ -82,7 +84,7 @@ export const defaultsRules: ReminderRule[] = [
     id: 'session-harvest',
     target: 'prompt',
     events: ['UserPromptSubmit'],
-    when: agentIs(undefined),
+    when: and(typedByUser, agentIs(undefined)),
     message: [
       HARVEST_SCAN,
       HARVEST_ROUTE,
