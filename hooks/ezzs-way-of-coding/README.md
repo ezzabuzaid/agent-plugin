@@ -49,7 +49,10 @@ the root agent to store. The stop audit runs after every third completed
 assistant response, captures out-of-scope follow-ups, and closes backlog items
 completed or explicitly closed by the conversation: a closing note, then
 `agent-backlog done`. It never removes items, because a closed item and its
-notes are the record later sessions search. Upstream bug reports and
+notes are the record later sessions search. The audit does not run on a turn
+that ends while a subagent or a workflow that the session started still runs
+(Claude Code's `background_tasks` on Stop): that turn only waits. A shell or a
+monitor, such as a dev server, does not hold the audit back. Upstream bug reports and
 dev-tooling audit items (agent hooks, agent settings, test tooling) do not go
 to the backlog. The agent mentions each one once in its reply. Items are
 classified on two axes: `--kind feature|defect|risk|debt` (Unicorn Project

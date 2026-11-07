@@ -452,6 +452,65 @@ test('root stop cadence counts Claude turns without counting tool results or met
   }
 });
 
+// Claude Code sends the work still in flight on Stop as `background_tasks`,
+// with the task type as a display name.
+async function stopOnThirdTurn(backgroundTasks: unknown[]) {
+  const transcriptDirectory = await mkdtemp(
+    join(tmpdir(), 'ezzs-way-of-coding-claude-'),
+  );
+
+  try {
+    const transcriptPath = join(transcriptDirectory, 'transcript.jsonl');
+    const entries = ['First request', 'Second request', 'Third request'].map(
+      (content) => ({ type: 'user', message: { role: 'user', content } }),
+    );
+    await writeFile(
+      transcriptPath,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+
+    const output = await evaluateReminderHook(
+      {
+        hook_event_name: 'Stop',
+        transcript_path: transcriptPath,
+        background_tasks: backgroundTasks,
+      },
+      ezzsWayOfCodingConfig,
+    );
+    return output?.hookSpecificOutput?.additionalContext ?? '';
+  } finally {
+    await rm(transcriptDirectory, { recursive: true, force: true });
+  }
+}
+
+test('root stop audit waits while a subagent or a workflow it started still runs', async () => {
+  for (const task of [
+    { id: 'a3a963ff468395a67', type: 'subagent', status: 'running', description: 'Group C: #3958', agent_type: 'general-purpose' },
+    { id: 'w1', type: 'workflow', status: 'pending', description: 'Fix tickets', name: 'fix-tickets' },
+  ]) {
+    assert.doesNotMatch(
+      await stopOnThirdTurn([task]),
+      /audit-out-of-scope-followups/,
+      task.type,
+    );
+  }
+});
+
+test('root stop audit runs when no delegated work is in flight', async () => {
+  for (const backgroundTasks of [
+    [],
+    // A dev server or a watcher can run all session; it is not work the turn waits on.
+    [{ id: 'b9i2ob8yk', type: 'shell', status: 'running', description: 'npm run dev', command: 'npm run dev' }],
+    [{ id: 'm1', type: 'monitor', status: 'running', description: 'CI run', server: 'github', tool: 'watch' }],
+  ]) {
+    assert.match(
+      await stopOnThirdTurn(backgroundTasks),
+      /\[stop-feedback:audit-out-of-scope-followups\]/,
+      JSON.stringify(backgroundTasks),
+    );
+  }
+});
+
 test('root stop audit stays quiet without a readable transcript', async () => {
   for (const transcriptPath of [undefined, '/missing/transcript.jsonl']) {
     const output = await evaluateReminderHook(
