@@ -22,11 +22,10 @@ import {
  * or a continuation prompt. A relayed report talks about pages, packages and
  * failures in its own words, so a prompt rule reads only what the user typed.
  */
-export const typedByUser = not(
-  contentPattern(
-    /^(?:Another Claude session sent a message:\n)?<(?:agent-message|cross-session-message) |^<task-notification>\n|^(?:Your claude\.ai usage limit has reset|Your claude\.ai usage is available again before the usage-limit reset|You can continue now)\. Continue the task you were working on when the (?:usage )?limit was reached;/,
-  ),
-);
+export const RELAYED_PROMPT =
+  /^(?:Another Claude session sent a message:\n)?<(?:agent-message|cross-session-message) |^<task-notification>\n|^(?:Your claude\.ai usage limit has reset|Your claude\.ai usage is available again before the usage-limit reset|You can continue now)\. Continue the task you were working on when the (?:usage )?limit was reached;/;
+
+export const typedByUser = not(contentPattern(RELAYED_PROMPT));
 
 /**
  * The prompt asks the agent to build or change behavior. These are the verbs

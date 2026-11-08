@@ -47,18 +47,19 @@ those files and encode it here as rules.
 Out-of-scope follow-up capture works in every repository with no configuration:
 the global `agent-backlog` command stores all repositories' items in one
 database at `~/.agent-backlog/backlog.sqlite`. Subagent findings are left for
-the root agent to store. The stop audit runs after every third completed
-assistant response, captures out-of-scope follow-ups, and closes backlog items
+the root agent to store. The stop audit runs once the user has typed three
+prompts since the last audit, captures out-of-scope follow-ups, and closes backlog items
 completed or explicitly closed by the conversation: a closing note, then
 `agent-backlog done`. It never removes items, because a closed item and its
 notes are the record later sessions search. The audit does not run on a turn
 that ends while a subagent or a workflow that the session started still runs
 (Claude Code's `background_tasks` on Stop): that turn only waits. The audit
-stays due until the transcript records it, so it runs on the first later Stop
-with nothing in flight. An audit due on a turn that gets no Stop, such as an
-interrupted turn or a local command, also runs on the next Stop. A Codex
-transcript records no hook context, so in Codex the audit runs on every third
-turn only. A shell or a monitor, such as a dev server, does not hold the audit
+then runs on the first later Stop with nothing in flight, and the next audit
+waits for three more prompts: the rule reads the audits it ran from the
+transcript. A task notification, a hand-back, a peer message, the usage-limit
+continuation, a local command such as `/effort` or `!git status` and its
+output, and an interrupt are not prompts the user typed. A Codex transcript
+records no hook context, so in Codex the audit runs on every third turn. A shell or a monitor, such as a dev server, does not hold the audit
 back: Claude Code gives a shell's command and description, but nothing that
 tells a shell the turn waits for from a server. Upstream bug reports and
 dev-tooling audit items (agent hooks, agent settings, test tooling) do not go

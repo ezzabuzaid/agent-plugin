@@ -553,31 +553,114 @@ const userTurn = (content: string) => ({
   message: { role: 'user', content },
 });
 
+// User entries that Claude Code writes for work the user did not ask the
+// agent for, in the shapes the session transcripts hold them.
+const NOT_PROMPTS = [
+  {
+    type: 'user',
+    origin: { kind: 'task-notification' },
+    message: {
+      role: 'user',
+      content:
+        '<task-notification>\n<task-id>b0sht8ykj</task-id>\n<status>completed</status>\n<summary>Background command finished</summary>\n</task-notification>',
+    },
+  },
+  userTurn('<bash-input>git status</bash-input>'),
+  userTurn(
+    '<bash-stdout>On branch main</bash-stdout><bash-stderr></bash-stderr>',
+  ),
+  userTurn(
+    '<command-name>/effort</command-name>\n            <command-message>effort</command-message>\n            <command-args>xhigh</command-args>',
+  ),
+  userTurn(
+    '<local-command-stdout>Set effort level to xhigh</local-command-stdout>',
+  ),
+  // The 2.1.319 binary writes these tags too; no transcript starts with one yet.
+  userTurn('<bash-stderr>fatal: not a git repository</bash-stderr>'),
+  userTurn('<local-command-stderr>Unknown model</local-command-stderr>'),
+  {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [{ type: 'text', text: '[Request interrupted by user]' }],
+    },
+  },
+  {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [
+        { type: 'text', text: '[Request interrupted by user for tool use]' },
+      ],
+    },
+  },
+  {
+    type: 'user',
+    isMeta: true,
+    origin: { kind: 'peer' },
+    message: {
+      role: 'user',
+      content:
+        'Another Claude session sent a message:\n<agent-message from="a24c8559dff70a569">\n[Subagent hand-back] The report follows.\n</agent-message>',
+    },
+  },
+  {
+    type: 'user',
+    isMeta: true,
+    origin: { kind: 'auto-continuation' },
+    message: {
+      role: 'user',
+      content:
+        'Your claude.ai usage limit has reset. Continue the task you were working on when the limit was reached; do not repeat work that is already complete.',
+    },
+  },
+];
+
+test('root stop audit counts only prompts the user typed', async () => {
+  assert.doesNotMatch(
+    await stopAfter([
+      userTurn('First request'),
+      ...NOT_PROMPTS,
+      userTurn('Second request'),
+      ...NOT_PROMPTS,
+    ]),
+    /audit-out-of-scope-followups/,
+  );
+});
+
 test('root stop audit held back by delegated work runs on the first stop after that work ends', async () => {
-  // The third turn ended while a subagent ran, so no audit was recorded; the
-  // fourth turn ends with nothing in flight.
+  // The third prompt's turn ended while a subagent ran, so no audit was
+  // recorded; the hand-back's turn ends with nothing in flight.
   assert.match(
     await stopAfter([
       userTurn('First request'),
       userTurn('Second request'),
       userTurn('Third request'),
-      userTurn('<agent-message from="a1">\nThe report follows.\n</agent-message>'),
+      ...NOT_PROMPTS,
     ]),
     /\[stop-feedback:audit-out-of-scope-followups\]/,
   );
 });
 
-test('root stop audit runs once for every third turn', async () => {
+test('root stop audit waits for three prompts after the audit it last ran', async () => {
+  // An audit made up on the fourth prompt's turn; the sixth prompt is not the
+  // third after it.
+  const sinceAudit = [
+    userTurn('First request'),
+    userTurn('Second request'),
+    userTurn('Third request'),
+    userTurn('Fourth request'),
+    AUDIT_FIRE,
+    userTurn('Fifth request'),
+    userTurn('Sixth request'),
+  ];
   assert.doesNotMatch(
-    await stopAfter([
-      userTurn('First request'),
-      userTurn('Second request'),
-      userTurn('Third request'),
-      AUDIT_FIRE,
-      userTurn('Fourth request'),
-      userTurn('Fifth request'),
-    ]),
+    await stopAfter(sinceAudit),
     /audit-out-of-scope-followups/,
+  );
+  assert.match(
+    await stopAfter([...sinceAudit, userTurn('Seventh request')]),
+    /\[stop-feedback:audit-out-of-scope-followups\]/,
   );
 });
 

@@ -6,9 +6,32 @@ import {
   type ReminderRule,
 } from '@deepagents/experimental/coding-agent-reminders';
 
+import { RELAYED_PROMPT } from './intent.ts';
 import { readTranscriptEntries, type TranscriptEntry } from './transcript.ts';
 
-function isClaudeUserTurn(entry: TranscriptEntry): boolean {
+/**
+ * Claude Code writes a user entry also for a local command and its output
+ * (`/effort`, `/clear`, `!git status`) and for an interrupt marker. A built-in
+ * command starts with `<command-name>`; a skill command, which asks the agent
+ * for work, starts with `<command-message>`.
+ */
+const LOCAL_ENTRY =
+  /^<(?:command-name|bash-(?:input|stdout|stderr)|local-command-(?:stdout|stderr))>|^\[Request interrupted by user/;
+
+function isBlockOfType(
+  block: unknown,
+  type: string,
+): block is Record<string, unknown> {
+  return (
+    typeof block === 'object' &&
+    block !== null &&
+    'type' in block &&
+    block.type === type
+  );
+}
+
+/** A Claude Code user entry that holds a prompt the user typed. */
+function isTypedPrompt(entry: TranscriptEntry): boolean {
   if (
     entry.type !== 'user' ||
     entry.isMeta === true ||
@@ -19,15 +42,26 @@ function isClaudeUserTurn(entry: TranscriptEntry): boolean {
   }
 
   const { content } = entry.message;
-  if (typeof content === 'string') return content.length > 0;
-  if (!Array.isArray(content) || content.length === 0) return false;
+  let text: string;
+  if (typeof content === 'string') {
+    text = content;
+  } else if (
+    Array.isArray(content) &&
+    !content.some((block) => isBlockOfType(block, 'tool_result'))
+  ) {
+    text = content
+      .flatMap((block) =>
+        isBlockOfType(block, 'text') && typeof block.text === 'string'
+          ? [block.text]
+          : [],
+      )
+      .join('\n');
+  } else {
+    return false;
+  }
 
-  return !content.some(
-    (block) =>
-      typeof block === 'object' &&
-      block !== null &&
-      'type' in block &&
-      block.type === 'tool_result',
+  return (
+    text.length > 0 && !RELAYED_PROMPT.test(text) && !LOCAL_ENTRY.test(text)
   );
 }
 
@@ -53,33 +87,31 @@ function recordsAudit(entry: TranscriptEntry): boolean {
 }
 
 /**
- * The audit is due after every third assistant message. A Claude Code turn
- * that ends while delegated work runs holds the audit back, so the audit stays
- * due until the transcript records it: it runs on the first later Stop with
- * nothing in flight. A Codex transcript records no hook context, and Codex
- * never holds the audit back, so it runs on every third turn only.
+ * The audit is due once the user has typed three prompts since the transcript
+ * last recorded it, or since the session started. A Claude Code turn that ends
+ * while delegated work runs holds the audit back, so it runs on the first later
+ * Stop with nothing in flight, and the next one waits for three more prompts.
+ * A Codex transcript records no hook context, and Codex never holds the audit
+ * back, so it runs on every third turn.
  */
 async function auditDue(input: ClaudeHookInput): Promise<boolean> {
   if (!input.transcript_path) return false;
 
   const codexTurnIds = new Set<string>();
-  let claudeUserTurns = 0;
-  let claudeUserTurnsAtAudit = 0;
+  let promptsSinceAudit = 0;
 
   for await (const entry of readTranscriptEntries(input.transcript_path)) {
     if (entry.type === 'turn_context' && entry.payload?.turn_id) {
       codexTurnIds.add(entry.payload.turn_id);
-    } else if (isClaudeUserTurn(entry)) {
-      claudeUserTurns += 1;
+    } else if (isTypedPrompt(entry)) {
+      promptsSinceAudit += 1;
     } else if (recordsAudit(entry)) {
-      claudeUserTurnsAtAudit = claudeUserTurns;
+      promptsSinceAudit = 0;
     }
   }
 
   if (codexTurnIds.size > 0) return codexTurnIds.size % 3 === 0;
-
-  const lastDueTurn = claudeUserTurns - (claudeUserTurns % 3);
-  return lastDueTurn > 0 && claudeUserTurnsAtAudit < lastDueTurn;
+  return promptsSinceAudit >= 3;
 }
 
 /**
