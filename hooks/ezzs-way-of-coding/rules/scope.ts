@@ -31,30 +31,55 @@ function isClaudeUserTurn(entry: TranscriptEntry): boolean {
   );
 }
 
-async function countAssistantMessages(transcriptPath: string): Promise<number> {
+const AUDIT_ID = 'audit-out-of-scope-followups';
+
+/**
+ * Claude Code records the context that a Stop hook adds as a
+ * `hook_additional_context` attachment, which holds each reminder under its
+ * `[target:id]` header.
+ */
+function recordsAudit(entry: TranscriptEntry): boolean {
+  const content = entry.attachment?.content;
+  return (
+    entry.type === 'attachment' &&
+    entry.attachment?.type === 'hook_additional_context' &&
+    Array.isArray(content) &&
+    content.some(
+      (text) =>
+        typeof text === 'string' &&
+        text.includes(`[stop-feedback:${AUDIT_ID}]\n`),
+    )
+  );
+}
+
+/**
+ * The audit is due after every third assistant message. A Claude Code turn
+ * that ends while delegated work runs holds the audit back, so the audit stays
+ * due until the transcript records it: it runs on the first later Stop with
+ * nothing in flight. A Codex transcript records no hook context, and Codex
+ * never holds the audit back, so it runs on every third turn only.
+ */
+async function auditDue(input: ClaudeHookInput): Promise<boolean> {
+  if (!input.transcript_path) return false;
+
   const codexTurnIds = new Set<string>();
   let claudeUserTurns = 0;
+  let claudeUserTurnsAtAudit = 0;
 
-  for await (const entry of readTranscriptEntries(transcriptPath)) {
+  for await (const entry of readTranscriptEntries(input.transcript_path)) {
     if (entry.type === 'turn_context' && entry.payload?.turn_id) {
       codexTurnIds.add(entry.payload.turn_id);
     } else if (isClaudeUserTurn(entry)) {
       claudeUserTurns += 1;
+    } else if (recordsAudit(entry)) {
+      claudeUserTurnsAtAudit = claudeUserTurns;
     }
   }
 
-  return codexTurnIds.size > 0 ? codexTurnIds.size : claudeUserTurns;
-}
+  if (codexTurnIds.size > 0) return codexTurnIds.size % 3 === 0;
 
-async function everyThirdAssistantMessage(
-  input: ClaudeHookInput,
-): Promise<boolean> {
-  if (!input.transcript_path) return false;
-
-  const assistantMessageCount = await countAssistantMessages(
-    input.transcript_path,
-  );
-  return assistantMessageCount > 0 && assistantMessageCount % 3 === 0;
+  const lastDueTurn = claudeUserTurns - (claudeUserTurns % 3);
+  return lastDueTurn > 0 && claudeUserTurnsAtAudit < lastDueTurn;
 }
 
 /**
@@ -99,10 +124,10 @@ export const scopeRules: ReminderRule[] = [
     ].join('\n'),
   },
   {
-    id: 'audit-out-of-scope-followups',
+    id: AUDIT_ID,
     target: 'stop-feedback',
     events: ['Stop'],
-    when: and(not(waitsOnDelegatedWork), everyThirdAssistantMessage),
+    when: and(not(waitsOnDelegatedWork), auditDue),
     message:
       'Before stopping, capture each concrete, actionable follow-up outside the active request with `agent-backlog`. Close each backlog item that this conversation completed or explicitly closed: append a closing note (what settled it, the commit, how it was verified) with `agent-backlog update <id> --description=<old description and note>`, then run `agent-backlog done <id>`. Never run `agent-backlog remove`: a closed item and its notes are the record later sessions search. Do not invent work or capture blockers, vague cleanup, or completed work as new items. Do not file upstream bug reports or dev-tooling audit items (agent hooks, agent settings, test tooling); mention each one once in your reply instead. If storing or closing fails, report the failure.',
   },

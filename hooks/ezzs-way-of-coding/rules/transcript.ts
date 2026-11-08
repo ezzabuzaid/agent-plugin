@@ -12,6 +12,10 @@ export type TranscriptEntry = {
     role?: string;
     content?: unknown;
   };
+  attachment?: {
+    type?: string;
+    content?: unknown;
+  };
   payload?: {
     turn_id?: string;
   };

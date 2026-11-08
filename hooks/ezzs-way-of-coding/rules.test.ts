@@ -511,6 +511,76 @@ test('root stop audit runs when no delegated work is in flight', async () => {
   }
 });
 
+// Claude Code records the context a Stop hook adds as a transcript attachment.
+const AUDIT_FIRE = {
+  type: 'attachment',
+  attachment: {
+    type: 'hook_additional_context',
+    content: [
+      '[stop-feedback:audit-out-of-scope-followups]\nBefore stopping, capture each concrete, actionable follow-up outside the active request with `agent-backlog`.',
+    ],
+  },
+};
+
+async function stopAfter(entries: object[]) {
+  const transcriptDirectory = await mkdtemp(
+    join(tmpdir(), 'ezzs-way-of-coding-claude-'),
+  );
+
+  try {
+    const transcriptPath = join(transcriptDirectory, 'transcript.jsonl');
+    await writeFile(
+      transcriptPath,
+      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+    );
+
+    const output = await evaluateReminderHook(
+      {
+        hook_event_name: 'Stop',
+        transcript_path: transcriptPath,
+        background_tasks: [],
+      },
+      ezzsWayOfCodingConfig,
+    );
+    return output?.hookSpecificOutput?.additionalContext ?? '';
+  } finally {
+    await rm(transcriptDirectory, { recursive: true, force: true });
+  }
+}
+
+const userTurn = (content: string) => ({
+  type: 'user',
+  message: { role: 'user', content },
+});
+
+test('root stop audit held back by delegated work runs on the first stop after that work ends', async () => {
+  // The third turn ended while a subagent ran, so no audit was recorded; the
+  // fourth turn ends with nothing in flight.
+  assert.match(
+    await stopAfter([
+      userTurn('First request'),
+      userTurn('Second request'),
+      userTurn('Third request'),
+      userTurn('<agent-message from="a1">\nThe report follows.\n</agent-message>'),
+    ]),
+    /\[stop-feedback:audit-out-of-scope-followups\]/,
+  );
+});
+
+test('root stop audit runs once for every third turn', async () => {
+  assert.doesNotMatch(
+    await stopAfter([
+      userTurn('First request'),
+      userTurn('Second request'),
+      userTurn('Third request'),
+      AUDIT_FIRE,
+      userTurn('Fourth request'),
+      userTurn('Fifth request'),
+    ]),
+    /audit-out-of-scope-followups/,
+  );
+});
+
 test('root stop audit stays quiet without a readable transcript', async () => {
   for (const transcriptPath of [undefined, '/missing/transcript.jsonl']) {
     const output = await evaluateReminderHook(
