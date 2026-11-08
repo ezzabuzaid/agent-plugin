@@ -841,6 +841,31 @@ test('prompt reminders stay quiet on a turn that a hand-back, a peer message or 
   }
 });
 
+// Claude Code starts a turn by itself when a usage limit resets, with one of
+// these fixed prompts (`origin.kind` `auto-continuation`). The first is in
+// session transcripts from 2.1.239 to 2.1.318; the other two are in the
+// 2.1.319 binary.
+const AUTO_CONTINUATION_PROMPTS = [
+  'Your claude.ai usage limit has reset. Continue the task you were working on when the limit was reached; do not repeat work that is already complete.',
+  'Your claude.ai usage is available again before the usage-limit reset. Continue the task you were working on when the limit was reached; do not repeat work that is already complete.',
+  'You can continue now. Continue the task you were working on when the usage limit was reached; do not repeat work that is already complete.',
+];
+
+test('prompt reminders stay quiet on a turn that Claude Code continues after a usage limit resets', async () => {
+  for (const prompt of AUTO_CONTINUATION_PROMPTS) {
+    const output = await evaluateReminderHook(
+      { hook_event_name: 'UserPromptSubmit', prompt },
+      ezzsWayOfCodingConfig,
+    );
+
+    assert.doesNotMatch(
+      output?.hookSpecificOutput?.additionalContext ?? '',
+      /\[prompt:/,
+      prompt,
+    );
+  }
+});
+
 test('session harvest names Codex memory paths in a Codex session', async () => {
   const context = await evaluateWithTranscript(
     [

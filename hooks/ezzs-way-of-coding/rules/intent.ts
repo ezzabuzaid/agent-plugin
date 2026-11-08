@@ -12,15 +12,19 @@ import {
  * session_title). Claude Code frames each of these prompts, and the frame is
  * the start of `prompt`: `<agent-message …>` or `<cross-session-message …>`,
  * with or without the line `Another Claude session sent a message:` in front,
- * and `<task-notification>`. The transcript records the origin of the same
- * entries as `origin.kind` `peer` and `task-notification`; no prompt whose
- * origin is `human` starts with a frame. A relayed report talks about pages,
- * packages and failures in its own words, so a prompt rule reads only what the
- * user typed.
+ * and `<task-notification>`. When a usage limit resets, Claude Code continues
+ * the task by itself with a fixed prompt: `Your claude.ai usage limit has
+ * reset.`, `Your claude.ai usage is available again before the usage-limit
+ * reset.` or `You can continue now.`, then `Continue the task you were working
+ * on when the …limit was reached`. The transcript records the origin of these
+ * entries as `origin.kind` `peer`, `task-notification` and
+ * `auto-continuation`; no prompt whose origin is `human` starts with a frame
+ * or a continuation prompt. A relayed report talks about pages, packages and
+ * failures in its own words, so a prompt rule reads only what the user typed.
  */
 export const typedByUser = not(
   contentPattern(
-    /^(?:Another Claude session sent a message:\n)?<(?:agent-message|cross-session-message) |^<task-notification>\n/,
+    /^(?:Another Claude session sent a message:\n)?<(?:agent-message|cross-session-message) |^<task-notification>\n|^(?:Your claude\.ai usage limit has reset|Your claude\.ai usage is available again before the usage-limit reset|You can continue now)\. Continue the task you were working on when the (?:usage )?limit was reached;/,
   ),
 );
 

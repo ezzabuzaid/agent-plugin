@@ -24,8 +24,10 @@ Claude Code runs `UserPromptSubmit` also for a turn that a subagent hand-back,
 a message from another Claude session or a background-task notification
 starts. The payload has no field for the origin, but Claude Code frames each of
 these prompts (`<agent-message …>`, `<cross-session-message …>`,
-`<task-notification>`). The prompt rules and the session harvest read only a
-prompt that the user typed. The `/wait-what` register does not read the prompt
+`<task-notification>`). When a usage limit resets, Claude Code also starts a
+turn by itself with a fixed prompt, such as "Your claude.ai usage limit has
+reset. Continue the task you were working on…". The prompt rules and the
+session harvest read only a prompt that the user typed. The `/wait-what` register does not read the prompt
 text, so it stays on for every turn. The UI and dependency reminders fire on a
 phrase, such as "build a dashboard page" or "update the packages", not on two
 words anywhere in a long prompt.
