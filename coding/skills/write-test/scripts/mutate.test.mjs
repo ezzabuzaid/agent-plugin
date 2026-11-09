@@ -51,6 +51,8 @@ async function mutate(root, spec, { cwd = root, env = {} } = {}) {
   child.stdin.end(JSON.stringify(spec));
   let stdout = '';
   let stderr = '';
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
   child.stdout.on('data', (chunk) => (stdout += chunk));
   child.stderr.on('data', (chunk) => (stderr += chunk));
   const [status] = await once(child, 'close');
@@ -413,6 +415,38 @@ test('a failing run with no test summary in its output is reported UNPARSED with
     assert.equal(of('Q1').verdict, 'UNPARSED');
     assert.equal(of('Q1').tests, null);
     assert.match(of('Q1').excerpt, /strict check refused the input/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a character split across two chunks of output stays whole in the excerpt', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
+  try {
+    // A euro sign is three bytes, and a pipe can end a chunk inside it.
+    const splitRunner = [
+      "import { strict } from './src/flag.mjs';",
+      "import { spawnSync } from 'node:child_process';",
+      "import { setTimeout as delay } from 'node:timers/promises';",
+      'if (strict) {',
+      '  process.stderr.write(Buffer.from([0xe2]));',
+      '  await delay(200);',
+      '  process.stderr.write(Buffer.from([0x82, 0xac]));',
+      '  process.exit(1);',
+      '}',
+      `process.exitCode = spawnSync(process.execPath, ${JSON.stringify(nodeTests(['src/clamp.test.mjs']).slice(1))}, { stdio: 'inherit' }).status;`,
+      '',
+    ].join('\n');
+    const { copy } = copyOf(root, { 'src/flag.mjs': 'export const strict = false;\n', 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest, 'run.mjs': splitRunner });
+
+    const { of } = await mutate(root, {
+      copy,
+      command: [process.execPath, 'run.mjs'],
+      timeoutSeconds: 60,
+      mutations: [{ id: 'S1', claim: 'the check passes', edits: [{ file: 'src/flag.mjs', find: 'false', replace: 'true' }] }],
+    });
+
+    assert.match(of('S1').excerpt, /€/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
