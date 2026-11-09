@@ -170,7 +170,9 @@ function signalGroup(pgid, signal) {
   try {
     process.kill(-pgid, signal);
   } catch (error) {
-    if (error.code !== 'ESRCH') throw error;
+    // ESRCH: the group is gone. EPERM: on macOS, every member is a zombie that
+    // nobody has reaped yet. Either way, nothing is left to signal.
+    if (error.code !== 'ESRCH' && error.code !== 'EPERM') throw error;
   }
 }
 

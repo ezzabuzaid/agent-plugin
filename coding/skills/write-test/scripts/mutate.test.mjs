@@ -270,7 +270,7 @@ test('a per-mutation command gets its own baseline, identical commands share one
   }
 });
 
-test('a mutation that makes the test hang is reported TIMEOUT and its whole process group is killed, even a grandchild that ignores SIGTERM', { timeout: 30_000 }, async () => {
+test('a mutation that makes the test hang is reported TIMEOUT and its whole process group is killed, even a grandchild that ignores SIGTERM', { timeout: 30_000 }, async (t) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   const pidFile = join(root, 'grandchild.pid');
   try {
@@ -302,7 +302,8 @@ test('a mutation that makes the test hang is reported TIMEOUT and its whole proc
     const grandchild = Number(readFileSync(pidFile, 'utf8'));
     assert.equal(of('H1').verdict, 'TIMEOUT');
     assert.ok(of('H1').killedPids.includes(grandchild), `killed ${of('H1').killedPids}, grandchild ${grandchild}`);
-    assert.throws(() => process.kill(grandchild, 0), { code: 'ESRCH' });
+    // A killed process stays a zombie until it is reaped, so the kill takes effect a moment later.
+    await t.waitFor(() => assert.throws(() => process.kill(grandchild, 0), { code: 'ESRCH' }), { timeout: 10_000 });
     assert.ok(Date.now() - started < 20_000, 'the timeout bounded the run');
     assert.equal(readFileSync(join(copy, 'src/flag.mjs'), 'utf8'), 'export const hang = false;\n');
   } finally {
@@ -313,7 +314,47 @@ test('a mutation that makes the test hang is reported TIMEOUT and its whole proc
   }
 });
 
-test('a mutation that breaks the import, or fails the run with no failing test, is reported INVALID rather than CAUGHT', async () => {
+// macOS answers EPERM to kill(-pgid) when every member of the group is a zombie
+// that nobody has reaped. Mutate reads the group with a synchronous ps at the
+// timeout, so a leader that exits during that read is such a zombie. The slow ps
+// holds this window open; the race itself is real and only rarely this wide.
+test('a test run that exits just as its timeout fires is reported TIMEOUT, and mutate restores the file instead of crashing', { timeout: 30_000 }, async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
+  try {
+    const bin = join(root, 'bin');
+    mkdirSync(bin);
+    const slowPs = join(bin, 'ps');
+    writeFileSync(slowPs, '#!/bin/sh\nsleep 3\nexec /bin/ps "$@"\n', { mode: 0o755 });
+    const lateTest = [
+      "import test from 'node:test';",
+      "import { setTimeout as wait } from 'node:timers/promises';",
+      "import { delay } from './flag.mjs';",
+      "test('finishes', async () => {",
+      '  await wait(delay);',
+      '});',
+      '',
+    ].join('\n');
+    const { copy } = copyOf(root, { 'src/flag.mjs': 'export const delay = 0;\n', 'src/late.test.mjs': lateTest });
+
+    const { status, stderr, of } = await mutate(root, {
+      copy,
+      command: nodeTests(['src/']),
+      timeoutSeconds: 3,
+      mutations: [
+        { id: 'L1', claim: 'the test finishes at once', edits: [{ file: 'src/flag.mjs', find: 'delay = 0', replace: 'delay = 3500' }] },
+      ],
+    }, { env: { PATH: `${bin}:${process.env.PATH}` } });
+
+    assert.doesNotMatch(stderr, /EPERM/);
+    assert.equal(status, 0, stderr);
+    assert.equal(of('L1')?.verdict, 'TIMEOUT');
+    assert.equal(readFileSync(join(copy, 'src/flag.mjs'), 'utf8'), 'export const delay = 0;\n');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a mutation that breaks the import, or fails the run with no failing test, is reported INVALID rather than CAUGHT',async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
     const check = "import { strict } from './src/flag.mjs';\nif (strict) process.exit(2);\n";
@@ -417,7 +458,7 @@ test('a mutation that never reaches the built output the tests import is reporte
 });
 
 for (const signal of ['SIGTERM', 'SIGINT']) {
-  test(`${signal} to mutate in the middle of a run restores the mutated file in the copy`, { timeout: 30_000 }, async () => {
+  test(`${signal} to mutate in the middle of a run restores the mutated file in the copy`, { timeout: 30_000 }, async (t) => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
     let child;
     try {
@@ -455,7 +496,8 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
       // 128 + the signal's number is what the handler exits with after a verified restore.
       assert.equal(code, 128 + osConstants.signals[signal]);
       assert.equal(readFileSync(join(copy, 'src/flag.mjs'), 'utf8'), 'export const hang = false;\n');
-      assert.throws(() => process.kill(Number(readFileSync(pidFile, 'utf8')), 0), { code: 'ESRCH' });
+      // A killed process stays a zombie until it is reaped, so the kill takes effect a moment later.
+      await t.waitFor(() => assert.throws(() => process.kill(Number(readFileSync(pidFile, 'utf8')), 0), { code: 'ESRCH' }), { timeout: 10_000 });
     } finally {
       child?.kill('SIGKILL');
       rmSync(root, { recursive: true, force: true });
