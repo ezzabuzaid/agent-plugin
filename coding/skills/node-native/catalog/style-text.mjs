@@ -115,6 +115,7 @@ export default {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-depend@1.5.0',
       rule: 'depend/ban-dependencies',
+      failed: 'reads only the package name, and the code can need the package for what no native API does; e18e/ban-dependencies, which reports the same hits, had 4 of 12 hits on good code',
       code: "import chalk from 'chalk';",
     },
   },

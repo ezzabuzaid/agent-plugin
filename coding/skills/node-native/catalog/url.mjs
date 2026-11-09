@@ -189,16 +189,25 @@ export default {
     },
   },
   lint: {
+    e18eTryNewURL: {
+      eslint: '10.12.0',
+      plugin: '@e18e/eslint-plugin@0.8.1',
+      rule: 'e18e/prefer-url-canparse',
+      on: 'modern-node/recommended',
+      code: 'function isUrl(value) { try { new URL(value); return true; } catch { return false; } }',
+    },
     tryNewURL: {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-unicorn@79.0.0',
       rule: 'unicorn/prefer-url-can-parse',
+      unmeasured: 'ADR 0008 does not judge this rule; e18e/prefer-url-canparse is the one on',
       code: 'function isUrl(value) { try { new URL(value); return true; } catch { return false; } }',
     },
     legacyUrlParse: {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-n@18.5.0',
       rule: 'n/no-deprecated-api',
+      unmeasured: 'ADR 0008 does not judge this rule, and no @zukhruf/eslint config turns it on',
       code: "import url from 'node:url'; const parsed = url.parse(href);",
     },
   },

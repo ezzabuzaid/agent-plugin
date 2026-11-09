@@ -570,7 +570,7 @@ async function registryOf(dir, packages) {
       ['pack', join(dir, 'packages', name), '--pack-destination', join(dir, 'tarballs'), '--json'],
       { env: { PATH: process.env.PATH, ...isolatedNpm(dir, 'http://127.0.0.1:9/') } },
     );
-    const [{ filename }] = JSON.parse(stdout);
+    const { filename } = JSON.parse(stdout)[name];
     tarballs.set(name, await readFile(join(dir, 'tarballs', filename)));
   }
   const server = createServer((request, response) => {
@@ -659,4 +659,182 @@ test('the catalog run installs packages under their real names, so a package fin
   } finally {
     server.close();
   }
+});
+
+// Published packages for a lint row. The fake ESLint answers as the real one
+// does: verify() runs the row's rule, and calculateConfigForFile() merges the
+// config blocks that apply to a file, with each severity as an array. preset
+// imports optional-lib when it loads, so it loads only when the catalog's config
+// table installs that peer. Rule no-bad reports; no-worse is on only in a
+// TypeScript block, and no-other only as off.
+const lintPackages = {
+  eslint: {
+    'package.json': JSON.stringify({ name: 'eslint', version: '1.0.0', type: 'module', exports: './index.js' }),
+    'index.js': `export class Linter {
+      verify(code, [{ plugins, rules }]) {
+        const [ruleId] = Object.keys(rules);
+        const [namespace, name] = ruleId.split('/');
+        return plugins[namespace].rules[name](code) ? [{ ruleId, message: 'reported' }] : [];
+      }
+    }
+    export class ESLint {
+      constructor({ overrideConfig }) { this.blocks = overrideConfig; }
+      async calculateConfigForFile(file) {
+        const blocks = this.blocks.filter(({ files }) => !files || file.endsWith(files));
+        return { rules: Object.assign({}, ...blocks.map(({ rules }) => rules)) };
+      }
+    }\n`,
+  },
+  'config-lib': {
+    'package.json': JSON.stringify({
+      name: 'config-lib',
+      version: '1.0.0',
+      type: 'module',
+      exports: { './preset': './preset.js' },
+      peerDependencies: { 'optional-lib': '1.0.0' },
+      peerDependenciesMeta: { 'optional-lib': { optional: true } },
+    }),
+    'preset.js': `import { isBad } from 'optional-lib';
+    export default {
+      rules: { 'no-bad': isBad, 'no-worse': isBad, 'no-other': isBad, 'no-unset': isBad },
+      configs: { recommended: [
+        { rules: { 'plugin/no-bad': [2], 'plugin/no-other': [0] } },
+        { files: '.ts', rules: { 'plugin/no-worse': [2] } },
+      ] },
+    };\n`,
+  },
+  'optional-lib': {
+    'package.json': JSON.stringify({ name: 'optional-lib', version: '1.0.0', type: 'module', exports: './index.js' }),
+    'index.js': "export const isBad = (code) => code.includes('bad');\n",
+  },
+};
+
+const lintCatalog = async (dir, rows) => {
+  await write(
+    join(dir, 'catalog', 'support', 'lint-configs.mjs'),
+    `export default { 'preset/recommended': { from: 'config-lib@1.0.0/preset', config: 'recommended', peers: ['optional-lib@1.0.0'] } };\n`,
+  );
+  await write(
+    join(dir, 'catalog', 'no-bad.mjs'),
+    `export default { apis: [], lint: ${JSON.stringify(
+      Object.fromEntries(
+        Object.entries(rows).map(([name, row]) => [name, { eslint: '1.0.0', plugin: 'config-lib@1.0.0/preset', code: 'bad();', ...row }]),
+      ),
+    )} };\n`,
+  );
+  return ['--catalog', join(dir, 'catalog')];
+};
+
+const verdicts = (json) => json.rows.map(({ member, verdict }) => ({ member, verdict }));
+
+test('a lint row loads its plugin from a subpath, with the peers the config table installs, and holds while the config agrees', async () => {
+  await using dir = await mkdtempDisposable(join(tmpdir(), 'probe-'));
+  await mkdir(join(dir.path, 'tmp'));
+  const server = await registryOf(dir.path, lintPackages);
+  try {
+    const args = await lintCatalog(dir.path, {
+      onEverywhere: { rule: 'plugin/no-bad', on: 'preset/recommended' },
+      onInTypeScriptOnly: { rule: 'plugin/no-worse', on: 'preset/recommended' },
+      failedAndOff: { rule: 'plugin/no-other', failed: 'it fails' },
+      failedAndUnset: { rule: 'plugin/no-unset', failed: 'it fails' },
+    });
+
+    const { status, stderr, json } = await probe(dir.path, args, {
+      env: isolatedNpm(dir.path, `http://127.0.0.1:${server.address().port}/`),
+    });
+
+    assert.equal(status, 0, JSON.stringify(json) + stderr);
+    assert.deepEqual(verdicts(json), [
+      { member: 'onEverywhere', verdict: 'holds' },
+      { member: 'onInTypeScriptOnly', verdict: 'holds' },
+      { member: 'failedAndOff', verdict: 'holds' },
+      { member: 'failedAndUnset', verdict: 'holds' },
+    ]);
+  } finally {
+    server.close();
+  }
+});
+
+test('a row that says on, whose rule the published config does not turn on, is a config-mismatch', async () => {
+  await using dir = await mkdtempDisposable(join(tmpdir(), 'probe-'));
+  await mkdir(join(dir.path, 'tmp'));
+  const server = await registryOf(dir.path, lintPackages);
+  try {
+    const args = await lintCatalog(dir.path, {
+      setToOff: { rule: 'plugin/no-other', on: 'preset/recommended' },
+      absent: { rule: 'plugin/no-unset', on: 'preset/recommended' },
+    });
+
+    const { status, json } = await probe(dir.path, args, {
+      env: isolatedNpm(dir.path, `http://127.0.0.1:${server.address().port}/`),
+    });
+
+    assert.equal(status, 1);
+    assert.deepEqual(verdicts(json), [
+      { member: 'setToOff', verdict: 'config-mismatch' },
+      { member: 'absent', verdict: 'config-mismatch' },
+    ]);
+    assert.ok(json.rows[0].other.includes('plugin/no-other is not on in preset/recommended of config-lib@1.0.0/preset'), json.rows[0].other);
+  } finally {
+    server.close();
+  }
+});
+
+test('a row that says failed, off or unmeasured, whose rule a published config turns on, is a config-mismatch', async () => {
+  await using dir = await mkdtempDisposable(join(tmpdir(), 'probe-'));
+  await mkdir(join(dir.path, 'tmp'));
+  const server = await registryOf(dir.path, lintPackages);
+  try {
+    const args = await lintCatalog(dir.path, {
+      failed: { rule: 'plugin/no-bad', failed: 'it fails' },
+      off: { rule: 'plugin/no-bad', off: 'it is off' },
+      unmeasured: { rule: 'plugin/no-worse', unmeasured: 'nothing judged it' },
+    });
+
+    const { status, json } = await probe(dir.path, args, {
+      env: isolatedNpm(dir.path, `http://127.0.0.1:${server.address().port}/`),
+    });
+
+    assert.equal(status, 1);
+    assert.deepEqual(verdicts(json), [
+      { member: 'failed', verdict: 'config-mismatch' },
+      { member: 'off', verdict: 'config-mismatch' },
+      { member: 'unmeasured', verdict: 'config-mismatch' },
+    ]);
+    assert.ok(json.rows[0].other.includes('plugin/no-bad is on in preset/recommended of config-lib@1.0.0/preset'), json.rows[0].other);
+  } finally {
+    server.close();
+  }
+});
+
+test('a row whose on names a config the table does not have proves nothing', async () => {
+  await using dir = await mkdtempDisposable(join(tmpdir(), 'probe-'));
+  await mkdir(join(dir.path, 'tmp'));
+  const server = await registryOf(dir.path, lintPackages);
+  try {
+    const args = await lintCatalog(dir.path, { unknown: { rule: 'plugin/no-bad', on: 'preset/other' } });
+
+    const { status, json } = await probe(dir.path, args, {
+      env: isolatedNpm(dir.path, `http://127.0.0.1:${server.address().port}/`),
+    });
+
+    assert.equal(status, 1);
+    assert.deepEqual(verdicts(json), [{ member: 'unknown', verdict: 'probe-error' }]);
+  } finally {
+    server.close();
+  }
+});
+
+test('a lint row whose catalog has no config table stops the run', async () => {
+  await using dir = await mkdtempDisposable(join(tmpdir(), 'probe-'));
+  await write(
+    join(dir.path, 'catalog', 'no-bad.mjs'),
+    `export default { apis: [], lint: { row: { eslint: '1.0.0', plugin: 'p@1.0.0', rule: 'p/r', on: 'x/y', code: 'c' } } };\n`,
+  );
+
+  const { status, stderr, json } = await probe(dir.path, ['--catalog', join(dir.path, 'catalog')]);
+
+  assert.equal(status, 2);
+  assert.ok(stderr.includes('lint-configs.mjs'), stderr);
+  assert.equal(json, null);
 });

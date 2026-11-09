@@ -22,6 +22,7 @@ export default {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-unicorn@79.0.0',
       rule: 'unicorn/prefer-json-import',
+      failed: '3 of 4 hits on good code: the file is outside rootDir, or the code rewrites it',
       code: "import { readFileSync } from 'node:fs';\nconst data = JSON.parse(readFileSync(new URL('./data.json', import.meta.url), 'utf8'));",
     },
   },

@@ -71,6 +71,7 @@ export default {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-unicorn@79.0.0',
       rule: 'unicorn/prefer-abort-signal-any',
+      on: 'modern-node/recommended',
       code: 'export function merge(userSignal, timeoutSignal) { const controller = new AbortController(); userSignal.addEventListener("abort", () => controller.abort()); timeoutSignal.addEventListener("abort", () => controller.abort()); return controller.signal; }',
     },
   },

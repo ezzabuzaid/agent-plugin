@@ -46,16 +46,33 @@ export default {
     },
   },
   lint: {
+    e18eSpreadSort: {
+      eslint: '10.12.0',
+      plugin: '@e18e/eslint-plugin@0.8.1',
+      rule: 'e18e/prefer-array-to-sorted',
+      on: 'modern-node/recommended',
+      note: 'the fixer does not read types: [...set].sort() becomes set.toSorted(); the type check finds this in TypeScript, and no check finds it in a .mjs file',
+      code: 'const sorted = [...items].sort((a, b) => a - b);',
+    },
+    e18eSpreadReverse: {
+      eslint: '10.12.0',
+      plugin: '@e18e/eslint-plugin@0.8.1',
+      rule: 'e18e/prefer-array-to-reversed',
+      on: 'modern-node/recommended',
+      code: 'const reversed = [...items].reverse();',
+    },
     spreadSort: {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-unicorn@79.0.0',
       rule: 'unicorn/no-array-sort',
+      off: 'in all 12 hits read, the array was already a new copy, so the change fixed nothing; e18e/prefer-array-to-sorted reports the [...x].sort() form',
       code: 'const sorted = [...items].sort((a, b) => a - b);',
     },
     sliceReverse: {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-unicorn@79.0.0',
       rule: 'unicorn/no-array-reverse',
+      off: 'no hits on good code, but it is off with no-array-sort; e18e/prefer-array-to-reversed reports the [...x].reverse() form',
       code: 'const reversed = items.slice().reverse();',
     },
   },

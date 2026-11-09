@@ -11,6 +11,7 @@ import { memberOf, parseSpec, readCatalog } from './catalog.mjs';
 const skill = fileURLToPath(new URL('..', import.meta.url));
 const VERSION = /^v(\d+)\.(\d+)\.(\d+)$/;
 const versioned = (spec) => Boolean(parseSpec(spec ?? '')?.version);
+const LINT_STATES = ['on', 'failed', 'off', 'unmeasured'];
 
 const committed = async () => ({
   surface: JSON.parse(await readFile(join(skill, 'surface.json'), 'utf8')),
@@ -145,4 +146,39 @@ test('every lint row names the eslint and plugin versions, the rule, and code th
   );
 
   assert.deepEqual(problems, []);
+});
+
+test('every lint row says one thing about its rule: on in a config, failed on real code, off for a reason, or unmeasured', async () => {
+  const { entries } = await committed();
+  const { default: configs } = await import(new URL('../catalog/support/lint-configs.mjs', import.meta.url));
+
+  const problems = entries.flatMap(({ id, entry }) =>
+    Object.entries(entry.lint ?? {}).flatMap(([name, row]) => {
+      const states = LINT_STATES.filter((state) => state in row);
+      if (states.length !== 1) return [`${id} lint ${name}: has ${states.length} of ${LINT_STATES.join(', ')}`];
+      const [state] = states;
+      return [
+        ...(typeof row[state] === 'string' && row[state].trim() ? [] : [`${id} lint ${name}: ${state} says nothing`]),
+        ...(state === 'on' && !(row.on in configs) ? [`${id} lint ${name}: on names ${row.on}, not a config`] : []),
+      ];
+    }),
+  );
+
+  assert.deepEqual(problems, []);
+});
+
+test('a rule has the same state in every row that names it', async () => {
+  const { entries } = await committed();
+
+  const said = entries.flatMap(({ entry }) =>
+    Object.values(entry.lint ?? {}).map((row) => ({
+      rule: row.rule,
+      states: LINT_STATES.filter((state) => state in row).map((state) => `${state}: ${row[state]}`),
+    })),
+  );
+  const split = [...Map.groupBy(said, ({ rule }) => rule)]
+    .map(([rule, rows]) => [rule, [...new Set(rows.flatMap(({ states }) => states))]])
+    .filter(([, states]) => states.length > 1);
+
+  assert.deepEqual(split, []);
 });

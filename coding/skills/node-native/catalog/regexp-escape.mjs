@@ -74,6 +74,7 @@ export default {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-unicorn@79.0.0',
       rule: 'unicorn/prefer-regexp-escape',
+      failed: '1 of 8 hits on good code, 3 of 12 in all repos: the fix can change what the pattern matches, and no error occurs',
       code: "const escaped = text.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');",
     },
   },

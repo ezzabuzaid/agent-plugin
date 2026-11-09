@@ -42,10 +42,19 @@ export default {
     },
   },
   lint: {
+    noCollectLoop: {
+      eslint: '10.12.0',
+      plugin: '@zukhruf/eslint@0.8.12',
+      rule: 'zukhruf/no-collect-loop',
+      on: 'zukhruf/base',
+      note: 'has the exclusions learned from real code; unicorn/prefer-array-from-async reports only an empty array in the statement before the loop, and gives the fix',
+      code: 'const items = [];\nfor await (const item of source) items.push(item);',
+    },
     preferArrayFromAsync: {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-unicorn@79.0.0',
       rule: 'unicorn/prefer-array-from-async',
+      on: 'modern-node/recommended',
       code: 'const items = [];\nfor await (const item of source) items.push(item);',
     },
   },

@@ -32,6 +32,9 @@ description: >
   agreed. Anything believed but not probed goes under **Unproven**.
 - **Read-only.** Nothing is written into the target repo. Scratch files go in
   the session scratchpad.
+- **This skill finds candidates. ESLint enforces them.** A run finds code that
+  Node can replace. Only a rule that a repo has on protects that code on each
+  lint run.
 
 All scripts live in `scripts/` next to this file; run them as
 `node <this skill's directory>/scripts/<name>.mjs`. Each script's header comment
@@ -131,6 +134,10 @@ cast the replacement needs, refused by `consistent-type-assertions`) is a
 reason too: give it. When lint cannot read the file at all (a typed config and
 a file no tsconfig includes), say so on the finding.
 
+This lint shows what this repo has on. A catalog `lint` row does not. When a
+row has `failed` and the site is the case that its reason names, the finding is
+**Keep**, citing the reason.
+
 **Typecheck a TypeScript site.** Run the repo's own type check on the replaced
 copy. A type error from a missing declaration of the native API itself (the
 installed `@types/node` or TypeScript `lib` does not declare it yet) does not
@@ -167,7 +174,8 @@ read; a directory you did not read is not "clean".
 
 ## Replace
 - <file:line> <package or helper> → <native API> [needs <flag>] — deletes <what>.
-  Evidence: <entry>/<member> holds | site probe <name> holds. Mechanical: <plugin/rule>.
+  Evidence: <entry>/<member> holds | site probe <name> holds.
+  Mechanical: <plugin/rule> | Not extended: <plugin/rule>, on in <config> | Known bad fix: <plugin/rule>, <reason>.
   Changes: <each improvement the site's names carry, if any>.
 
 ## Partial
@@ -186,10 +194,31 @@ Skipped (browser): <workspaces>. Read for hand-written code: <directories>.
 Not read: <directories and workspaces, and why (a subagent that could not start)>.
 ```
 
-Each line names `file:line`. "Mechanical" names the catalog entry's `lint` rule
-when its probe holds: that rule catches the pattern on every lint run, and
-adding it to `@zukhruf/eslint` goes through `coding:guardrail`. A section with
-nothing in it says "none".
+Each line names `file:line`. A section with nothing in it says "none".
+
+Each catalog `lint` row has one field that says what is true of its rule. Most
+rules that the catalog names are not on anywhere, so read the field and report
+what it says. The source of these facts is ADR 0008 of `@zukhruf/eslint`.
+
+- `on`: the config that the field names turns the rule on. This is
+  `modern-node/recommended`, or `zukhruf/base` for `zukhruf/no-collect-loop`.
+  Only this row can give protection. A repo gets the protection only when it
+  extends the config. To read this, run
+  `cd <repo> && npx eslint --print-config <file>`. If the rule is on, write
+  "Mechanical". If it is not on, write "Not extended".
+- `failed`: the rule failed on real code. Write "Known bad fix", with the reason.
+  Never write "Mechanical" for this row.
+- `off`: the rule is off for the reason that the field gives. It gives no
+  protection, so do not name it.
+- `unmeasured`: nothing has judged the rule. It gives no protection, so do not
+  name it.
+- `note`: a limit of the rule, such as the files it reads. Write the note when
+  it applies to the site.
+
+A `lint` probe that holds shows that the rule fires on the row's own code, and
+that the published config agrees with the field. It does not show that the rule covers each idiom of the entry, or that the rule
+is exact on other code. To add a rule to `@zukhruf/eslint`, use
+`coding:guardrail`.
 
 End with the hand-off: the Replace lines are the input for `coding:remove-code`,
 listed as deletions (the dependency, the wrapper), not as swapped calls.

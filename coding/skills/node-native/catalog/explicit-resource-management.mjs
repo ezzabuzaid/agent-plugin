@@ -199,6 +199,8 @@ export default {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-unicorn@79.0.0',
       rule: 'unicorn/prefer-dispose',
+      on: 'modern-node/recommended',
+      note: 'TypeScript files only, because only types prove a disposer',
       code: 'const handle = open();\ntry {\n  use(handle);\n} finally {\n  handle.close();\n}',
     },
   },

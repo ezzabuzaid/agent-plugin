@@ -5,7 +5,8 @@
 //   { apis, reviewedAt, flags?, env?, replaces?, idioms?, lint? }
 //   replaces  { '<package>@<version>[/<subpath>]': { <member>[: <case>]: { native(), package(module), gap? | improves? } } }
 //   idioms    { <name>: { native(), idiom(), gap? | improves? } }
-//   lint      { <name>: { eslint: '<version>', plugin: '<package>@<version>', rule, code } }
+//   lint      { <name>: { eslint: '<version>', plugin: '<package>@<version>[/<subpath>]', rule, code,
+//                         on | failed | off | unmeasured, note? } }
 // `package(module, { url, load })` gets the package's root export, or its
 // subpath export when the key names one; the URL it was loaded from, for a
 // probe that runs the package in a child process; and `load(spec)`, which
@@ -13,6 +14,19 @@
 // needs `sha256` from `@noble/hashes/sha2.js`). `flags` (Node CLI flags) and `env` (environment variables)
 // are what the entry's native APIs need; the probes run with them, so a probe
 // that fails without them is the evidence they are needed.
+//
+// A lint row says one thing about its rule, and a catalog run checks it against
+// the configs in `<catalog>/support/lint-configs.mjs`:
+//   { <name>: { from: '<package>@<version>[/<subpath>]', config, peers } }
+//   `from` default-exports a plugin whose `configs[config]` is that config;
+//   `peers` is what npm does not install for it (an optional peer, or any peer
+//   under legacy-peer-deps). They install for each entry with a lint row. ESLint
+//   resolves each config for a JavaScript and a TypeScript file, as it does for
+//   a user, because a rule can be on for TypeScript files only.
+//   on          the config that turns the rule on
+//   failed      why the rule failed on real code (ADR 0008 of @zukhruf/eslint)
+//   off         why the rule is off, though it did not fail
+//   unmeasured  why the ADR has no judgment on it
 //
 // Claims and verdicts:
 //   a row without `gap` claims native() and the other side give deep-equal
@@ -22,7 +36,10 @@
 //   a row with `improves` (Node does better than the other side) claims the
 //     same difference: `holds`, or `improvement-lost` when they are now equal
 //     (Node lost the better behaviour, or the package caught up).
-//   a lint row claims the rule reports `code`: `holds`, or `broken`.
+//   a lint row claims the rule reports `code`: `holds`, or `broken`. In a
+//     catalog run it also claims its state: `config-mismatch` when a row with
+//     `on` names a config that does not turn the rule on, or a row without `on`
+//     has a rule that a config turns on.
 //   `probe-error`: the package side or the probe itself failed, or the row
 //     lacks the functions it must run, so the row proves nothing. A key that
 //     resolves to a Node built-in (an npm `buffer` or `string_decoder` keyed
@@ -88,10 +105,33 @@ async function compare(row, side, ...args) {
   return { claim, verdict: equal ? 'holds' : 'broken', ...evidence };
 }
 
-async function lint(row, load) {
+async function rulesOn({ from, config }, ESLint, load, cwd) {
+  const { default: plugin } = await load(from);
+  const eslint = new ESLint({ cwd, overrideConfigFile: true, overrideConfig: plugin.configs[config] });
+  const on = new Set();
+  for (const file of ['probe.mjs', 'probe.ts']) {
+    const { rules } = await eslint.calculateConfigForFile(file);
+    for (const [rule, [severity]] of Object.entries(rules)) if (severity !== 0) on.add(rule);
+  }
+  return on;
+}
+
+async function configMismatch(row, configs, resolve) {
+  if ('on' in row) {
+    const on = await resolve(configs[row.on]);
+    return on.has(row.rule) ? undefined : `${row.rule} is not on in ${row.on} of ${configs[row.on].from}`;
+  }
+  for (const [name, config] of Object.entries(configs)) {
+    const on = await resolve(config);
+    if (on.has(row.rule)) return `${row.rule} is on in ${name} of ${config.from}, but the row says it is not on`;
+  }
+  return undefined;
+}
+
+async function lint(row, load, configs, cwd) {
   const claim = 'reports';
   try {
-    const { Linter } = await load(`eslint@${row.eslint}`);
+    const { Linter, ESLint } = await load(`eslint@${row.eslint}`);
     const { default: plugin } = await load(row.plugin);
     const [namespace] = row.rule.split('/');
     const messages = new Linter({ configType: 'flat' }).verify(
@@ -100,8 +140,10 @@ async function lint(row, load) {
       'probe.mjs',
     );
     const reports = messages.filter((message) => message.ruleId === row.rule).map((message) => message.message);
-    if (reports.length > 0) return { claim, verdict: 'holds', other: reports.join('; ') };
-    return { claim, verdict: 'broken', other: preview({ value: messages }) };
+    if (reports.length === 0) return { claim, verdict: 'broken', other: preview({ value: messages }) };
+    const mismatch = configs && (await configMismatch(row, configs, (config) => rulesOn(config, ESLint, load, cwd)));
+    if (mismatch) return { claim, verdict: 'config-mismatch', other: mismatch };
+    return { claim, verdict: 'holds', other: reports.join('; ') };
   } catch (error) {
     return { claim, verdict: 'probe-error', other: preview({ threw: error?.message ?? String(error) }) };
   }
@@ -146,19 +188,19 @@ async function child() {
     rows.push({ group: 'idioms', member, ...(await compare(row, 'idiom')) });
   }
   for (const [member, row] of Object.entries(entry.lint ?? {})) {
-    rows.push({ group: 'lint', member, ...(await lint(row, load)) });
+    rows.push({ group: 'lint', member, ...(await lint(row, load, job.configs, job.from)) });
   }
   process.stdout.write(JSON.stringify(rows));
 }
 
-async function runEntry({ id, module, flags, env }, from) {
+async function runEntry({ id, module, flags, env }, from, configs) {
   const probe = spawn(process.execPath, ['--experimental-import-meta-resolve', ...flags, self, '--child'], {
     stdio: ['pipe', 'pipe', 'inherit'],
     env: { ...process.env, ...env },
     signal: AbortSignal.timeout(120_000),
     killSignal: 'SIGKILL',
   });
-  probe.stdin.end(JSON.stringify({ module, from }));
+  probe.stdin.end(JSON.stringify({ module, from, configs }));
   const [output, [status]] = await Promise.all([text(probe.stdout), once(probe, 'close')]);
   if (status !== 0) throw new Error(`the probes of ${id} exited ${status}`);
   return JSON.parse(output).map((row) => ({
@@ -179,15 +221,22 @@ async function entriesIn(directory, selected) {
   return catalog.map(runnable);
 }
 
+function installSpec(spec) {
+  const parsed = parseSpec(spec);
+  if (!parsed?.version) throw new Error(`${spec} is not <package>@<version>[/<subpath>]`);
+  return `${parsed.name}@${parsed.version}`;
+}
+
 // The `<package>@<version>` each entry needs installed; subpaths of one
 // version install once.
 function installsOf(entry) {
   const lint = Object.values(entry.lint ?? {}).flatMap((row) => [`eslint@${row.eslint}`, row.plugin]);
-  return [...Object.keys(entry.replaces ?? {}), ...lint].map((spec) => {
-    const parsed = parseSpec(spec);
-    if (!parsed?.version) throw new Error(`${spec} is not <package>@<version>[/<subpath>]`);
-    return `${parsed.name}@${parsed.version}`;
-  });
+  return [...Object.keys(entry.replaces ?? {}), ...lint].map(installSpec);
+}
+
+async function lintConfigs(directory) {
+  const { default: configs } = await import(pathToFileURL(join(directory, 'support', 'lint-configs.mjs')).href);
+  return configs;
 }
 
 async function install(directory, specs) {
@@ -245,10 +294,12 @@ async function main() {
   } else {
     const entries = await entriesIn(values.catalog, values.entry);
     await using scratch = await mkdtempDisposable(join(tmpdir(), 'node-native-probe-'));
-    const specs = [...new Set(entries.flatMap(({ entry }) => installsOf(entry)))];
+    const configs = entries.some(({ entry }) => entry.lint) ? await lintConfigs(values.catalog) : undefined;
+    const configSpecs = Object.values(configs ?? {}).flatMap(({ from, peers }) => [from, ...peers]).map(installSpec);
+    const specs = [...new Set([...entries.flatMap(({ entry }) => installsOf(entry)), ...configSpecs])];
     if (specs.length > 0) await install(scratch.path, specs);
     rows = [];
-    for (const entry of entries) rows.push(...(await runEntry(entry, scratch.path)));
+    for (const entry of entries) rows.push(...(await runEntry(entry, scratch.path, configs)));
   }
   process.stdout.write(`${JSON.stringify({ rows }, null, 2)}\n`);
   return rows.every((row) => row.verdict === 'holds') ? 0 : 1;

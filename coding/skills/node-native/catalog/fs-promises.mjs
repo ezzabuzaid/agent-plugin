@@ -81,6 +81,7 @@ export default {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-n@18.5.0',
       rule: 'n/prefer-promises/fs',
+      failed: '2 of 2 hits on good code: it reads fs.watch as callback I/O',
       code: "import fs from 'node:fs';\nfs.readFile('a', 'utf8', (error, data) => {});",
     },
   },

@@ -91,6 +91,7 @@ export default {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-unicorn@62.0.0',
       rule: 'unicorn/prefer-structured-clone',
+      failed: '9 of 9 hits on good code: the code wants the JSON form of the value',
       code: 'const copy = JSON.parse(JSON.stringify(value));',
     },
   },
@@ -174,6 +175,16 @@ Rules:
 - **Lint rows** pin the ESLint version `@zukhruf/eslint` resolves (10.12.0 on
   2026-11-06; read it from `~/Desktop/experiments/mutex`) and a plugin version
   that runs on it. The probe proves the pair works.
+- **A lint row says one thing about its rule:** `on` (the config that turns the
+  rule on), `failed` (why the rule failed on real code), `off` (why the rule is
+  off, though it did not fail) or `unmeasured` (why nothing judges it). Take it
+  from ADR 0008 of `@zukhruf/eslint` and from `modern-node/plugin.ts`, not from
+  memory. catalog.test.mjs refuses a row with none, a row with two, and two rows
+  that say different things about one rule. The probe reports `config-mismatch`
+  when the published configs in `catalog/support/lint-configs.mjs` disagree with
+  the row. To move to a new `@zukhruf/eslint`, change the version there and in
+  the rows that name it as their plugin. An optional `note` holds a limit of the
+  rule.
 - An entry claims at least one `replaces` or `idioms` row.
 
 ### 4. Prove

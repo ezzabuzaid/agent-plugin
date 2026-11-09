@@ -102,6 +102,7 @@ export default {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-unicorn@79.0.0',
       rule: 'unicorn/prefer-abort-signal-timeout',
+      off: 'no hits, but code cannot obey it: island/no-ambient-time reports AbortSignal.timeout in each library file',
       code: 'const controller = new AbortController(); setTimeout(() => controller.abort(), 1000); await fetch(url, { signal: controller.signal });',
     },
   },
