@@ -12,7 +12,7 @@
       "name": "coding",
       "description": "Progressive Guardrails output style, the write-test skill and its four test agents, the remove-code skill, the guardrail skill, and the node-native skill.",
       "source": "./coding",
-      "version": "1.5.1",
+      "version": "1.5.2",
       "category": "development"
     }
   ]
