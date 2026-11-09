@@ -27,6 +27,10 @@ const NOBLE_SHA3 = {
     keccak_512: 'keccak-512',
 };
 const NOBLE_BLAKE2 = { blake2b: 'blake2b512', blake2s: 'blake2s256' };
+// Node's docs: cSHAKE in crypto.hash needs a build with OpenSSL 4.0 or later. On
+// OpenSSL 3.5.9, the official build of Node 26.13, the name is not supported at
+// all, and WebCrypto's cSHAKE rejects a customization.
+const CSHAKE_GAP = "crypto.hash('cshake-128') and 'cshake-256' need a Node built with OpenSSL 4.0 or later, and subtle.digest rejects a customization on OpenSSL 3.5";
 // js-sha3 exports one function per algorithm, returning hex.
 const JS_SHA3 = {
   sha3_224: 'sha3-224',
@@ -133,11 +137,13 @@ export default {
         package: ({ default: jsSha3 }) => jsSha3.shake256(TEXT, 512),
       },
       cshake128: {
-        native: () => hash('cshake128', TEXT, { outputLength: 32, customization: 'app' }),
+        gap: CSHAKE_GAP,
+        native: () => hash('cshake-128', TEXT, { outputLength: 32, customization: 'app' }),
         package: ({ default: jsSha3 }) => jsSha3.cshake128(TEXT, 256, '', 'app'),
       },
       cshake256: {
-        native: () => hash('cshake256', TEXT, { outputLength: 64, functionName: 'KMAC', customization: 'app' }),
+        gap: CSHAKE_GAP,
+        native: () => hash('cshake-256', TEXT, { outputLength: 64, functionName: 'KMAC', customization: 'app' }),
         package: ({ default: jsSha3 }) => jsSha3.cshake256(TEXT, 512, 'KMAC', 'app'),
       },
     },
@@ -174,11 +180,13 @@ export default {
     },
     '@noble/hashes@2.4.0/sha3-addons.js': {
       cshake128: {
-        native: () => hash('cshake128', TEXT, { outputLength: 32, customization: 'app' }),
+        gap: CSHAKE_GAP,
+        native: () => hash('cshake-128', TEXT, { outputLength: 32, customization: 'app' }),
         package: ({ cshake128 }) => hex(cshake128(bytes(), { personalization: new TextEncoder().encode('app'), dkLen: 32 })),
       },
       cshake256: {
-        native: () => hash('cshake256', TEXT, { outputLength: 32, functionName: 'KMAC', customization: 'app' }),
+        gap: CSHAKE_GAP,
+        native: () => hash('cshake-256', TEXT, { outputLength: 32, functionName: 'KMAC', customization: 'app' }),
         package: ({ cshake256 }) =>
           hex(cshake256(bytes(), { personalization: new TextEncoder().encode('app'), NISTfn: 'KMAC', dkLen: 32 })),
       },
