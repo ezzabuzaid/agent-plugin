@@ -167,6 +167,26 @@ test('every lint row says one thing about its rule: on in a config, failed on re
   assert.deepEqual(problems, []);
 });
 
+test('every lint row names one subject: an idiom of its entry, a package its entry replaces, or a deprecated or legacy API', async () => {
+  const { surface, entries } = await committed();
+
+  const problems = entries.flatMap(({ id, entry }) =>
+    Object.entries(entry.lint ?? {}).flatMap(([name, row]) => {
+      const kinds = ['idiom', 'dependency', 'api'].filter((kind) => kind in row);
+      if (kinds.length !== 1) return [`${id} lint ${name}: names ${kinds.length} of idiom, dependency, api`];
+      const known = {
+        idiom: () => Object.keys(entry.idioms ?? {}).filter((key) => !key.includes(': ')).includes(row.idiom),
+        dependency: () => Object.keys(entry.replaces ?? {}).some((spec) => parseSpec(spec)?.name === row.dependency),
+        api: () => [0, 3].includes(surface.apis[row.api]?.stability),
+      };
+      const [kind] = kinds;
+      return known[kind]() ? [] : [`${id} lint ${name}: ${kind} ${row[kind]} is not one`];
+    }),
+  );
+
+  assert.deepEqual(problems, []);
+});
+
 test('a rule has the same state in every row that names it', async () => {
   const { entries } = await committed();
 

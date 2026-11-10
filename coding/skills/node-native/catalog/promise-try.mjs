@@ -48,6 +48,7 @@ export default {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-unicorn@79.0.0',
       rule: 'unicorn/prefer-promise-try',
+      idiom: 'resolveWrapper',
       failed: '2 of 7 hits on good code: Promise.try runs the function now, and the code defers it on purpose',
       code: 'const pending = new Promise((resolve) => resolve(work()));',
     },

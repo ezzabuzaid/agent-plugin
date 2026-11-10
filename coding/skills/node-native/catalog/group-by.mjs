@@ -85,6 +85,7 @@ export default {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-unicorn@79.0.0',
       rule: 'unicorn/prefer-group-by',
+      idiom: 'reduceIntoObject',
       on: 'modern-node/recommended',
       code: 'const groups = items.reduce((accumulator, item) => {\n  (accumulator[item.type] ??= []).push(item);\n  return accumulator;\n}, {});',
     },

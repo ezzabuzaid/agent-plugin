@@ -6,7 +6,10 @@
 //   replaces  { '<package>@<version>[/<subpath>]': { <member>[: <case>]: { native(), package(module), gap? | improves? } } }
 //   idioms    { <name>: { native(), idiom(), gap? | improves? } }
 //   lint      { <name>: { eslint: '<version>', plugin: '<package>@<version>[/<subpath>]', rule, code,
-//                         on | failed | off | unmeasured, note? } }
+//                         idiom | dependency | api, on | failed | off | unmeasured, note? } }
+//     `idiom`, `dependency` or `api` names what the row's `code` is: an idiom
+//     of the entry, a package the entry replaces, or a deprecated or legacy
+//     API as the surface names it. rules.mjs reads it; the probe does not.
 // `package(module, { url, load })` gets the package's root export, or its
 // subpath export when the key names one; the URL it was loaded from, for a
 // probe that runs the package in a child process; and `load(spec)`, which

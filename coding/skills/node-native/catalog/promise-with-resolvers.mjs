@@ -44,6 +44,7 @@ export default {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-unicorn@79.0.0',
       rule: 'unicorn/prefer-promise-with-resolvers',
+      idiom: 'deferred',
       on: 'modern-node/recommended',
       code: 'let resolve, reject;\nconst promise = new Promise((res, rej) => {\n  resolve = res;\n  reject = rej;\n});',
     },

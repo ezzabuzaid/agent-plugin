@@ -34,7 +34,7 @@ description: >
   the session scratchpad.
 - **This skill finds candidates. ESLint enforces them.** A run finds code that
   Node can replace. Only a rule that a repo has on protects that code on each
-  lint run.
+  lint run. The report names the findings that can become a rule (step 7).
 
 All scripts live in `scripts/` next to this file; run them as
 `node <this skill's directory>/scripts/<name>.mjs`. Each script's header comment
@@ -166,7 +166,41 @@ path. `holds` → **Replace**;
 anything else → **Unproven** with what you saw. State which directories you
 read; a directory you did not read is not "clean".
 
-### 7. Report
+### 7. Find the rule candidates
+
+A finding can become a lint check. The catalog knows which rule exists for
+it, and what ADR 0008 of `@zukhruf/eslint` says about that rule. A script reads
+this, so the report does not depend on what you remember.
+
+Write the findings to `<scratchpad>/findings.json`: one item for each site of
+each Replace, Partial and Deprecated in Node line.
+
+- `{ "file", "line", "entry", "idiom" }` for code that a catalog idiom proves.
+- `{ "file", "line", "entry", "dependency" }` for an import site of a package.
+- `{ "file", "line", "api" }` for a deprecated call. Use inventory's `api`. A
+  deprecated call is an `api` item, also when an idiom seed found it.
+
+```
+node scripts/rules.mjs <scratchpad>/findings.json
+```
+
+It puts each subject into one group, with its site count:
+
+- `covered`: a config turns a rule on. This is not a candidate.
+- `unmeasured`: a community rule exists, but nothing measured it. This is a
+  candidate: measure the rule.
+- `noRule`: no rule exists. This is a candidate for an own rule under
+  `modern-node/`.
+- `judged`: each rule failed or is off. ADR 0008 judged it, so this is not a
+  candidate. Give the reason, so that nobody proposes it again.
+
+Exit 2 means that an item names an entry, idiom, package or API that the
+catalog or the surface does not have. Correct the item, and run it again.
+
+A finding that only a site probe proves has no catalog idiom. Do not put it
+in the file. List it in the section as "not in the catalog".
+
+### 8. Report
 
 ```
 # node-native: <repo> on Node <lts>
@@ -190,6 +224,14 @@ read; a directory you did not read is not "clean".
 ## Unproven
 - <file:line> <claim> — <what is missing to prove it>
 
+## Rule candidates
+- Measure: <entry>/<subject> (<count> sites) — <plugin> <rule>, unmeasured.
+- Own rule: <entry>/<subject> (<count> sites) — no rule exists; candidate for `modern-node/`.
+- Not in the catalog: <file:line> <helper> → <native API>.
+Not candidates:
+- Covered: <entry>/<subject> (<count> sites) — <rule>, on in <config>.
+- Judged: <entry>/<subject> (<count> sites) — <rule>, <failed | off>: <reason>.
+
 Skipped (browser): <workspaces>. Read for hand-written code: <directories>.
 Not read: <directories and workspaces, and why (a subagent that could not start)>.
 ```
@@ -209,16 +251,21 @@ what it says. The source of these facts is ADR 0008 of `@zukhruf/eslint`.
 - `failed`: the rule failed on real code. Write "Known bad fix", with the reason.
   Never write "Mechanical" for this row.
 - `off`: the rule is off for the reason that the field gives. It gives no
-  protection, so do not name it.
+  protection, so do not name it on a Replace line. Rule candidates gives its
+  reason.
 - `unmeasured`: nothing has judged the rule. It gives no protection, so do not
-  name it.
+  name it on a Replace line. Rule candidates lists it as a rule to measure.
 - `note`: a limit of the rule, such as the files it reads. Write the note when
   it applies to the site.
 
 A `lint` probe that holds shows that the rule fires on the row's own code, and
 that the published config agrees with the field. It does not show that the rule covers each idiom of the entry, or that the rule
-is exact on other code. To add a rule to `@zukhruf/eslint`, use
-`coding:guardrail`.
+is exact on other code.
 
-End with the hand-off: the Replace lines are the input for `coding:remove-code`,
-listed as deletions (the dependency, the wrapper), not as swapped calls.
+End with two hand-offs:
+
+- The Replace lines are the input for `coding:remove-code`, listed as deletions
+  (the dependency, the wrapper), not as swapped calls.
+- The Measure and Own rule lines are the input for `coding:guardrail`. It
+  applies the bar of ADR 0008: at most 1 hit in 10 on good code. This skill
+  builds and measures no rule.

@@ -89,6 +89,7 @@ export default {
       eslint: '10.12.0',
       plugin: '@e18e/eslint-plugin@0.8.1',
       rule: 'e18e/prefer-get-or-insert',
+      idiom: 'getThenSet',
       failed: '2 of 7 hits on good code: the default runs on each call, so a cache stops working',
       code: 'let list = map.get(key);\nif (!list) {\n  list = [];\n  map.set(key, list);\n}',
     },

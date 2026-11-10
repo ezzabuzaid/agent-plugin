@@ -91,6 +91,7 @@ export default {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-unicorn@62.0.0',
       rule: 'unicorn/prefer-structured-clone',
+      idiom: 'jsonClone',                     // what `code` is: idiom | dependency | api
       failed: '9 of 9 hits on good code: the code wants the JSON form of the value',
       code: 'const copy = JSON.parse(JSON.stringify(value));',
     },
@@ -185,6 +186,12 @@ Rules:
   the row. To move to a new `@zukhruf/eslint`, change the version there and in
   the rows that name it as their plugin. An optional `note` holds a limit of the
   rule.
+- **A lint row names what its `code` is:** `idiom` (an idiom of the entry),
+  `dependency` (a package the entry replaces) or `api` (a deprecated or legacy
+  API, as the surface names it). The row is about that one thing. Two rules for
+  one idiom are two rows. rules.mjs reads this to say which findings of a run
+  have a rule. catalog.test.mjs refuses a row with none, a row with two, and a
+  name that the entry or the surface does not have.
 - An entry claims at least one `replaces` or `idioms` row.
 
 ### 4. Prove

@@ -180,6 +180,7 @@ export default {
       eslint: '10.12.0',
       plugin: 'eslint-plugin-unicorn@79.0.0',
       rule: 'unicorn/no-new-buffer',
+      api: 'buffer:new Buffer',
       on: 'modern-node/recommended',
       code: 'const bytes = new Buffer(16);',
     },
