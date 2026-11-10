@@ -231,8 +231,7 @@ test('a dependency takes only the rows of the entry the finding names, and an ap
   });
 
   const result = JSON.parse(stdout);
-  assert.deepEqual(result.noRule, [{ entry: 'group-by', dependency: 'lodash', count: 1, sites: ['e.ts:1'], rules: [] }]);
-  assert.deepEqual(result.judged, []);
+  assert.deepEqual(result.skillKeeps, [{ entry: 'group-by', dependency: 'lodash', count: 1, sites: ['e.ts:1'], rules: [] }]);
   assert.deepEqual(result.covered, [
     {
       api: 'buffer:new Buffer',
@@ -241,4 +240,41 @@ test('a dependency takes only the rows of the entry the finding names, and an ap
       rules: [{ plugin: 'eslint-plugin-x@1.0.0', rule: 'unicorn/no-new-buffer', state: 'on', says: 'modern-node/recommended' }],
     },
   ]);
+});
+
+test('a dependency is never a rule candidate: with no rule, an unmeasured rule or a failed one the skill keeps it, and only a rule on covers it', async () => {
+  await using dir = await mkdtempDisposable(join(tmpdir(), 'rules-'));
+  const ban = (fields) => row({ plugin: 'eslint-plugin-depend@1.5.0', rule: 'depend/ban-dependencies', ...fields });
+
+  const { stdout } = await rules(dir.path, {
+    entries: {
+      'server-close': { replaces: { '@godaddy/terminus@4.12.1': {} } },
+      'style-text': {
+        replaces: { 'chalk@5.0.0': {}, 'kleur@4.1.5': {} },
+        lint: { chalk: ban({ dependency: 'chalk', failed: 'reads only the package name' }), kleur: ban({ dependency: 'kleur', unmeasured: 'not judged' }) },
+      },
+      fetch: { replaces: { 'node-fetch@3.3.2': {} }, lint: { nodeFetch: ban({ dependency: 'node-fetch', on: 'modern-node/recommended' }) } },
+    },
+    findings: [
+      { file: 'a.ts', line: 1, entry: 'server-close', dependency: '@godaddy/terminus' },
+      { file: 'b.ts', line: 2, entry: 'style-text', dependency: 'chalk' },
+      { file: 'c.ts', line: 3, entry: 'style-text', dependency: 'kleur' },
+      { file: 'd.ts', line: 4, entry: 'fetch', dependency: 'node-fetch' },
+    ],
+  });
+
+  const result = JSON.parse(stdout);
+  assert.deepEqual([result.noRule, result.unmeasured, result.judged], [[], [], []]);
+  assert.deepEqual(
+    result.skillKeeps.map(({ dependency, rules }) => [dependency, rules.map(({ state }) => state)]),
+    [
+      ['@godaddy/terminus', []],
+      ['chalk', ['failed']],
+      ['kleur', ['unmeasured']],
+    ],
+  );
+  assert.deepEqual(
+    result.covered.map(({ dependency }) => dependency),
+    ['node-fetch'],
+  );
 });

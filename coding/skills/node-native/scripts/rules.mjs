@@ -21,9 +21,14 @@
 //   noRule      no row names the subject: a candidate for an own rule
 //   judged      every row `failed` or is `off`: ADR 0008 judged it, so it is
 //               no candidate; `says` gives the reason
+//   skillKeeps  a dependency with no row `on`: a package swap is no lint rule.
+//               ADR 0008 says a rule reads only the package name, and the code
+//               can need the package for what no native API does, so this
+//               skill judges each site. Only an idiom or an api can be in
+//               unmeasured or noRule.
 //
 // Stdout is one JSON document:
-//   { covered, unmeasured, noRule, judged: [{ entry?, idiom | dependency | api,
+//   { covered, unmeasured, noRule, judged, skillKeeps: [{ entry?, idiom | dependency | api,
 //       count, sites: ['<file>:<line>'], rules: [{ plugin, rule, state, says }] }] }
 // Exit 0: listed. Exit 2: a finding names what the catalog or the surface does
 // not have, or a read failed; reason on stderr.
@@ -45,9 +50,10 @@ const keyOf = (entry, item) => {
   return kind === 'api' ? `api ${item.api}` : `${entry} ${kind} ${item[kind]}`;
 };
 
-function groupOf(rules) {
+function groupOf(kind, rules) {
   const states = new Set(rules.map(({ state }) => state));
   if (states.has('on')) return 'covered';
+  if (kind === 'dependency') return 'skillKeeps';
   if (states.has('unmeasured')) return 'unmeasured';
   return rules.length === 0 ? 'noRule' : 'judged';
 }
@@ -98,12 +104,12 @@ async function main() {
     ),
     ({ key }) => key,
   );
-  const groups = { covered: [], unmeasured: [], noRule: [], judged: [] };
+  const groups = { covered: [], unmeasured: [], noRule: [], judged: [], skillKeeps: [] };
   for (const [key, sites] of Map.groupBy(findings, (finding) => keyOf(finding.entry, finding))) {
     const [first] = sites;
     const kind = kindOf(first);
     const rules = (rulesBySubject.get(key) ?? []).map(({ rule }) => rule);
-    groups[groupOf(rules)].push({
+    groups[groupOf(kind, rules)].push({
       ...(kind !== 'api' && { entry: first.entry }),
       [kind]: first[kind],
       count: sites.length,

@@ -193,6 +193,11 @@ It puts each subject into one group, with its site count:
   `modern-node/`.
 - `judged`: each rule failed or is off. ADR 0008 judged it, so this is not a
   candidate. Give the reason, so that nobody proposes it again.
+- `skillKeeps`: a package that no rule `on` covers. This is not a candidate. A
+  lint rule reads only the package name, and the code can need the package for
+  what no native API does (ADR 0008). This skill judges each site instead.
+
+Only an idiom or an API can be a candidate.
 
 Exit 2 means that an item names an entry, idiom, package or API that the
 catalog or the surface does not have. Correct the item, and run it again.
@@ -231,6 +236,7 @@ in the file. List it in the section as "not in the catalog".
 Not candidates:
 - Covered: <entry>/<subject> (<count> sites) — <rule>, on in <config>.
 - Judged: <entry>/<subject> (<count> sites) — <rule>, <failed | off>: <reason>.
+- Package: <entry>/<package> (<count> sites) — a package swap; this skill judges it per site, not a lint rule (ADR 0008).
 
 Skipped (browser): <workspaces>. Read for hand-written code: <directories>.
 Not read: <directories and workspaces, and why (a subagent that could not start)>.

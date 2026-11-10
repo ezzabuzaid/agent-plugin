@@ -38,5 +38,13 @@ export default {
       on: 'modern-node/recommended',
       code: "import path from 'node:path';\nimport { fileURLToPath } from 'node:url';\nconst here = path.dirname(fileURLToPath(import.meta.url));",
     },
+    filenameFromUrl: {
+      eslint: '10.12.0',
+      plugin: 'eslint-plugin-unicorn@79.0.0',
+      rule: 'unicorn/prefer-import-meta-properties',
+      idiom: 'filenameFromUrl',
+      on: 'modern-node/recommended',
+      code: "import { fileURLToPath } from 'node:url';\nconst file = fileURLToPath(import.meta.url);",
+    },
   },
 };
