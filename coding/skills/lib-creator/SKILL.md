@@ -67,7 +67,7 @@ Do this step before the first design message.
    - The package exports mechanism (classes, functions), never instances or `configure*` slots. A thing that owns a resource over time is a class with `[Symbol.asyncDispose]`.
 4. **Write the paper** in the doc shape of the repo; read a sibling's README, CONTEXT.md and `docs/adr` first. The README has task sections, the signature block, a call → what happens underneath table, the errors, "the same concepts in other systems", why each npm candidate failed, and who uses what. CONTEXT.md holds the glossary. Each decision gets an ADR whose name is a sentence. A port keeps `docs/ported-from-<upstream>.md`.
 5. **Commit the paper alone,** in a folder with no package.json and no tsconfig, with a "design for review" banner: `docs(<pkg>): the API on paper of …, for review before any code`.
-6. **Review it in chat,** not as a path. Show the now/later/never map, the layer diagram, and each decision with its precedent. Show each change that a caller can see (export, signature, option, default, error) as before/after with its cost. Say what you decided and why. Then get the user's ruling on each change with AskUserQuestion in the same turn (in Codex, ask in plain text). Never end the turn on questions in prose.
+6. **Review it in chat,** not as a path. Show the now/later/never map, the layer diagram, and each decision with its precedent. Show each change that a caller can see (export, signature, option, default, error) as before/after with its cost. Say what you decided and why. Then get the user's ruling on each change with AskUserQuestion in the same turn (in Codex, ask in plain text).
 
 **Done when** the user has ruled on the paper. No code comes before that.
 
@@ -87,7 +87,7 @@ Before the first code commit, ask the user whether the package is public or priv
 
 ## 6. Build and test it
 
-- Load `coding:write-test` before the first test. Test through the public entry, on the real path, one RED → GREEN at a time, failure modes first.
+- Load `coding:write-test` before the first test, and follow it.
 - Build the units of the paper in dependency order. When the user wants to learn the package, build one unit at a time: teach it, test it, commit it, pause.
 - A port proves itself with one scenario suite that runs against the real upstream and against the port.
 - Each rule that a machine can see goes into a check (`coding:guardrail`), not into the README.
@@ -101,7 +101,7 @@ Before a push, run `git fetch origin`, list `git log origin/main..HEAD` with the
 
 Read the repo's release section and workflow before the first push, and follow them:
 
-- zukhruf: a green CI run on a push of `feat`, `fix` or `refactor` to main publishes. Never run `nx release` or make tags. Preview with `npx nx release version --dry-run`.
+- zukhruf: the README's `## Release`. Never run `nx release` or make tags.
 - deepagents: push main and wait for green CI; the user runs `nx release`.
 - A repo with no workflow releases nothing on push: run each check locally and name what ran.
 
