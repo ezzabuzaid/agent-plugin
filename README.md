@@ -37,9 +37,11 @@ component. Three layers on top of normal coding work:
 
 It also ships the **write-test** skill and its four test agents (discoverer, claim
 comparator, mutation prover, gotcha reviewer), the **remove-code** skill, the
-**guardrail** skill, which turns a rule stated in words into a check that a machine runs, and
+**guardrail** skill, which turns a rule stated in words into a check that a machine runs,
 the **node-native** skill, which reports what the current Node LTS already does for a
-codebase, each claim proved by a probe. See [coding/README.md](./coding/README.md).
+codebase, each claim proved by a probe, and the **lib-creator** skill, which creates a library
+package from the decision that it should exist to the last consumer that moves onto it. See
+[coding/README.md](./coding/README.md).
 
 ## Selecting the style
 

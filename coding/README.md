@@ -72,6 +72,17 @@ and runs every probe again, so a gap that Node has closed shows up as `gap-close
 
 The scripts have their own tests: `node --test skills/node-native/scripts/*.test.mjs`.
 
+## lib-creator skill
+
+[`skills/lib-creator`](./skills/lib-creator/SKILL.md) creates a library package from the
+first question to the last consumer. It decides whether the library should exist (own
+packages, native Node, npm, the Rule of Three) and where, takes the scope and the name from
+the standard libraries of Go and .NET, puts the API on paper for review before any code,
+scaffolds the package from the repo's newest package commit, tests it with `write-test`,
+releases it the way the repo releases, and moves each consumer off its copy with
+`remove-code`. [`references/RULINGS.md`](./skills/lib-creator/references/RULINGS.md) gives
+the decision behind each step and how conflicting rulings were settled.
+
 ## Install
 
 ```
@@ -90,7 +101,7 @@ codex plugin marketplace add ezzabuzaid/agent-plugin
 codex plugin add coding@ezzabuzaid
 ```
 
-Update with `codex plugin marketplace upgrade ezzabuzaid`. All three skills load. Codex plugins
+Update with `codex plugin marketplace upgrade ezzabuzaid`. All the skills load. Codex plugins
 can't ship agents, so write-test starts a general subagent with each agent's file as its
 brief. The output style is Claude Code only; Codex ignores it.
 
