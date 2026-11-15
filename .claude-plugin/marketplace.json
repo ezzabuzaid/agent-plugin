@@ -10,9 +10,9 @@
   "plugins": [
     {
       "name": "coding",
-      "description": "Progressive Guardrails output style, the write-test skill and its four test agents, the remove-code skill, the guardrail skill, and the node-native skill.",
+      "description": "Progressive Guardrails output style, the write-test skill and its four test agents, the remove-code skill, the guardrail skill, the node-native skill, and the lib-creator skill.",
       "source": "./coding",
-      "version": "1.5.7",
+      "version": "1.5.8",
       "category": "development"
     }
   ]
