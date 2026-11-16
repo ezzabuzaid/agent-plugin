@@ -59,6 +59,15 @@ test('checks a Monitor command as it checks a Bash command, and leaves other too
   assert.equal(decide('Read', { file_path: '/tmp/git reset --hard' }), undefined);
 });
 
+test('hands the cwd of its input to the shell checks, so a relative link lands where the session runs', () => {
+  const command = 'ln -s ../../packages/pipes node_modules/@zukhruf/pipes';
+  assert.match(
+    runHook(command, '/Users/me/code/mutex')?.hookSpecificOutput?.permissionDecisionReason ?? '',
+    /makes a link by hand in \/Users\/me\/code\/mutex\/node_modules\/@zukhruf; /,
+  );
+  assert.equal(runHook(command, '/private/tmp/x'), null);
+});
+
 test('blocks git commit --amend, which rewrites the last commit', () => {
   assertBlocked('git commit --amend --no-edit', 'commit');
 });

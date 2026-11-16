@@ -2,6 +2,8 @@
 // was measured against 45 days of real commands: under about 1 hit in 10 on good
 // code. Word splitting, unmatched globs and `=word` have no check here: the agent shell
 // removes them with SH_WORD_SPLIT, NO_NOMATCH and NO_EQUALS (agent-shell.zsh, beside this file).
+import { homedir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import {
 	HEREDOC_BODY,
 	redirection,
@@ -18,6 +20,8 @@ import {
 export interface ShellCommand {
 	command: string;
 	tool: 'Bash' | 'Monitor';
+	// The folder the session runs the command in, from the hook input.
+	cwd: string;
 }
 
 // ---- zsh reads the text differently from bash ------------------------------
@@ -735,11 +739,204 @@ function exitAfterPipe(command: string): string | null {
 	return null;
 }
 
+// ---- links into node_modules ---------------------------------------------------
+
+// Ezz, 2026-11-02: "Always npm install". npm does not record a link made by hand in
+// node_modules, and the next install replaces or removes it. Of 892 past commands that
+// run `ln` (24,694 transcripts, to 2026-11-16), this check refuses 33, each a link into
+// the node_modules of a checkout. A node_modules in a scratch folder stays open.
+const SCRATCH_ROOTS = [process.env.TMPDIR, '/tmp', '/private/tmp', '/var/folders', '/private/var/folders', join(homedir(), '.claude/scratch')]
+	.filter((root): root is string => Boolean(root))
+	.map((root) => resolve(root));
+
+const inScratch = (folder: string) =>
+	`${folder}/`.includes('/scratchpad/') || SCRATCH_ROOTS.some((root) => folder === root || folder.startsWith(`${root}/`));
+
+// The subshell or $( ) around each position, as the index where it opens (-1 for none),
+// and the one around each of those. A `cd` or an assignment reaches only the commands
+// inside its own subshell.
+interface Groups {
+	at: number[];
+	around: Map<number, number>;
+}
+
+function groups(text: string): Groups {
+	const at = new Array<number>(text.length).fill(-1);
+	const around = new Map<number, number>();
+	const stack: { open: number; subshell: boolean }[] = [];
+	const innermost = () => stack.findLast(({ subshell }) => subshell)?.open ?? -1;
+	const open = (i: number, subshell: boolean) => {
+		if (subshell) around.set(i, innermost());
+		stack.push({ open: i, subshell });
+	};
+	zshWalk(
+		text,
+		(i, context) => {
+			at[i] = innermost();
+			if (context !== 'unquoted') return;
+			if (text[i] === '(') open(i, i === 0 || /[\s;|&(]/.test(text[i - 1]));
+			else if (text[i] === ')') stack.pop();
+		},
+		(i) => (text[i] === '(' ? open(i, true) : stack.pop()),
+	);
+	return { at, around };
+}
+
+function reaches({ at, around }: Groups, from: number, to: number): boolean {
+	for (let group = at[to]; group !== -1; group = around.get(group) ?? -1) if (group === at[from]) return true;
+	return at[from] === -1;
+}
+
+interface Script {
+	text: string;
+	cwd: string;
+	groups: Groups;
+	open: Set<number>;
+}
+
+// The words of the simple command at `at`, or null when a backtick ends it: the words
+// then hold the output of a command.
+function wordsAt(text: string, at: number): string[] | null {
+	const simple = simpleCommand(text, at);
+	return text[at + simple.length] === '`' ? null : shellWords(simple);
+}
+
+// The last `name=value` before `at` that reaches it, as its value (null when a backtick
+// makes it) and position.
+function assignmentBefore({ text, groups: scopes, open }: Script, name: string, at: number): { value: string | null; at: number } | null {
+	let found: { value: string | null; at: number } | null = null;
+	for (const match of text.matchAll(new RegExp(`(?<=^|[\\s;&|(])${name}=`, 'g'))) {
+		if (match.index >= at) break;
+		if (!open.has(match.index) || !reaches(scopes, match.index, at)) continue;
+		const from = match.index + match[0].length;
+		const words = /^[\s;&|)]?$/.test(text.charAt(from)) ? [''] : wordsAt(text, from);
+		found = { value: words && (words[0] ?? ''), at: match.index };
+	}
+	return found;
+}
+
+function variable(script: Script, name: string, at: number, pwd: string | null): string | null {
+	const assigned = assignmentBefore(script, name, at);
+	if (assigned) return assigned.value === null || assigned.value.startsWith('(') ? null : expand(script, assigned.value, assigned.at, folderAt(script, assigned.at));
+	if (name === 'HOME') return homedir();
+	return name === 'PWD' ? pwd : null;
+}
+
+// The word after zsh expands it at `at`, or null when the text does not hold its value:
+// the output of a command, a variable it does not assign, another user's home.
+function expand(script: Script, word: string, at: number, pwd: string | null): string | null {
+	let out = '';
+	let i = 0;
+	if (word === '~' || word.startsWith('~/')) {
+		out = homedir();
+		i = 1;
+	} else if (word.startsWith('~')) return null;
+	let quoted = false;
+	while (i < word.length) {
+		const ch = word[i];
+		if (ch === "'" && !quoted) {
+			const end = word.indexOf("'", i + 1);
+			if (end === -1) return null;
+			out += word.slice(i + 1, end);
+			i = end + 1;
+		} else if (ch === '"') {
+			quoted = !quoted;
+			i += 1;
+		} else if (ch === '\\') {
+			out += word.charAt(i + 1);
+			i += 2;
+		} else if (ch === '$') {
+			const name = word.slice(i).match(/^\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\})/);
+			const value = name && variable(script, name[1] ?? name[2], at, pwd);
+			if (!name || value === null) return null;
+			out += value;
+			i += name[0].length;
+		} else {
+			out += ch;
+			i += 1;
+		}
+	}
+	return out;
+}
+
+// The folder a command at `at` runs in: the cwd, then each `cd` before it that reaches it.
+// Null when a `cd` goes where the text cannot tell.
+function folderAt(script: Script, at: number): string | null {
+	let folder = script.cwd;
+	for (const cd of commandPositions(script.text, 'cd')) {
+		if (cd >= at || !reaches(script.groups, cd, at)) continue;
+		const words = wordsAt(script.text, cd);
+		if (!words) return null;
+		const target = words.slice(1).find((word) => word !== '--' && !/^-[qsLP]+$/.test(word));
+		if (target === '-') return null;
+		const path = target === undefined ? homedir() : expand(script, target, cd, folder);
+		if (path === null) return null;
+		folder = resolve(folder, path);
+	}
+	return folder;
+}
+
+// Where `ln -s` puts its link: the last operand, or the folder of -t. GNU ln takes -t and
+// long options; BSD ln, the one on macOS, takes neither. With more than two operands, the
+// last one is the folder that holds the links.
+function linkDestination(words: string[]): { word: string; folder: boolean } | null {
+	let symbolic = false;
+	let folder: string | undefined;
+	const operands: string[] = [];
+	for (let i = 0; i < words.length; i += 1) {
+		const word = words[i];
+		const redirect = redirection(word);
+		if (redirect) {
+			if (redirect.target) i += 1;
+		} else if (word === '--') operands.push(...words.slice(i + 1).filter((rest) => !redirection(rest)));
+		else if (word.startsWith('--')) {
+			if (word === '--symbolic') symbolic = true;
+			else if (word.startsWith('--target-directory=')) folder = word.slice('--target-directory='.length);
+			else if (word === '--target-directory') folder = words[(i += 1)];
+			else if (word === '--suffix') i += 1;
+		} else if (word.startsWith('-') && word.length > 1) {
+			for (let k = 1; k < word.length; k += 1) {
+				if (word[k] === 's') symbolic = true;
+				if (word[k] !== 't' && word[k] !== 'S') continue;
+				const value = word.slice(k + 1) || words[(i += 1)];
+				if (word[k] === 't') folder = value;
+				break;
+			}
+		} else operands.push(word);
+		if (word === '--') break;
+	}
+	if (!symbolic) return null;
+	if (folder !== undefined) return operands.length > 0 ? { word: folder, folder: true } : null;
+	return operands.length > 1 ? { word: operands.at(-1)!, folder: operands.length > 2 } : null;
+}
+
+function nodeModulesSymlink(command: string, cwd: string): string | null {
+	const text = withoutDataHeredocs(command);
+	if (!/(?:^|[^\w./-])ln\s/.test(text)) return null;
+	const script: Script = { text, cwd, groups: groups(text), open: openPositions(text, 'unquoted') };
+	for (const at of commandPositions(text, 'ln')) {
+		const words = wordsAt(text, at);
+		const destination = words && linkDestination(words.slice(1));
+		if (!destination) continue;
+		const pwd = folderAt(script, at);
+		if (pwd === null) continue;
+		const path = expand(script, destination.word, at, pwd);
+		if (path === null) continue;
+		const resolved = resolve(pwd, path);
+		const holder = destination.folder || path.endsWith('/') ? resolved : dirname(resolved);
+		const segments = holder.split('/');
+		const nodeModules = segments.indexOf('node_modules');
+		if (nodeModules === -1 || inScratch(segments.slice(0, nodeModules).join('/') || '/')) continue;
+		return `Blocked: this \`ln -s\` makes a link by hand in ${holder}; npm never records it and the next \`npm install\` deletes it. Link through npm instead: \`npm install\` at the repo root for this repo's own workspaces; \`npm link <path>\`, \`npm install <path>\` (a \`file:\` dependency) or a root \`overrides\` entry for another checkout's package; \`npm rebuild <pkg>\` for a \`.bin\` link. Links in a scratch folder are allowed.`;
+	}
+	return null;
+}
+
 // Monitor streams through grep by design, so the pipe checks are for Bash only.
-export function shellTrap({ command, tool }: ShellCommand): string | null {
-	const inEveryShell = [modifiedVariable, reservedAssignment, backtick, pipestatus, sedInPlace, bareQualifier, pgrepWatcher, killByPattern];
+export function shellTrap({ command, tool, cwd }: ShellCommand): string | null {
+	const inEveryShell = [modifiedVariable, reservedAssignment, backtick, pipestatus, sedInPlace, bareQualifier, pgrepWatcher, killByPattern, nodeModulesSymlink];
 	for (const check of inEveryShell) {
-		const reason = check(command);
+		const reason = check(command, cwd);
 		if (reason) return reason;
 	}
 	if (tool !== 'Bash') return null;

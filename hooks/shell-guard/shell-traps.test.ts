@@ -2,18 +2,18 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 // GIT_GUARD_SCRIPT lets the suite run against a scratch copy before the real hook is replaced.
 const SCRIPT =
   process.env.GIT_GUARD_SCRIPT ?? new URL('./block-git-mutation.ts', import.meta.url).pathname;
 
-function decide(command: string, { tool = 'Bash', background = false } = {}): string | null {
+function decide(command: string, { tool = 'Bash', background = false, cwd = process.cwd() } = {}): string | null {
   const result = spawnSync('node', [SCRIPT], {
     input: JSON.stringify({
       tool_name: tool,
-      cwd: process.cwd(),
+      cwd,
       tool_input: background ? { command, run_in_background: true } : { command },
     }),
     encoding: 'utf8',
@@ -243,6 +243,109 @@ test('denies a kill that picks targets by a pattern, and allows one that names t
   assertAllowed('pgrep -f x | xargs kill -0');
   assertAllowed(`kill $(pgrep -f 'node$')`);
   assertAllowed('kill $(ps -p 123 | grep node | cut -c1-5)');
+});
+
+// Ezz, 2026-11-02: "Always npm install". 2026-11-14: `ln -s ../../packages/pipes
+// node_modules/@zukhruf/pipes` in a checkout, one of 23 such links in past commands.
+test('denies a symbolic link that ln makes in the node_modules of a checkout, in each form ln takes', () => {
+  const cwd = '/Users/me/code/mutex';
+  const command = 'ln -s ../../packages/pipes node_modules/@zukhruf/pipes';
+  assert.equal(
+    decide(command, { cwd }),
+    `Blocked: this ${BT}ln -s${BT} makes a link by hand in /Users/me/code/mutex/node_modules/@zukhruf; npm never records it and the next ${BT}npm install${BT} deletes it. Link through npm instead: ${BT}npm install${BT} at the repo root for this repo's own workspaces; ${BT}npm link <path>${BT}, ${BT}npm install <path>${BT} (a ${BT}file:${BT} dependency) or a root ${BT}overrides${BT} entry for another checkout's package; ${BT}npm rebuild <pkg>${BT} for a ${BT}.bin${BT} link. Links in a scratch folder are allowed. Command: ${command}`,
+  );
+  const scoped = /makes a link by hand in \/Users\/me\/code\/mutex\/node_modules\/@z; /;
+  const top = /makes a link by hand in \/Users\/me\/code\/mutex\/node_modules; /;
+  assertDenied('ln --symbolic ../p node_modules/@z/p', scoped, { cwd });
+  assertDenied('ln -sfn ../p node_modules/@z/p', scoped, { cwd });
+  assertDenied('ln -f -s ../p node_modules/@z/p', scoped, { cwd });
+  assertDenied('ln -s -t node_modules/@z ../../packages/p', scoped, { cwd });
+  assertDenied('ln -st node_modules/@z ../../packages/p', scoped, { cwd });
+  assertDenied('ln -s --target-directory=node_modules/@z ../p', scoped, { cwd });
+  assertDenied('ln -s --target-directory node_modules/@z ../p', scoped, { cwd });
+  assertDenied('ln -s ../a ../b node_modules/@z', scoped, { cwd });
+  assertDenied('ln -s ../p node_modules/', top, { cwd });
+  assertDenied('ln -s -S .bak ../p node_modules/p', top, { cwd });
+  assertDenied('ln -s --suffix .bak ../p node_modules/p', top, { cwd });
+  assertDenied('ln -sf ../p node_modules/p 2>/dev/null || true', top, { cwd });
+  assertDenied('sudo ln -s ../p /Users/me/code/app/node_modules/p', /makes a link by hand in \/Users\/me\/code\/app\/node_modules; /, { cwd });
+  assertDenied(`ln -s ../p '/Users/me/code/app/node_modules/p'`, /makes a link by hand in \/Users\/me\/code\/app\/node_modules; /, { cwd });
+  assertDenied('ln -s ../p /Users/me/code/my\\ app/node_modules/p', /makes a link by hand in \/Users\/me\/code\/my app\/node_modules; /, { cwd });
+  assertDenied('ln -s ../p node_modules/@z/p', scoped, { cwd, tool: 'Monitor' });
+});
+
+// A judge of 33 real refusals, 2026-11-16: about half linked the repo's own workspace
+// package, which a plain `npm install` at the repo root links.
+test('the refusal of a node_modules link names npm install at the repo root and the scratch exemption', () => {
+  const cwd = '/Users/me/code/mutex';
+  const command = 'ln -s ../../packages/pipes node_modules/@zukhruf/pipes';
+  assertDenied(command, new RegExp(`${BT}npm install${BT} at the repo root for this repo's own workspaces;`), { cwd });
+  assertDenied(command, /Links in a scratch folder are allowed\./, { cwd });
+});
+
+test('denies a link that an earlier cd, a variable, ~, $HOME or $PWD puts in the node_modules of a checkout', () => {
+  const cwd = '/Users/me/code/mutex';
+  const scratch = '/private/tmp/x';
+  const app = /makes a link by hand in \/Users\/me\/code\/app\/node_modules; /;
+  const home = new RegExp(`makes a link by hand in ${RegExp.escape(homedir())}/code/app/node_modules; `);
+  assertDenied('cd packages/x && ln -s ../../../packages/pipes node_modules/@zukhruf/pipes', /makes a link by hand in \/Users\/me\/code\/mutex\/packages\/x\/node_modules\/@zukhruf; /, { cwd });
+  assertDenied('cd /Users/me/code/app; ln -s ../p node_modules/p', app, { cwd });
+  assertDenied('cd /Users/me/code/app && ln -s ../p node_modules/p', app, { cwd: scratch });
+  assertDenied('cd /private/tmp/x && cd /Users/me/code/app && ln -s ../p node_modules/p', app, { cwd });
+  assertDenied('cd /Users/me/code && cd app && ln -s ../p node_modules/p', app, { cwd: scratch });
+  assertDenied('cd /Users/me/code && cd -P app && ln -s ../p node_modules/p', app, { cwd: scratch });
+  assertDenied('cd node_modules && ln -s ../p p', /makes a link by hand in \/Users\/me\/code\/mutex\/node_modules; /, { cwd });
+  assertDenied('cd && ln -s ../p code/app/node_modules/p', home, { cwd: scratch });
+  assertDenied('D=/Users/me/code/app/node_modules; ln -s ../p $D/p', app, { cwd });
+  assertDenied('cd /Users/me/code/app && D="$PWD/node_modules" && ln -s ../p "$D/p"', app, { cwd: scratch });
+  assertDenied('cd /Users/me/code/app && ln -s ../p $PWD/node_modules/p', app, { cwd: scratch });
+  assertDenied('ln -s ../p ~/code/app/node_modules/p', home, { cwd });
+  assertDenied('ln -s ../p $HOME/code/app/node_modules/p', home, { cwd });
+  assertDenied('ln -s ../p "${HOME}/code/app/node_modules/p"', home, { cwd });
+  // A cd in a subshell or a $( ) does not move the commands after it.
+  assertDenied('(cd /private/tmp/x && ls); ln -s ../p node_modules/p', /makes a link by hand in \/Users\/me\/code\/mutex\/node_modules; /, { cwd });
+  assertDenied('X=$(cd /private/tmp/x && pwd); ln -s ../p node_modules/p', /makes a link by hand in \/Users\/me\/code\/mutex\/node_modules; /, { cwd });
+});
+
+test('allows a link in the node_modules of a scratch folder', () => {
+  const cwd = '/Users/me/code/mutex';
+  assertAllowed('ln -sfn /Users/me/code/mutex/node_modules /private/tmp/x/node_modules', { cwd });
+  assertAllowed('ln -s ../p /private/tmp/x/node_modules/p', { cwd });
+  assertAllowed('ln -s ../p /tmp/x/node_modules/p', { cwd });
+  assertAllowed('ln -s ../p /var/folders/ab/T/x/node_modules/p', { cwd });
+  assertAllowed('ln -s ../p ~/.claude/scratch/x/node_modules/p', { cwd });
+  assertAllowed('ln -s ../p /Users/me/s/scratchpad/c/node_modules/p', { cwd });
+  assertAllowed('ln -s ../p node_modules/p', { cwd: '/private/tmp/x' });
+  assertAllowed('cd /private/tmp/x && ln -s ../p node_modules/p', { cwd });
+  assertAllowed('(cd /private/tmp/x && ln -s ../p node_modules/p)', { cwd });
+});
+
+test('allows the links npm makes, links outside node_modules, and text that only names ln', () => {
+  const cwd = '/Users/me/code/mutex';
+  assertAllowed('npm link ../mutex/packages/launchd', { cwd });
+  assertAllowed('npm install ../x', { cwd });
+  assertAllowed('ln -s ../a b', { cwd });
+  assertAllowed('ln -s ../../node_modules/.bin/x bin/x', { cwd });
+  assertAllowed('ln -s ../p node_modules/../p', { cwd });
+  assertAllowed('ln ../p node_modules/p', { cwd });
+  assertAllowed('echo "ln -s a node_modules/b"', { cwd });
+  assertAllowed(`grep -rn 'ln -s' node_modules`, { cwd });
+  assertAllowed(`cat <<'EOF'\nln -s a node_modules/b\nEOF`, { cwd });
+  assertAllowed('# ln -s a node_modules/b\nls', { cwd });
+});
+
+test('allows a link whose destination the command text does not hold', () => {
+  const cwd = '/Users/me/code/mutex';
+  assertAllowed('ln -s ../p "$(pwd)/node_modules/p"', { cwd });
+  assertAllowed(`ln -s ../p node_modules/${BT}echo x${BT}`, { cwd });
+  assertAllowed(`D=${BT}pwd${BT}; ln -s ../p $D/node_modules/p`, { cwd });
+  assertAllowed(`cd ${BT}echo /private/tmp/x${BT} && ln -s ../p node_modules/p`, { cwd });
+  assertAllowed('ln -s ../p $DEST/node_modules/p', { cwd });
+  assertAllowed('D=$(pwd); ln -s ../p $D/node_modules/p', { cwd });
+  assertAllowed('for p in a b; do ln -s ../$p node_modules/$p; done', { cwd });
+  assertAllowed('cd $X && ln -s ../p node_modules/p', { cwd });
+  assertAllowed('cd - && ln -s ../p node_modules/p', { cwd });
+  assertAllowed('ln -s ../p ~other/node_modules/p', { cwd });
 });
 
 test('denies a bare glob qualifier, and allows it once the option is on', () => {

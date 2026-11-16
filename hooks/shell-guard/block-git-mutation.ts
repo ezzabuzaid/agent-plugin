@@ -880,6 +880,7 @@ const toolName = input.tool_name ?? '';
 if (toolName !== 'Bash' && toolName !== 'Monitor') process.exit(0);
 
 const command = input.tool_input?.command ?? input.tool_input?.cmd ?? '';
+const cwd = input.cwd ?? process.cwd();
 
 // A shell check that fails to load or run must not switch off the git guard below,
 // so it is imported here and not at the top of the file.
@@ -888,6 +889,7 @@ try {
 	const trap = shellTrap({
 		command,
 		tool: toolName,
+		cwd,
 	});
 	if (trap) {
 		deny(`${trap} Command: ${command}`);
@@ -899,6 +901,6 @@ try {
 
 if (!command.includes('git')) process.exit(0);
 
-const blocked = blockedGitCommands(command, input.cwd ?? process.cwd());
+const blocked = blockedGitCommands(command, cwd);
 
 if (blocked.length > 0) block(command, blocked);
