@@ -46,6 +46,8 @@ Do this step before the first design message.
 
 **Done when** the plan opens with these verdicts: package / Node / npm (or the adoption), the strike, the owner table and the home.
 
+A verdict comes from a check that ran, never from memory. When a check cannot run here (no shell, the registry is blocked), write that verdict as open, with the command that settles it, and stop at step 1: a name, a map or an API before every verdict is settled can be undone by an adoption.
+
 ## 2. Take the scope and the name from the standard libraries
 
 - Draw the now/later/never map of the domain first. The name covers the whole map. The "now" column is the first release.
