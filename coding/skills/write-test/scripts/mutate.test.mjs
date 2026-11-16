@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { constants as osConstants, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
@@ -1474,6 +1474,216 @@ test('an in-memory spec that asks for a build check is refused before any comman
     assert.match(stderr, /"built" checks the build output of a copy/);
     assert.deepEqual(lines, []);
     assert.equal(existsSync(runs), false, 'no baseline or mutation ran');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// A TypeScript project the way a user's repo looks to the type mode: its own
+// typescript installed in its node_modules, and a tsconfig that would emit.
+function typeProject(root, files) {
+  const project = treeOf(root, {
+    'package.json': '{ "name": "fixture", "private": true, "type": "module" }\n',
+    'tsconfig.json': `${JSON.stringify({
+      compilerOptions: {
+        target: 'ESNext', module: 'NodeNext', strict: true, types: [], skipLibCheck: true,
+        allowImportingTsExtensions: true, rewriteRelativeImportExtensions: true,
+        composite: true, outDir: 'dist', tsBuildInfoFile: 'dist/tsconfig.tsbuildinfo',
+      },
+      include: ['src/**/*.ts'],
+    }, null, 2)}\n`,
+    ...files,
+  });
+  execFileSync('npm', ['install', 'typescript@6', '--no-save', '--no-package-lock', '--prefer-offline', '--no-audit', '--no-fund', '--ignore-scripts'], {
+    cwd: project,
+    stdio: 'ignore',
+  });
+  return project;
+}
+
+// Every file of the project outside node_modules, with its bytes.
+function filesOf(project) {
+  return Object.fromEntries(readdirSync(project, { recursive: true })
+    .filter((path) => !path.startsWith('node_modules'))
+    .sort()
+    .map((path) => [path, statSync(join(project, path)).isDirectory() ? 'directory' : readFileSync(join(project, path))]));
+}
+
+const pathSource = [
+  'export type AbsolutePath = `/${string}`;',
+  '',
+  'export function isAbsolutePath(path: string): path is AbsolutePath {',
+  "  return path.startsWith('/');",
+  '}',
+  '',
+  "export const label = 'absolute';",
+  '',
+].join('\n');
+const pathTypeTest = [
+  "import { type AbsolutePath, isAbsolutePath } from './path.ts';",
+  '',
+  'export const narrow = (resolved: string): AbsolutePath => {',
+  '  // @ts-expect-error a string is not known to begin with `/`.',
+  '  const unchecked: AbsolutePath = resolved;',
+  '  if (!isAbsolutePath(resolved)) throw new Error(`${unchecked} is relative`);',
+  '  return resolved;',
+  '};',
+  '',
+].join('\n');
+const narrowLines = { file: 'src/path.test.ts', lines: [3, 8] };
+
+test('a type mutation that leaves the @ts-expect-error unused is CAUGHT as TS2578 after a clean baseline, and no file of the project changes', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
+  try {
+    const project = typeProject(root, { 'src/path.ts': pathSource, 'src/path.test.ts': pathTypeTest });
+    const before = filesOf(project);
+
+    const { status, lines, of } = await mutate(root, {
+      cwd: project,
+      typecheck: 'tsconfig.json',
+      mutations: [{
+        id: 'T1',
+        claim: 'a plain string is not an AbsolutePath',
+        edits: [{ file: 'src/path.ts', find: 'AbsolutePath = `/${string}`', replace: 'AbsolutePath = string' }],
+        assertion: narrowLines,
+      }],
+    });
+
+    assert.equal(status, 0);
+    const baseline = lines.find((line) => line.kind === 'baseline');
+    assert.equal(baseline.verdict, 'PASS');
+    assert.deepEqual(baseline.diagnostics, []);
+    assert.equal(of('T1').verdict, 'CAUGHT');
+    assert.deepEqual(of('T1').diagnostics.map(({ file, line, code }) => ({ file, line, code })), [{ file: join(project, 'src/path.test.ts'), line: 4, code: 2578 }]);
+    assert.equal(of('T1').drift, false);
+    assert.deepEqual(filesOf(project), before);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a type mutation that loosens a guard to boolean is CAUGHT by the error it causes on the asserting line', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
+  try {
+    const project = typeProject(root, { 'src/path.ts': pathSource, 'src/path.test.ts': pathTypeTest });
+
+    const { status, of } = await mutate(root, {
+      cwd: project,
+      typecheck: 'tsconfig.json',
+      mutations: [{
+        id: 'T2',
+        claim: 'only isAbsolutePath narrows a string to an AbsolutePath',
+        edits: [{ file: 'src/path.ts', find: 'path is AbsolutePath', replace: 'boolean' }],
+        assertion: narrowLines,
+      }],
+    });
+
+    assert.equal(status, 0);
+    assert.equal(of('T2').verdict, 'CAUGHT');
+    assert.deepEqual(of('T2').diagnostics.map(({ line, code }) => ({ line, code })), [{ line: 7, code: 2322 }]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a type mutation that breaks the mutated file's own syntax is INVALID, not CAUGHT", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
+  try {
+    const project = typeProject(root, { 'src/path.ts': pathSource, 'src/path.test.ts': pathTypeTest });
+
+    const { status, of } = await mutate(root, {
+      cwd: project,
+      typecheck: 'tsconfig.json',
+      mutations: [{
+        id: 'T3',
+        claim: 'only isAbsolutePath narrows a string to an AbsolutePath',
+        edits: [{ file: 'src/path.ts', find: "path.startsWith('/');", replace: "path.startsWith('/';" }],
+        assertion: narrowLines,
+      }],
+    });
+
+    assert.equal(status, 0);
+    assert.equal(of('T3').verdict, 'INVALID');
+    assert.match(of('T3').reason, /the mutant does not compile: src\/path\.ts:4 TS1005/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a type mutation the claimed lines do not see is SURVIVED', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
+  try {
+    const project = typeProject(root, { 'src/path.ts': pathSource, 'src/path.test.ts': pathTypeTest });
+
+    const { status, of } = await mutate(root, {
+      cwd: project,
+      typecheck: 'tsconfig.json',
+      mutations: [{
+        id: 'T4',
+        claim: 'a plain string is not an AbsolutePath',
+        edits: [{ file: 'src/path.ts', find: "label = 'absolute'", replace: "label = 'relative'" }],
+        assertion: narrowLines,
+      }],
+    });
+
+    assert.equal(status, 0);
+    assert.equal(of('T4').verdict, 'SURVIVED');
+    assert.deepEqual(of('T4').diagnostics, []);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('claimed lines that have a type error without any mutation are INVALID-BASELINE, and their mutations are SKIPPED', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
+  try {
+    const unusedDirective = pathTypeTest.replace('const unchecked: AbsolutePath = resolved;', "const unchecked: AbsolutePath = '/a';");
+    const project = typeProject(root, { 'src/path.ts': pathSource, 'src/path.test.ts': unusedDirective });
+
+    const { status, lines, of } = await mutate(root, {
+      cwd: project,
+      typecheck: 'tsconfig.json',
+      mutations: [{
+        id: 'T5',
+        claim: 'a plain string is not an AbsolutePath',
+        edits: [{ file: 'src/path.ts', find: 'AbsolutePath = `/${string}`', replace: 'AbsolutePath = string' }],
+        assertion: narrowLines,
+      }],
+    });
+
+    assert.equal(status, 0);
+    const baseline = lines.find((line) => line.kind === 'baseline');
+    assert.equal(baseline.verdict, 'INVALID-BASELINE');
+    assert.deepEqual(baseline.diagnostics.map(({ line, code }) => ({ line, code })), [{ line: 4, code: 2578 }]);
+    assert.equal(of('T5').verdict, 'SKIPPED');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a type mutation of a file outside the program of the tsconfig is INVALID, not SURVIVED', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
+  try {
+    const project = typeProject(root, {
+      'src/path.ts': pathSource,
+      'src/path.test.ts': pathTypeTest,
+      'scripts/limit.ts': 'export const limit = 10;\n',
+    });
+
+    const { status, of } = await mutate(root, {
+      cwd: project,
+      typecheck: 'tsconfig.json',
+      mutations: [{
+        id: 'T6',
+        claim: 'a plain string is not an AbsolutePath',
+        edits: [{ file: 'scripts/limit.ts', find: '10', replace: '11' }],
+        assertion: narrowLines,
+      }],
+    });
+
+    assert.equal(status, 0);
+    assert.equal(of('T6').verdict, 'INVALID');
+    assert.match(of('T6').reason, /not in the program of .*tsconfig\.json: scripts\/limit\.ts/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

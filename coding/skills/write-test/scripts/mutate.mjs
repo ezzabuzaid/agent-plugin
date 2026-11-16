@@ -5,7 +5,29 @@
 //   { ...the spec... }
 //   JSON
 //
-// A mutant lives in one of two places:
+// A claim only the type checker can see (an @ts-expect-error, a type that must
+// not accept a value) is proven by the type mode ("typecheck"), in place: the
+// project's own TypeScript, resolved from `cwd`, checks the project's own
+// tsconfig through its compiler API, and a mutated file reads as its mutated
+// text from memory. No command runs, nothing is copied and nothing is written
+// (no emit, no build info). Each mutation names the lines of the test that
+// assert the claim: `"assertion": { "file": "src/a.test.ts", "lines": [12, 14] }`.
+// Each assertion first gets a baseline: no error on its lines without any
+// mutation, or INVALID-BASELINE and its mutations SKIPPED. Then a mutation is
+// - CAUGHT when the claimed lines have an error: TS2578 ("Unused
+//   '@ts-expect-error' directive") on the directive, or any error on the line
+//   that asserts;
+// - INVALID when a mutated file is not in the tsconfig's program, or the
+//   mutation gives a mutated file an error it did not have;
+// - SURVIVED otherwise.
+// The check reads sources, never built declarations: project references and
+// composite are dropped, as an editor reads the source of a reference.
+//
+//   { "cwd": "/abs/packages/launchd", "typecheck": "tsconfig.spec.json",
+//     "mutations": [{ "id": "T1", "claim": "...", "edits": [...],
+//                     "assertion": { "file": "src/job/job.test.ts", "lines": [247, 254] } }] }
+//
+// For a claim a test run sees, a mutant lives in one of two places:
 // - In memory (no "copy"): each mutant exists only in the Node processes of its
 //   own run. mutant-hook.mjs, loaded through NODE_OPTIONS=--import, edits a
 //   file's source as Node loads it, so nothing is copied, written, rebuilt or
@@ -17,8 +39,8 @@
 //   loaded"); so is a process that clears its environment before loading it.
 // - In a scratch copy ("copy", made by scratch-copy.mjs): the edits are written
 //   into the copy and restored after each run. Use it for what a Node load hook
-//   cannot reach: CSS, JSON or Rust files, claims only a type checker can see,
-//   and code a bundler such as Vite transforms before Node loads it.
+//   cannot reach: CSS, JSON or Rust files, and code a bundler such as Vite
+//   transforms before Node loads it, where the repository allows a copy.
 //
 // The spec comes on stdin, the report goes to stdout, and the directory the
 // command runs in is absolute, so nothing a run reads or writes depends on the
@@ -76,10 +98,11 @@ import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { constants as osConstants, tmpdir } from 'node:os';
-import { isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { text } from 'node:stream/consumers';
 import { pathToFileURL } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
+import { projectTypeScript, typeChecker } from './type-check.mjs';
 
 function badSpec(reason) {
   console.error(reason);
@@ -92,7 +115,15 @@ if (process.argv.length > 2) badSpec('mutate.mjs takes no arguments: pipe the sp
 const spec = await text(process.stdin)
   .then(JSON.parse)
   .catch((error) => badSpec(`the spec on stdin is not JSON: ${error.message}`));
-if (!Array.isArray(spec?.command) || !Array.isArray(spec.mutations)) {
+const typeMode = spec?.typecheck !== undefined;
+if (typeMode) {
+  if (typeof spec.typecheck !== 'string') badSpec(`"typecheck" names the tsconfig, relative to "cwd", not ${JSON.stringify(spec.typecheck)}`);
+  if (spec.copy !== undefined || spec.command !== undefined) badSpec('"typecheck" checks the tree in place and runs no command: drop "copy" and "command"');
+  if (!Array.isArray(spec.mutations)) badSpec('the spec on stdin needs a "mutations" array');
+  const unclaimed = spec.mutations.find(({ assertion }) => typeof assertion?.file !== 'string'
+    || !Array.isArray(assertion.lines) || assertion.lines.length !== 2 || !assertion.lines.every(Number.isSafeInteger));
+  if (unclaimed) badSpec(`mutation ${unclaimed.id} needs "assertion": { "file", "lines": [first, last] }, the test lines that assert its claim`);
+} else if (!Array.isArray(spec?.command) || !Array.isArray(spec.mutations)) {
   badSpec('the spec on stdin needs a "command" argv array and a "mutations" array');
 }
 const copy = spec.copy;
@@ -344,63 +375,148 @@ function restore(original) {
   }
 }
 
-const commandOf = (mutation) => mutation.command ?? spec.command;
-const baselines = new Map();
-for (const command of [spec.command, ...spec.mutations.map(commandOf)]) {
-  const key = JSON.stringify(command);
-  if (baselines.has(key)) continue;
-  const result = await run(command);
-  const passed = result.exit === 0 && result.tests?.pass > 0 && result.tests.fail === 0 && result.tests.cancelled === 0;
-  baselines.set(key, passed);
-  emit({
-    kind: 'baseline',
-    command,
-    verdict: passed ? 'PASS' : 'INVALID-BASELINE',
-    exit: result.exit,
-    tests: result.tests,
-    ...(passed ? {} : {
-      reason: result.exit !== 0 ? `command exited ${result.exit}`
-        : !result.tests ? 'no structured test evidence; configure node-evidence.mjs as a Node test reporter'
-          : 'no named tests passed; check the filter, skips and test registration',
-      excerpt: excerpt(result.output), hint: leftOutHint,
-    }),
-  });
+// The type mode: each mutant is a text in the memory of this process, which
+// the project's own TypeScript reads in place of the file on disk.
+function proveTypes() {
+  let ts;
+  let check;
+  try {
+    ts = projectTypeScript(spec.cwd);
+    check = typeChecker(ts, resolve(spec.cwd, spec.typecheck));
+  } catch (error) {
+    badSpec(error.message);
+  }
+  const claimed = ({ file, lines: [first, last] }) => (error) => error.file === pathOf(file) && error.line >= first && error.line <= last;
+  const asText = (error) => `${relative(spec.cwd, error.file)}:${error.line} TS${error.code} ${error.message}`;
+
+  const unmutated = check(new Map());
+  const baselines = new Map();
+  for (const { assertion } of spec.mutations) {
+    const key = JSON.stringify(assertion);
+    if (baselines.has(key)) continue;
+    const inProgram = unmutated.has(pathOf(assertion.file));
+    const diagnostics = unmutated.errors(pathOf(assertion.file)).filter(claimed(assertion));
+    const passed = inProgram && diagnostics.length === 0;
+    baselines.set(key, passed);
+    emit({
+      kind: 'baseline',
+      typecheck: resolve(spec.cwd, spec.typecheck),
+      assertion,
+      verdict: passed ? 'PASS' : 'INVALID-BASELINE',
+      diagnostics,
+      ...(passed ? {} : {
+        reason: inProgram ? 'the claimed lines have a type error without any mutation' : `${assertion.file} is not in the program of ${spec.typecheck}`,
+      }),
+    });
+  }
+
+  for (const mutation of spec.mutations) {
+    const { id, claim, assertion } = mutation;
+    const report = (line) => {
+      counts[line.verdict] = (counts[line.verdict] ?? 0) + 1;
+      emit({ kind: 'mutation', id, claim, ...line });
+    };
+    if (!baselines.get(JSON.stringify(assertion))) {
+      report({ verdict: 'SKIPPED', reason: 'its assertion has no clean baseline (INVALID-BASELINE)' });
+      continue;
+    }
+    const applied = mutatedTexts(mutation.edits);
+    if (applied.error) {
+      report({ verdict: 'APPLY-FAILED', reason: applied.error });
+      continue;
+    }
+    const mutant = check(new Map([...applied.mutated].map(([file, text]) => [pathOf(file), text])));
+    const drift = [...applied.original].some(([file, text]) => !existsSync(pathOf(file)) || readFileSync(pathOf(file), 'utf8') !== text);
+    const diagnostics = mutant.errors(pathOf(assertion.file)).filter(claimed(assertion));
+    const outside = [...applied.mutated.keys()].filter((file) => !mutant.has(pathOf(file)));
+    if (outside.length) {
+      report({ verdict: 'INVALID', reason: `not in the program of ${resolve(spec.cwd, spec.typecheck)}: ${outside.join(', ')}`, diagnostics, drift });
+      continue;
+    }
+    // An error the mutation gave a mutated file itself: the mutant does not
+    // compile, so it proves nothing. Errors the file had before stay allowed.
+    const broken = [...applied.mutated.keys()].flatMap((file) => {
+      const before = unmutated.errors(pathOf(file)).map(({ code, message }) => `${code} ${message}`);
+      return mutant.errors(pathOf(file)).filter(({ code, message }) => {
+        const at = before.indexOf(`${code} ${message}`);
+        if (at === -1) return true;
+        before.splice(at, 1);
+        return false;
+      });
+    });
+    if (broken.length) {
+      report({ verdict: 'INVALID', reason: `the mutant does not compile: ${broken.map(asText).join('; ')}`, diagnostics, drift });
+      continue;
+    }
+    report({ verdict: diagnostics.length ? 'CAUGHT' : 'SURVIVED', diagnostics, drift });
+  }
 }
 
+// The runtime modes: each mutant runs under the test command, in memory or in
+// a copy.
+async function proveRuntime() {
+  const baselines = new Map();
+  for (const command of [spec.command, ...spec.mutations.map(commandOf)]) {
+    const key = JSON.stringify(command);
+    if (baselines.has(key)) continue;
+    const result = await run(command);
+    const passed = result.exit === 0 && result.tests?.pass > 0 && result.tests.fail === 0 && result.tests.cancelled === 0;
+    baselines.set(key, passed);
+    emit({
+      kind: 'baseline',
+      command,
+      verdict: passed ? 'PASS' : 'INVALID-BASELINE',
+      exit: result.exit,
+      tests: result.tests,
+      ...(passed ? {} : {
+        reason: result.exit !== 0 ? `command exited ${result.exit}`
+          : !result.tests ? 'no structured test evidence; configure node-evidence.mjs as a Node test reporter'
+            : 'no named tests passed; check the filter, skips and test registration',
+        excerpt: excerpt(result.output), hint: leftOutHint,
+      }),
+    });
+  }
+
+  for (const mutation of spec.mutations) {
+    const { id, claim } = mutation;
+    const report = (line) => {
+      counts[line.verdict] = (counts[line.verdict] ?? 0) + 1;
+      emit({ kind: 'mutation', id, claim, drift: drifted(mutation.edits), ...line });
+    };
+    if (!baselines.get(JSON.stringify(commandOf(mutation)))) {
+      report({ verdict: 'SKIPPED', reason: 'its command has no valid passing baseline (INVALID-BASELINE)' });
+      continue;
+    }
+    const applied = mutatedTexts(mutation.edits);
+    if (applied.error) {
+      report({ verdict: 'APPLY-FAILED', reason: applied.error });
+      continue;
+    }
+    if (inMemory) {
+      report(await proveInMemory(mutation, applied.original));
+      continue;
+    }
+    for (const [file, text] of applied.mutated) writeFileSync(join(copy, file), text);
+    active.original = applied.original;
+    const result = await run(commandOf(mutation));
+    const restoring = restore(applied.original);
+    active.original = null;
+    if (!restoring.restored) restoreFailed = true;
+    if (result.timedOut) {
+      report({ verdict: 'TIMEOUT', killedPids: result.killedPids, excerpt: excerpt(result.output), ...restoring });
+      continue;
+    }
+    const verdict = notInBuild(mutation.built) ?? classify(result);
+    report({ ...verdict, exit: result.exit, tests: result.tests, excerpt: excerpt(result.output), ...restoring });
+  }
+  
+}
+
+const commandOf = (mutation) => mutation.command ?? spec.command;
 const counts = {};
 let restoreFailed = false;
-for (const mutation of spec.mutations) {
-  const { id, claim } = mutation;
-  const report = (line) => {
-    counts[line.verdict] = (counts[line.verdict] ?? 0) + 1;
-    emit({ kind: 'mutation', id, claim, drift: drifted(mutation.edits), ...line });
-  };
-  if (!baselines.get(JSON.stringify(commandOf(mutation)))) {
-    report({ verdict: 'SKIPPED', reason: 'its command has no valid passing baseline (INVALID-BASELINE)' });
-    continue;
-  }
-  const applied = mutatedTexts(mutation.edits);
-  if (applied.error) {
-    report({ verdict: 'APPLY-FAILED', reason: applied.error });
-    continue;
-  }
-  if (inMemory) {
-    report(await proveInMemory(mutation, applied.original));
-    continue;
-  }
-  for (const [file, text] of applied.mutated) writeFileSync(join(copy, file), text);
-  active.original = applied.original;
-  const result = await run(commandOf(mutation));
-  const restoring = restore(applied.original);
-  active.original = null;
-  if (!restoring.restored) restoreFailed = true;
-  if (result.timedOut) {
-    report({ verdict: 'TIMEOUT', killedPids: result.killedPids, excerpt: excerpt(result.output), ...restoring });
-    continue;
-  }
-  const verdict = notInBuild(mutation.built) ?? classify(result);
-  report({ ...verdict, exit: result.exit, tests: result.tests, excerpt: excerpt(result.output), ...restoring });
-}
+if (typeMode) proveTypes();
+else await proveRuntime();
 
 emit({ kind: 'summary', counts });
 process.exitCode = restoreFailed ? 3 : 0;
