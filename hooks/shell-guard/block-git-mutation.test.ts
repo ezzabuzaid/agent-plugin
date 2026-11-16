@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempDisposableSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 // GIT_GUARD_SCRIPT lets the suite run against a scratch copy before the real hook is replaced.
 const SCRIPT =
@@ -33,7 +36,7 @@ function assertBlocked(command: string, subcommand: string, reason?: RegExp) {
 
 const WHOLE_INDEX = /A commit without paths, or with -a or -i/;
 const SHARED_INDEX = /Every session in a checkout shares \.git\/index/;
-const LOCAL_CLONE = /AGENTS\.md forbids a clone/;
+const CHECKOUT_CLONE = /AGENTS\.md forbids a clone/;
 const GUARD = /User guardrail: agents may inspect git state/;
 
 function assertAllowed(command: string) {
@@ -153,15 +156,114 @@ test('blocks a clone of a local checkout and allows a remote or bare repository'
     assert.equal(spawnSync('git', ['init', '-q', '--bare', join(dir, 'remote.git')]).status, 0);
     const clone = (command: string, cwd = dir) => runHook(command, cwd)?.hookSpecificOutput;
     for (const command of [`git clone ${join(dir, 'work')} /tmp/copy`, 'git clone --no-local -b main ./work copy', `git clone file://${join(dir, 'work')} copy`]) {
-      assert.match(clone(command)?.permissionDecisionReason ?? '', LOCAL_CLONE, command);
+      assert.match(clone(command)?.permissionDecisionReason ?? '', CHECKOUT_CLONE, command);
     }
-    assert.match(clone('git clone . /tmp/copy', join(dir, 'work'))?.permissionDecisionReason ?? '', LOCAL_CLONE);
+    assert.match(clone('git clone . /tmp/copy', join(dir, 'work'))?.permissionDecisionReason ?? '', CHECKOUT_CLONE);
     for (const command of [`git clone ${join(dir, 'remote.git')} work2`, 'git clone $SRC copy', 'git clone https://github.com/x/y.git', 'git clone ssh://host/x.git', 'git clone --depth 1 git@github.com:x/y.git /tmp/y']) {
       assert.equal(clone(command), undefined, command);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('allows a clone by URL from a folder that is not a repository, even of a repository checked out elsewhere', () => {
+  using dir = mkdtempDisposableSync(join(tmpdir(), 'git-guard-url-clone-'));
+  const work = join(dir.path, 'work');
+  assert.equal(spawnSync('git', ['init', '-q', work]).status, 0);
+  assert.equal(spawnSync('git', ['-C', work, 'remote', 'add', 'origin', 'https://github.com/JanuaryLabs/zukhruf.git']).status, 0);
+  const command = `git clone https://github.com/JanuaryLabs/zukhruf.git ${join(dir.path, 'copy')}`;
+  assert.equal(runHook(command, dir.path), null, command);
+});
+
+test('allows a clone by URL of another repository from inside a checkout', () => {
+  using dir = mkdtempDisposableSync(join(tmpdir(), 'git-guard-url-clone-'));
+  const work = join(dir.path, 'work');
+  assert.equal(spawnSync('git', ['init', '-q', work]).status, 0);
+  assert.equal(spawnSync('git', ['-C', work, 'remote', 'add', 'origin', 'https://github.com/JanuaryLabs/zukhruf.git']).status, 0);
+  for (const url of ['https://github.com/JanuaryLabs/other.git', 'https://gitlab.com/JanuaryLabs/zukhruf.git', 'git@github.com:JanuaryLabs/zukhruf-docs.git', 'https://github.com/JanuaryLabs/zuk.git']) {
+    const command = `git clone ${url} ${join(dir.path, 'copy')}`;
+    assert.equal(runHook(command, work), null, command);
+  }
+});
+
+// 2026-11-15: from inside the mutex checkout an agent ran `git clone --quiet --reference <mutex>
+// https://github.com/JanuaryLabs/zukhruf.git <scratch>`, a copy by URL of the repository checked out there.
+test('blocks a clone by URL of the repository checked out at the session cwd, and names the routes that stay open', () => {
+  using dir = mkdtempDisposableSync(join(tmpdir(), 'git-guard-url-clone-'));
+  const work = join(dir.path, 'work');
+  assert.equal(spawnSync('git', ['init', '-q', work]).status, 0);
+  assert.equal(spawnSync('git', ['-C', work, 'remote', 'add', 'origin', 'https://github.com/JanuaryLabs/zukhruf.git']).status, 0);
+  const command = `git clone --quiet --reference ${work} https://github.com/JanuaryLabs/zukhruf.git ${join(dir.path, 'scratch')}`;
+  const reason = runHook(command, work)?.hookSpecificOutput?.permissionDecisionReason ?? '';
+  assert.match(reason, CHECKOUT_CLONE, command);
+  assert.match(reason, /Every session shares one checkout/);
+  assert.match(reason, /Build and test in the checkout/);
+  assert.match(reason, /pre-push Build/);
+  assert.match(reason, /git show <rev>:<path>/);
+  assert.match(reason, /`!`/);
+});
+
+test('blocks a clone by URL of the checked-out repository in its https, ssh and scp spellings, with or without .git and in any case', () => {
+  using dir = mkdtempDisposableSync(join(tmpdir(), 'git-guard-url-clone-'));
+  const pairs = [
+    ['https://github.com/JanuaryLabs/zukhruf.git', 'git@github.com:JanuaryLabs/zukhruf.git'],
+    ['https://github.com/JanuaryLabs/zukhruf.git', 'git@github.com:JanuaryLabs/zukhruf'],
+    ['https://github.com/JanuaryLabs/zukhruf.git', 'ssh://git@github.com/JanuaryLabs/zukhruf'],
+    ['https://github.com/JanuaryLabs/zukhruf.git', 'https://github.com/JanuaryLabs/zukhruf/'],
+    ['https://github.com/JanuaryLabs/zukhruf.git', 'https://GitHub.com/januarylabs/Zukhruf.GIT'],
+    ['git@github.com:JanuaryLabs/zukhruf.git', 'https://github.com/JanuaryLabs/zukhruf'],
+    ['ssh://git@github.com:22/JanuaryLabs/zukhruf', 'https://github.com/JanuaryLabs/zukhruf.git'],
+  ];
+  for (const [at, [origin, url]] of pairs.entries()) {
+    const work = join(dir.path, `work-${at}`);
+    assert.equal(spawnSync('git', ['init', '-q', work]).status, 0);
+    assert.equal(spawnSync('git', ['-C', work, 'remote', 'add', 'origin', origin]).status, 0);
+    const command = `git clone ${url} ${join(dir.path, 'copy')}`;
+    assert.match(runHook(command, work)?.hookSpecificOutput?.permissionDecisionReason ?? '', CHECKOUT_CLONE, `origin ${origin}: ${command}`);
+  }
+});
+
+test('blocks a clone by URL of the repository that a remote other than origin names', () => {
+  using dir = mkdtempDisposableSync(join(tmpdir(), 'git-guard-url-clone-'));
+  const work = join(dir.path, 'work');
+  assert.equal(spawnSync('git', ['init', '-q', work]).status, 0);
+  assert.equal(spawnSync('git', ['-C', work, 'remote', 'add', 'origin', 'https://github.com/me/zukhruf.git']).status, 0);
+  assert.equal(spawnSync('git', ['-C', work, 'remote', 'add', 'upstream', 'git@github.com:JanuaryLabs/zukhruf.git']).status, 0);
+  const command = `git clone https://github.com/JanuaryLabs/zukhruf ${join(dir.path, 'copy')}`;
+  assert.match(runHook(command, work)?.hookSpecificOutput?.permissionDecisionReason ?? '', CHECKOUT_CLONE, command);
+});
+
+test('blocks a clone by URL from a folder inside the checkout', () => {
+  using dir = mkdtempDisposableSync(join(tmpdir(), 'git-guard-url-clone-'));
+  const work = join(dir.path, 'work');
+  assert.equal(spawnSync('git', ['init', '-q', work]).status, 0);
+  assert.equal(spawnSync('git', ['-C', work, 'remote', 'add', 'origin', 'https://github.com/JanuaryLabs/zukhruf.git']).status, 0);
+  const packages = join(work, 'packages', 'mutex');
+  mkdirSync(packages, { recursive: true });
+  const command = `git clone https://github.com/JanuaryLabs/zukhruf.git ${join(dir.path, 'copy')}`;
+  assert.match(runHook(command, packages)?.hookSpecificOutput?.permissionDecisionReason ?? '', CHECKOUT_CLONE, command);
+});
+
+// --shared takes no path: it shares the objects of the clone source, which the local-folder check reads.
+test('blocks a clone that borrows the objects of a checkout through --reference, whatever its URL, and allows a bare reference', () => {
+  using dir = mkdtempDisposableSync(join(tmpdir(), 'git-guard-url-clone-'));
+  const work = join(dir.path, 'work');
+  const bare = join(dir.path, 'cache.git');
+  assert.equal(spawnSync('git', ['init', '-q', work]).status, 0);
+  assert.equal(spawnSync('git', ['init', '-q', '--bare', bare]).status, 0);
+  const copy = join(dir.path, 'copy');
+  for (const command of [
+    `git clone --reference ${work} https://github.com/x/unrelated.git ${copy}`,
+    `git clone --reference=${work} https://github.com/x/unrelated.git ${copy}`,
+    `git clone --reference-if-able ${work} git@github.com:x/unrelated.git ${copy}`,
+    `git clone --dissociate --reference-if-able=${work} https://github.com/x/unrelated.git ${copy}`,
+    `git clone --shared ${work} ${copy}`,
+  ]) {
+    assert.match(runHook(command, dir.path)?.hookSpecificOutput?.permissionDecisionReason ?? '', CHECKOUT_CLONE, command);
+  }
+  const command = `git clone --reference ${bare} https://github.com/x/unrelated.git ${copy}`;
+  assert.equal(runHook(command, dir.path), null, command);
 });
 
 test('allows git remote -v', () => {

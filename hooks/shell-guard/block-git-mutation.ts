@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -420,8 +421,13 @@ function resyncsSharedIndex(command: string): boolean {
 }
 
 // `git clone <source>` copies a checkout when the source is a local folder that
-// holds a working tree (a `.git` folder). A bare repository is not a checkout,
-// and a URL, `host:path` or a variable names no local folder.
+// holds a working tree (a `.git` folder) or a URL of the repository that a remote
+// of the session's checkout names, and when --reference or --reference-if-able
+// borrows the objects of a checkout. A bare repository is not a checkout, and a
+// variable names nothing the hook can read. The session's checkout is the one at
+// its cwd: a `cd` earlier in the same command is not followed, and a checkout
+// elsewhere on the machine is not looked for, because that would scan the disk
+// on every clone.
 const CLONE_VALUE_OPTIONS = new Set([
 	'-b', '--branch', '-o', '--origin', '-c', '--config', '--depth', '--reference',
 	'--reference-if-able', '--separate-git-dir', '-u', '--upload-pack', '-j', '--jobs',
@@ -431,9 +437,44 @@ const CLONE_VALUE_OPTIONS = new Set([
 
 function clonesCheckout(args: string[], cwd: string): boolean {
 	const [source] = namedPaths(args, CLONE_VALUE_OPTIONS);
-	if (!source) return false;
-	const path = source.replace(/^file:\/\//, '').replace(/^~(?=\/|$)/, homedir());
-	return existsSync(join(resolve(cwd, path), '.git'));
+	const repository = source && repositoryOf(source);
+	if (repository && remoteRepositories(cwd).has(repository)) return true;
+	const folders = args.flatMap((token, at) => {
+		const reference = /^--reference(?:-if-able)?(?:=(.*))?$/.exec(token);
+		const folder = reference && (reference[1] ?? args[at + 1]);
+		return folder ? [folder] : [];
+	});
+	if (source && !repository) folders.push(source.replace(/^file:\/\//, ''));
+	return folders.some((folder) => existsSync(join(resolve(cwd, folder.replace(/^~(?=\/|$)/, homedir())), '.git')));
+}
+
+// The repository that a clone URL names, as `host/path` in lower case, so that
+// `https://github.com/O/R.git`, `ssh://git@github.com/O/R` and `git@github.com:O/R`
+// compare equal. Git reads a source with `://` as a URL, one with a colon before
+// any slash as scp-like `[user@]host:path`, and any other as a local path; a
+// file:// URL names a local folder, not a host.
+function repositoryOf(source: string): string | undefined {
+	let host: string | undefined;
+	let path: string | undefined;
+	if (source.includes('://')) {
+		if (!URL.canParse(source)) return undefined;
+		const url = new URL(source);
+		if (url.protocol === 'file:') return undefined;
+		[host, path] = [url.hostname, url.pathname];
+	} else {
+		[, host, path] = /^(?:[^@/:]*@)?([^/:]+):(.*)$/.exec(source) ?? [];
+	}
+	const repository = path?.replace(/\/+$/, '').replace(/\.git$/i, '').replace(/^\/+/, '');
+	return host && repository ? `${host}/${repository}`.toLowerCase() : undefined;
+}
+
+// The repositories that the remotes of the checkout at `cwd` name. Outside a
+// repository `git remote -v` exits 128 and prints nothing on stdout.
+function remoteRepositories(cwd: string): Set<string> {
+	const { stdout } = spawnSync('git', ['-C', cwd, 'remote', '-v'], { encoding: 'utf8' });
+	return new Set(
+		(stdout ?? '').split('\n').flatMap((line) => repositoryOf(line.split(/\s+/)[1] ?? '') ?? []),
+	);
 }
 
 function readOnlyReflog(tokens: string[]): boolean {
@@ -616,7 +657,7 @@ function scriptGitCommands(script: string): string[] {
 }
 
 // Why a git command is blocked; each reason has its own explanation.
-type Reason = 'guard' | 'shared-index' | 'whole-index' | 'local-clone' | 'piped-commit';
+type Reason = 'guard' | 'shared-index' | 'whole-index' | 'checkout-clone' | 'piped-commit';
 
 interface Blocked {
 	subcommand: string;
@@ -758,7 +799,7 @@ function blockedGitCommands(command: string, cwd: string, depth = 0): Blocked[] 
 		}
 
 		if (subcommand === 'clone') {
-			if (clonesCheckout(args, cwd)) blocked.push({ subcommand, reason: 'local-clone' });
+			if (clonesCheckout(args, cwd)) blocked.push({ subcommand, reason: 'checkout-clone' });
 			continue;
 		}
 
@@ -809,8 +850,8 @@ const REASONS: Record<Reason, string> = {
 		'A commit without paths, or with -a or -i, takes everything staged in the shared .git/index, including files another session staged. Name the paths: `git commit -m <msg> -- <paths>`.',
 	'piped-commit':
 		'A pipe after git commit hides its exit status: the pipeline returns the last filter\'s status, so a later `&&` step runs even when the pre-commit hook refuses the commit. Drop the pipe (read the full commit output), or put `set -o pipefail;` first.',
-	'local-clone':
-		'AGENTS.md forbids a clone, worktree or other copy of a checkout. Read the code in place, or with `git show <rev>:<path>`.',
+	'checkout-clone':
+		'Every session shares one checkout, and AGENTS.md forbids a clone, worktree or other copy of it, by its folder or its URL: a copy proves the copy, not what ships. Build and test in the checkout; the pre-push Build proves an exact commit in a snapshot. Read an old file with `git show <rev>:<path>`.',
 };
 
 function block(command: string, blocked: Blocked[]) {
