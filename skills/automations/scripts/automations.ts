@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // Local automations: Claude Code prompts that run headless on this Mac at the times of an RFC 5545
-// schedule, through launchd and `claude -p` on the login of the Claude plan. The skill that writes
-// them: agent-plugin/skills/automations/SKILL.md.
+// schedule, through launchd and `claude -p` on the login of the Claude plan. ../SKILL.md says how to
+// write an automation; ../references/RULINGS.md says why each rule exists.
 //
-//   node cli.ts sync                 check every automation, install a launchd job for each active one, remove the rest
-//   node cli.ts run <id> [--if-due]  run one automation now; with --if-due, only when its schedule has a time due
-//   node cli.ts list [--json]        the automations, their next run and their last run
+//   node automations.ts sync                 check every automation, install a launchd job for each active one, remove the rest
+//   node automations.ts run <id> [--if-due]  run one automation now; with --if-due, only when its schedule has a time due
+//   node automations.ts list [--json]        the automations, their next run and their last run
+//
+// Exit codes of `run`: 0 done, the exit code of claude when it failed, 124 timed out, 127 claude did not start.
 
 import { atomicWrite, isErrno } from '@zukhruf/fs';
 import { type AgentJob, type CalendarInterval, isAbsolutePath, Launchd } from '@zukhruf/launchd';
@@ -507,6 +509,6 @@ if (command === 'sync') {
 } else if (command === 'list') {
   await list({ json: values.json });
 } else {
-  console.error('usage: node cli.ts sync | run <id> [--if-due] | list [--json]');
+  console.error('usage: node automations.ts sync | run <id> [--if-due] | list [--json]');
   process.exitCode = 2;
 }

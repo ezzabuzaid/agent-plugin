@@ -3,10 +3,10 @@
   "private": true,
   "type": "module",
   "bin": {
-    "automations": "./cli.ts"
+    "automations": "./automations.ts"
   },
   "scripts": {
-    "test": "node --test --no-warnings cli.test.ts",
+    "test": "node --test --no-warnings automations.test.ts",
     "typecheck": "tsc -p ."
   },
   "dependencies": {

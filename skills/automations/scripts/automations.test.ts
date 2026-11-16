@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-const CLI = new URL('./cli.ts', import.meta.url).pathname;
+const CLI = new URL('./automations.ts', import.meta.url).pathname;
 
 // The runner finds `claude` at $HOME/.local/bin and the other tools on PATH, as under launchd.
 function cli(home: string, args: string[], extraEnv: Record<string, string> = {}) {

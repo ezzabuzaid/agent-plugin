@@ -1,23 +1,26 @@
 ---
 name: automations
-description: Make, change, pause, run or list LOCAL automations, which are Claude Code prompts that run headless on this Mac on a schedule (launchd + `claude -p`, on the Claude plan's own usage). The Codex-automations equivalent for Claude. Use when the user asks to run something "every day/week/N days", "on a schedule", "recurring", "every morning", "remind me to check X weekly", or mentions automations, Codex schedules or local scheduled tasks, unless they ask for the cloud (then use the built-in `/schedule`) or for a poll inside this session only (then use `/loop`).
+description: Makes, changes, pauses, runs and lists local automations, which are Claude Code prompts that run headless on this Mac on a schedule, through launchd and `claude -p` on the usage of the Claude plan, with no open session and no open app. Use when the user asks to run a prompt, a skill, a check or a report every day, every week, every N days, on weekdays or at a time; says "on a schedule", "recurring", "every morning" or "remind me weekly to check X"; asks to schedule an agent on this Mac; or asks what runs on a schedule here, or to pause, delete or run one now. Not for a run in the cloud (use the built-in `/schedule`) or a poll inside this session (use `/loop`).
 ---
 
 # Automations
 
-An automation is a prompt that runs as a headless Claude Code session on this Mac at the times of a schedule. It does not need an open session or an open app. launchd starts it, and it uses the Claude plan's usage, not API credit. The CLI is:
+An automation is a prompt that Claude Code runs with no person present, on this Mac, at the times of a schedule. launchd starts each run, so no session and no app must be open. Each run uses the usage of the Claude plan, not API credit. The evidence for each rule below (Ezz's words, the incident, the source) is in [references/RULINGS.md](references/RULINGS.md).
 
-```sh
-node ~/Desktop/January/agent-plugin/tools/automations/cli.ts <sync | run <id> [--if-due] | list [--json]>
-```
+## Script
 
-## The files of an automation
+`scripts/automations.ts` does the work: `node scripts/automations.ts <command>`, with `scripts/` relative to this skill's directory. Its header comment holds its full contract, and `scripts/automations.test.ts` proves it (`npm test` in `scripts/`).
 
-Each automation is a folder `~/.claude/automations/<id>/`. The `<id>` has only `a-z`, `0-9` and `-`.
+| Command             | Does                                                                                                                                                                                  |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sync`              | Checks every automation. When one is wrong, prints each id with the reason, installs nothing and exits 1. Else installs a launchd job for each active automation and removes the job of each paused or deleted one. |
+| `run <id>`          | Runs the automation now, also when it is paused.                                                                                                                                      |
+| `run <id> --if-due` | What the launchd job runs: runs only when a time of the schedule came after the last run.                                                                                             |
+| `list [--json]`     | Each automation: status, timeout, next run, last run, last exit code, and whether its job is installed.                                                                               |
 
-- `automation.md`: you write it. YAML frontmatter, then the prompt as the body.
-- `memory.md`: the run reads it first and adds what the next run needs. You can make it empty or leave it out.
-- `state.json` and `run.log`: the runner writes them. Do not edit them.
+## 1. Write the automation
+
+An automation is a folder `~/.claude/automations/<id>/`. The `<id>` has only the characters `a-z`, `0-9` and `-`. You write `automation.md`: YAML frontmatter, then the prompt.
 
 ```markdown
 ---
@@ -27,7 +30,6 @@ schedule: |
   RRULE:FREQ=WEEKLY;BYDAY=MO,TH;BYHOUR=10;BYMINUTE=0
 cwd: /Users/ezzabuzaid/Desktop/experiments/mutex
 status: active
-model: opus
 effort: medium
 timeout: PT75M
 ---
@@ -35,21 +37,42 @@ timeout: PT75M
 /update-docs next
 ```
 
-| Key        | Required | Value                                                                                       |
-| ---------- | -------- | ------------------------------------------------------------------------------------------- |
-| `name`     | yes      | The title of the notification.                                                              |
-| `schedule` | yes      | RFC 5545: a `DTSTART` line, then an `RRULE` line.                                           |
-| `cwd`      | yes      | An absolute folder. The session runs there.                                                 |
-| `status`   | yes      | `active` or `paused`.                                                                       |
-| `model`    | no       | A `claude --model` value. With none, the settings give the model.                           |
-| `effort`   | no       | A `claude --effort` value.                                                                  |
-| `timeout`  | no       | An ISO 8601 duration for the whole run, resumes included. The runner stops a run that takes longer. The default is `PT2H`. |
-| `requiresAcPower` | no | `true`: on battery power the run waits, and the next hourly check on AC power runs it.  |
-| `resume`   | no       | `times`, `while`, `prompt`. See [Continue a run that stopped early](#continue-a-run-that-stopped-early). |
+| Key               | Required | Value                                                                                                   |
+| ----------------- | -------- | ------------------------------------------------------------------------------------------------------- |
+| `name`            | yes      | The title of the notification.                                                                          |
+| `schedule`        | yes      | RFC 5545: a `DTSTART` line, then an `RRULE` line. See step 2.                                           |
+| `cwd`             | yes      | An absolute folder. The session runs there.                                                             |
+| `status`          | yes      | `active` or `paused`.                                                                                   |
+| `model`           | no       | A `claude --model` value. With none, the settings give the model.                                       |
+| `effort`          | no       | A `claude --effort` value.                                                                              |
+| `timeout`         | no       | An ISO 8601 duration for the whole run, resumes included. The default is `PT2H`.                        |
+| `requiresAcPower` | no       | `true`: on battery power the run waits, and the next hourly check on AC power runs it.                  |
+| `resume`          | no       | `times`, `while`, `prompt`. See step 4.                                                                 |
 
-## Continue a run that stopped early
+The script writes `state.json` and `run.log` in the same folder. Do not edit them. `memory.md` belongs to the runs: each run reads it first and adds what the next run needs.
 
-A headless run ends at the first reply with no tool call, also when work is still open. `resume` sends a continuation, at most `times` times (the Opus 5.5 prompting guide says two or three):
+## 2. Write the schedule
+
+`DTSTART` is the first run. Write it in the time zone of the Mac (`node -p 'Temporal.Now.timeZoneId()'`), at a time in the future: a `DTSTART` in the past runs at the next hourly check. `RRULE` gives the repeats.
+
+| The user says       | RRULE                                                   |
+| ------------------- | ------------------------------------------------------- |
+| every day at 9:00   | `FREQ=DAILY;BYHOUR=9;BYMINUTE=0`                        |
+| weekdays at 8:30    | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=8;BYMINUTE=30` |
+| Monday and Thursday | `FREQ=WEEKLY;BYDAY=MO,TH;BYHOUR=10;BYMINUTE=0`          |
+| every 3 days        | `FREQ=DAILY;INTERVAL=3` (at the time of `DTSTART`)      |
+| every 2 weeks       | `FREQ=WEEKLY;INTERVAL=2` (on the day of `DTSTART`)      |
+| once                | `FREQ=DAILY;COUNT=1`                                    |
+
+launchd checks each automation every hour at the minutes of its rule, and every minute for a rule that repeats more often than each hour.
+
+## 3. Write the prompt for a run with no person
+
+No person answers the run. It cannot ask a question, and the script refuses each permission prompt (`--permission-prompts none`). The permission mode comes from the settings. So the prompt says what to do, what to produce and where to write it. A prompt can be a skill call, such as `/update-docs next`.
+
+## 4. Continue a run that stops early
+
+A headless run ends at the first reply that has no tool call, also when work is still open. When the work has a list of open items, give the automation `resume`:
 
 ```yaml
 resume:
@@ -61,45 +84,34 @@ resume:
     Continue with them. If one is blocked, record what blocks it in the ledger.
 ```
 
-After a run that is not an error, the runner runs `while` with `/bin/sh -c` in the `cwd`. Exit 0 means work is open: the runner resumes the same session with `prompt`, and `{stdout}` becomes the output of `while`. Any other exit ends the run. The check is yours to write: it names the open items, and it exits 0 only while some are open with no named blocker.
+After a run that is not an error, the script runs `while` with `/bin/sh -c` in the `cwd`. Exit 0 means that work is open: the script resumes the same session with `prompt`, and `{stdout}` becomes the output of `while`. Any other exit ends the run. Keep `times` at 2 or 3, so that a run that cannot finish stops. The check is the user's: it prints the open items, and it exits 0 only while an item is open with no named blocker.
 
-## Write the schedule
+## 5. Install it and show the next run
 
-`DTSTART` is the first run. Write it in the time zone of the Mac (`node -p 'Temporal.Now.timeZoneId()'`) and at a time in the future. With a time in the past, the next hourly check runs it at once. `RRULE` gives the repeats:
+1. Run `sync`. When it names an automation with a reason, fix that file and run `sync` again.
+2. Run `list` and tell the user the next run and the timeout.
+3. For a new prompt, offer `run <id>`: it shows the result now, before the first run on the schedule.
 
-| The user says        | RRULE                                                |
-| -------------------- | ---------------------------------------------------- |
-| every day at 9:00    | `FREQ=DAILY;BYHOUR=9;BYMINUTE=0`                     |
-| weekdays at 8:30     | `FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;BYHOUR=8;BYMINUTE=30` |
-| Monday and Thursday  | `FREQ=WEEKLY;BYDAY=MO,TH;BYHOUR=10;BYMINUTE=0`       |
-| every 3 days         | `FREQ=DAILY;INTERVAL=3` (at the time of `DTSTART`)   |
-| every 2 weeks        | `FREQ=WEEKLY;INTERVAL=2` (on the day of `DTSTART`)   |
-| once                 | `FREQ=DAILY;COUNT=1`                                 |
+## Change, run now, pause, delete
 
-launchd checks each automation every hour at the minute of its rule. A rule more frequent than hourly is checked every minute.
-
-## Write the prompt
-
-The run has no person to answer it. It cannot ask a question, and a permission prompt is refused (`--permission-prompts none`); the permission mode comes from the settings. So the prompt says what to do, what to produce, and where to write it. The session is kept, so the user can open it later.
-
-## Make, change and remove
-
-1. Write `~/.claude/automations/<id>/automation.md`.
-2. Run `cli.ts sync`. It checks every automation, and stops with the id and the reason when one is wrong. Then it installs a launchd job for each active automation and removes the job of each paused or deleted one.
-3. Run `cli.ts list` and show the user the next run.
-
-A change to the prompt, `cwd`, `model`, `effort` or `timeout` applies at the next run with no sync. A change to `schedule` or `status`, and a new or deleted folder, needs `sync`.
-
-- **Run now:** `cli.ts run <id>`. It runs also when the automation is paused.
+- A change to the prompt, `cwd`, `model`, `effort`, `timeout`, `requiresAcPower` or `resume` applies at the next run. It needs no `sync`.
+- A change to `schedule` or `status`, a new folder and a deleted folder need `sync`.
+- **Run now:** `run <id>`.
 - **Pause:** set `status: paused`, then `sync`.
-- **Delete:** remove the folder, then `sync`.
+- **Delete:** move the folder to the Trash, then `sync`.
 
 ## What the user sees
 
-After each run, a macOS notification gives the name, `done` or `failed`, and the first line of the reply. A click on it opens a cmux workspace in the `cwd` with `claude --resume <session>`.
+After each run, a macOS notification gives the `name`, `done`, `failed (exit N)` or `timed out`, and the first line of the reply. A click on it opens a cmux workspace in the `cwd` with `claude --resume <session>`. Each run is a saved session, so `claude --resume` in the `cwd` also finds it.
 
-## Limits
+## Traps
 
-- A run starts only while the Mac is awake and the user is logged in. When the Mac sleeps through one or more runs, the automation runs once after the Mac wakes.
-- The Mac stays awake while a run goes on.
-- Two runs of one automation never overlap. launchd starts only one process of a job.
+- **The Mac sleeps.** A run starts only while the Mac is awake and the user is logged in. When the Mac sleeps through one or more times, the automation runs one time after the Mac wakes. The script does not wake the Mac.
+- **A run failed with no clear reason.** Read `run.log` (one line when a run starts and one when it ends, with the session), `state.json` (the last exit code and session) and the session itself with `claude --resume <session>` in the `cwd`.
+- **`sync` installs nothing** when one automation is wrong, also for the correct ones. Read its message, fix the file, run `sync` again.
+- **Billing.** An `ANTHROPIC_API_KEY` or `claude --bare` makes a run use API credit. The script removes the key from each run. Do not add `--bare` to a prompt or a wrapper.
+
+## Done when
+
+- `sync` exits 0, and `list` shows the automation `active` and installed, with the next run the user asked for.
+- The user knows the next run, the timeout, and that a notification comes after each run.
