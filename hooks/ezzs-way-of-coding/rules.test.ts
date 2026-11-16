@@ -1537,13 +1537,57 @@ test('another tool whose message reports an unverified gap goes through', async 
   assert.equal(output?.hookSpecificOutput?.permissionDecision, undefined);
 });
 
-test('auxiliary model defaults pin Sonnet and gpt-6.1-sol for code the user builds, and subagents run Opus 5.5', async () => {
+test('auxiliary model defaults pin Sonnet and gpt-6.1-sol for code the user builds', async () => {
   const output = await evaluateReminderHook(
     { hook_event_name: 'SessionStart' },
     ezzsWayOfCodingConfig,
   );
   const context = output?.hookSpecificOutput?.additionalContext ?? '';
   assert.match(context, /Claude Sonnet 5 for Claude and gpt-6\.1-sol for OpenAI/);
-  assert.match(context, /Claude Code subagents[^\n]*run Opus 5\.5[^\n]*CLAUDE_CODE_SUBAGENT_MODEL_FORCE/);
   assert.doesNotMatch(context, /Terra|gpt-5\.6-terra/);
+});
+
+const preAgent = (tool_input: unknown) =>
+  evaluateReminderHook(
+    { hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_input } as Parameters<typeof evaluateReminderHook>[0],
+    ezzsWayOfCodingConfig,
+  );
+
+test('an Agent call that names no effort is refused with the rule for picking one', async () => {
+  for (const tool_input of [
+    { description: 'Find call sites', prompt: 'grep for foo' },
+    { description: 'Find call sites', prompt: 'grep for foo', effort: '' },
+  ]) {
+    const output = await preAgent(tool_input);
+    assert.equal(output?.hookSpecificOutput?.permissionDecision, 'deny', JSON.stringify(tool_input));
+    assert.match(
+      output?.hookSpecificOutput?.permissionDecisionReason ?? '',
+      /user, CLAUDE\.md, a skill or a memory[\s\S]*`low`[\s\S]*checked against the brief alone[\s\S]*`medium`[\s\S]*decides what matters[\s\S]*again with `effort` set; "lower" and "higher"/,
+    );
+  }
+});
+
+test('an Agent call that names an effort, or cannot take one, goes through', async () => {
+  for (const tool_input of [
+    { prompt: 'grep for foo', effort: 'low' },
+    { prompt: 'debug the flake', effort: 'medium' },
+    { prompt: 'grep for foo', effort: 'lower' },
+    { prompt: 'continue', subagent_type: 'fork' },
+    { prompt: 'run the suite', isolation: 'remote' },
+  ]) {
+    const output = await preAgent(tool_input);
+    assert.notEqual(output?.hookSpecificOutput?.permissionDecision, 'deny', JSON.stringify(tool_input));
+  }
+});
+
+test('the effort guard fails open on a malformed Agent input and leaves other tools alone', async () => {
+  for (const tool_input of ['grep for foo', null]) {
+    const output = await preAgent(tool_input);
+    assert.notEqual(output?.hookSpecificOutput?.permissionDecision, 'deny', JSON.stringify(tool_input));
+  }
+  const bash = await evaluateReminderHook(
+    { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'ls' } },
+    ezzsWayOfCodingConfig,
+  );
+  assert.notEqual(bash?.hookSpecificOutput?.permissionDecision, 'deny');
 });

@@ -53,7 +53,6 @@ export const defaultsRules: ReminderRule[] = [
       '- Use the latest Node.js and JavaScript/TypeScript features; do not reach for legacy idioms or polyfills when a modern primitive exists.',
       '- Challenge contradictions and weak premises directly. Ask for clarification when intent is genuinely ambiguous, and prioritize truth over agreement.',
       '- When code or config you build calls an AI for auxiliary work (a prompt or agent hook, a script, a CI job), pin Claude Sonnet 5 for Claude and gpt-6.1-sol for OpenAI. Use a larger model only when that code documents a concrete capability gap.',
-      '- Claude Code subagents, Workflow-script agents included, run Opus 5.5: the user settings force it with CLAUDE_CODE_SUBAGENT_MODEL_FORCE.',
     ].join('\n'),
   },
   {
