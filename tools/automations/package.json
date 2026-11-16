@@ -1,0 +1,22 @@
+{
+  "name": "automations",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "automations": "./cli.ts"
+  },
+  "scripts": {
+    "test": "node --test --no-warnings cli.test.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@zukhruf/fs": "^0.8.20",
+    "@zukhruf/launchd": "^0.8.20",
+    "rrule-temporal": "^2.2.9",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}
