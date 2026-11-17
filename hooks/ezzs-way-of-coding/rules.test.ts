@@ -1429,6 +1429,22 @@ test('stop asks for an idle housekeeping round while any background work still r
   assert.ok((await stopContext({ background_tasks: [] }, [request, toolCall('Bash'), reply])).includes(BEFORE_DONE));
 });
 
+test('a headless run gets neither Stop rule: it has no AskUserQuestion and no person to sweep for', async () => {
+  const ask = 'Two questions for you:\n1. A?\n2. B?';
+  const worked = [request, toolCall('Bash'), reply];
+  // hook.ts copies Claude Code's CLAUDE_CODE_ENTRYPOINT into the input: `claude -p` and the SDKs.
+  for (const entrypoint of ['sdk-cli', 'sdk-ts', 'sdk-py']) {
+    const context = await stopContext({ claude_code_entrypoint: entrypoint, last_assistant_message: ask }, worked);
+    assert.doesNotMatch(context, /ask-in-the-tool|housekeeping-due/, entrypoint);
+  }
+  // An interactive session, and a host that sends no entrypoint (Codex), keep both rules.
+  for (const input of [{ claude_code_entrypoint: 'cli' }, {}]) {
+    const context = await stopContext({ ...input, last_assistant_message: ask }, worked);
+    assert.match(context, ASK_IN_THE_TOOL, JSON.stringify(input));
+    assert.ok(context.includes(BEFORE_DONE), JSON.stringify(input));
+  }
+});
+
 test('stop stays quiet on housekeeping in a Codex session and without a transcript', async () => {
   const codex = [
     { type: 'turn_context', payload: { turn_id: 'turn-1' } },

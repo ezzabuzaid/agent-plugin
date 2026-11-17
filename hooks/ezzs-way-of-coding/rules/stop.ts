@@ -173,12 +173,22 @@ function backgroundWorkRuns(input: ClaudeHookInput): boolean {
   return Array.isArray(tasks) && tasks.length > 0;
 }
 
+// A headless run (`claude -p`, the Agent SDKs) has no AskUserQuestion and no
+// person to sweep for. Claude Code names how it started only in its
+// environment (CLAUDE_CODE_ENTRYPOINT: 'cli' in a terminal, 'sdk-cli' under
+// -p), so hook.ts copies it into the input. A host that sends none (Codex)
+// counts as interactive.
+function runsHeadless(input: ClaudeHookInput): boolean {
+  const entrypoint = input['claude_code_entrypoint'];
+  return typeof entrypoint === 'string' && entrypoint.startsWith('sdk-');
+}
+
 export const stopRules: ReminderRule[] = [
   {
     id: 'ask-in-the-tool',
     target: 'stop-feedback',
     events: ['Stop'],
-    when: async (input) => asksInProse(await finalAssistantText(input)),
+    when: async (input) => !runsHeadless(input) && asksInProse(await finalAssistantText(input)),
     message:
       "Your final message asks the user something, gives him a task, or waits on him in prose. He reads only AskUserQuestion. Re-issue each ask in AskUserQuestion (2-4 options each). A task for him becomes a question: 'Do X, then pick Done'. Do not restate the asks as text.",
   },
@@ -186,7 +196,7 @@ export const stopRules: ReminderRule[] = [
     id: 'housekeeping-due',
     target: 'stop-feedback',
     events: ['Stop'],
-    when: housekeepingDue,
+    when: async (input) => !runsHeadless(input) && (await housekeepingDue(input)),
     message: (input) =>
       backgroundWorkRuns(input)
         ? 'Background work is still running. Before this turn ends, run the housekeeping skill in idle mode: ask the user every decision only he can make for the rest of the work, from the session\'s first message, in one AskUserQuestion round, then keep waiting.'

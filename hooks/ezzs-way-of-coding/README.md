@@ -84,3 +84,7 @@ called a tool after the first stop (`stop_hook_summary`) that follows the last
 `housekeeping` skill call, or called any tool when no sweep ran yet. With
 `background_tasks` running it asks for the skill's idle mode, otherwise for its
 before-done mode. It is off in a Codex transcript and without one.
+Both rules are off in a headless run (`claude -p`, the Agent SDKs), which has
+no AskUserQuestion and no person to sweep for: `hook.ts` copies Claude Code's
+`CLAUDE_CODE_ENTRYPOINT` (`cli` in a terminal, `sdk-cli` under `-p`) into the
+input as `claude_code_entrypoint`.
