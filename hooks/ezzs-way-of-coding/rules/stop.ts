@@ -55,7 +55,10 @@ const MULTI_QUESTION_PATTERNS = [
   // A report verb earlier in the clause makes it a report of questions put to someone else:
   // "I sent the same two questions to build-classification-generic-core."
   // An opening quote or backtick makes it a mention of the phrase: 'the "two questions" pattern'.
-  /(?<!\b(sent|asked|forwarded|relayed|passed|posted|answered)\b[^.!?\n]{0,30})(?<!["'`“‘])\b(a few|couple of|two|three|four|some|several|\d+)\s+(quick\s+)?questions?\b/i,
+  // "the" points back at questions that exist ("one of the three questions in the agent").
+  // An ask puts the questions right after the count: a colon, "for you", "before I", or a list.
+  // A count alone describes: "5 questions, all from collection book 176286".
+  /(?<!\b(sent|asked|forwarded|relayed|passed|posted|answered)\b[^.!?\n]{0,30})(?<!["'`“‘]|\bthe\s)\b(a few|couple of|two|three|four|some|several|\d+)\s+(quick\s+)?questions?\b(?=[^.!?\n]{0,40}(:|\bfor you\b|\bbefore (I|we)\b)|[^\n]{0,40}\n\s*(\d+[.)]|[-*])\s)/i,
   /\bclarifying questions?\b/i,
   /\bjust to (confirm|check|make sure|clarify)\b/i,
   new RegExp(`\\bbefore (I|we) (${PRE_QUESTION_VERBS})\\b`, 'i'),

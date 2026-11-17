@@ -1295,6 +1295,7 @@ test('stop sends a prose question, offer or request for input to AskUserQuestion
   for (const message of [
     'Two questions before I proceed:\n1. Postgres or SQLite?\n2. Soft deletes?',
     'Sure. A few questions first: which env? which db?',
+    'I have two questions.\n1. Postgres or SQLite?\n2. Soft deletes?',
     'To clarify: do you mean staging or prod?',
     'Just to confirm — are you on UAT or prod?',
     'Clarifying questions before I propose a fix:\n1. Which env?\n2. Which DB?',
@@ -1324,6 +1325,8 @@ test('stop stays quiet on a final message that reports, finishes or only mention
     'My last message only reported that U12 is committed. Nothing is waiting for your answer.',
     'Nothing needs a decision right now; the prover is still running.',
     'I sent the same two questions to the peer session.',
+    '| Whole-library quiz | 5 questions, all from collection book **176286**; the chat references are `COLLECTION` |',
+    'Is it complete is one of the three questions in the Dataiku agent: is there enough information to proceed.',
     'All tests pass. The two rules are registered and the old audit rule is gone.',
     'Per your decision on 2026-11-06, the client reads the declared body.',
     'Every decision went through AskUserQuestion this round.',
