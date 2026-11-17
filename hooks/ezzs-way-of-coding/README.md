@@ -37,7 +37,10 @@ printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Build a custom exec
   | node hook.ts
 
 npm test
+npm run typecheck
 ```
+
+Node strips the types when it runs `hook.ts` and the tests, and checks none of them. `npm run typecheck` is the only type check: run it with `npm test` after each change.
 
 The AGENTS.md/CLAUDE.md explorer CLI lives at `../../tools/explore-agents-md/`
 (bin: `explore-agents-md`); the `reminders-curator` skill

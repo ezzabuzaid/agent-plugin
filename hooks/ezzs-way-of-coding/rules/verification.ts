@@ -33,8 +33,10 @@ function textOfContent(content: unknown): string {
 
 // Text that mentions a word does not claim it (the use–mention distinction).
 // Fenced code blocks quote output or messages, code spans name things (rule
-// ids, flags), and double quotes cite a word ("unverified") rather than say it.
-// A quote stays on one line, so a stray quote mark cannot hide the rest.
+// ids, flags), and quotes cite a word ("unverified", 'unverified') rather than
+// say it. A quote stays on one line, so a stray quote mark cannot hide the rest.
+// A single quote counts only at word edges, so apostrophes ("couldn't",
+// "user's") never open or close one.
 export function prose(text: string): string {
   return text
     .replaceAll(
@@ -42,7 +44,7 @@ export function prose(text: string): string {
       ' ',
     )
     .replaceAll(/`[^`]*`/g, ' ')
-    .replaceAll(/"[^"\n]*"|“[^”\n]*”/g, ' ');
+    .replaceAll(/"[^"\n]*"|“[^”\n]*”|‘[^’\n]*’|(?<![\w'])'[^'\n]+'(?![\w'])/g, ' ');
 }
 
 export async function finalAssistantText(

@@ -6,6 +6,11 @@
     "@deepagents/experimental": "4.3.0"
   },
   "scripts": {
-    "test": "node --test --no-warnings rules.test.ts"
+    "test": "node --test --no-warnings rules.test.ts",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
   }
 }

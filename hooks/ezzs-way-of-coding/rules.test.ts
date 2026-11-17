@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { evaluateReminderHook } from '@deepagents/experimental/coding-agent-reminders';
+import { type ClaudeHookInput, evaluateReminderHook } from '@deepagents/experimental/coding-agent-reminders';
 
 import { ezzsWayOfCodingConfig } from './rules/index.ts';
 
@@ -345,7 +345,7 @@ test('subagents leave out-of-scope backlog writes to the root agent', async () =
 });
 
 test('core reminders fire on their events', async () => {
-  const cases = [
+  const cases: [tag: string, input: ClaudeHookInput][] = [
     ['session:session-ezzs-way', { hook_event_name: 'SessionStart' }],
     [
       'prompt:bug-reproduce-first',
@@ -377,7 +377,7 @@ test('core reminders fire on their events', async () => {
 });
 
 test('core reminders stay quiet off their events', async () => {
-  const cases = [
+  const cases: [tag: string, input: ClaudeHookInput][] = [
     [
       'session:session-ezzs-way',
       { hook_event_name: 'UserPromptSubmit', prompt: 'Fix the crash when uploading large files.' },
@@ -427,7 +427,7 @@ async function bashReminder(command: string, stdout: string, stderr = '') {
 // Each stdout below is an excerpt of a real Bash result that exited 0 and got
 // this reminder, from a Claude Code session transcript.
 test('bash error reminder ignores successful output that mentions failure words', async () => {
-  const cases = [
+  const cases: [command: string, stdout: string][] = [
     ['grep -nE "events:|id:" rules/*.ts', "rules/failures.ts:50:  {\nrules/failures.ts:51:    id: 'bash-error-root-cause',"],
     ['node --test rules.test.ts', 'ℹ tests 44\nℹ pass 44\nℹ fail 0\nℹ cancelled 0'],
     ["sed -n '1,80p' rules/failures.ts", '// PostToolBatch entries carry no structured error marker: the CLI drops the\n// of a file that merely mentions "error" or "failed".'],
@@ -451,7 +451,7 @@ test('bash error reminder ignores successful output that mentions failure words'
 });
 
 test('bash error reminder fires on error lines a successful command hides', async () => {
-  const cases = [
+  const cases: [command: string, stdout: string][] = [
     // Real results from the same transcript: the stage failed, `| head` and `; echo` exited 0.
     ["grep -oE '.{0,400}subagentEffort:.{0,300}' \"$s\" | head -3; echo", 'ugrep: error: error at position 93\n^\\n\\x80-\\xbf][\\x80-\\xbf]*){0,300}\n    exceeds complexity limits___/'],
     ["grep -oE '.{0,300}iy.{0,300}' \"$s\" | head -2; echo '== next =='", 'grep: maximum repetition exceeds 255\n\n== next =='],
@@ -983,10 +983,12 @@ test('stop ignores talk about the verification rule itself', async () => {
 
 // Claude Code keeps a subagent's transcript next to the parent session's:
 // <session>.jsonl -> <session>/subagents/agent-<agent_id>.jsonl.
-// A word inside a fenced block or double quotes is mentioned, not claimed.
+// A word inside a fenced block or quotes is mentioned, not claimed.
 const mentionsOfUnverified = [
   'The probe now reports "unverified" when the export has no live row, and it found one.',
   'The probe now reports “unverified” when the export has no live row, and it found one.',
+  "The hook flagged my report because the word 'unverified' appears in it.",
+  'The hook flagged my report because the word ‘unverified’ appears in it.',
   [
     'The guard refused my first hand-back with this text:',
     '```',
@@ -1006,11 +1008,17 @@ test('stop ignores a verification word that the final message only quotes', asyn
     assert.doesNotMatch(output?.hookSpecificOutput?.additionalContext ?? '', /live-verify-before-unverified/, message);
   }
 
-  const claim = await evaluateReminderHook(
-    { hook_event_name: 'Stop', last_assistant_message: 'The probe reports the export as unverified.' },
-    ezzsWayOfCodingConfig,
-  );
-  assert.match(claim?.hookSpecificOutput?.additionalContext ?? '', /\[stop-feedback:live-verify-before-unverified\]/);
+  for (const message of [
+    'The probe reports the export as unverified.',
+    // Apostrophes inside words are not quotes, so the claim between them still counts.
+    "I couldn't reach the store, so the user's export is unverified and it's still open.",
+  ]) {
+    const claim = await evaluateReminderHook(
+      { hook_event_name: 'Stop', last_assistant_message: message },
+      ezzsWayOfCodingConfig,
+    );
+    assert.match(claim?.hookSpecificOutput?.additionalContext ?? '', /\[stop-feedback:live-verify-before-unverified\]/, message);
+  }
 });
 
 async function preHandback(
