@@ -18,6 +18,8 @@ Each entry gives the rule, the user's words with their date, what happened, and 
 
 These are the four Ask gotchas: idle, a task is a question, open items are questions, remaining phases hide decisions.
 
+**Tried and dropped: "a next step with an open design choice is a question now".** In the Mac mini session the reply ended _"After that I'll install the always-on phone server"_. After the nudge, the user's first decision was _"How should the CLI Remote Control cover all repos on the mini?"_ Neither the old skill nor this one asked it in the 2026-11-17 replay. The user chose "iterate now". A gotcha for it was added and replayed on the same three cases: it made the agent ask more design choices (cut-over, memory home, backlog on the mini), but still not the Remote Control one, and the total stayed at 7 of 9 checks (old skill: 5 and 4 of 9). By the rule set before the run, it was removed. Workspace: `~/.claude/scratch/housekeeping-workspace/iteration-2/`.
+
 **Ask only what is the user's.** The agent decides what the design decides, and asks only on a real split. A question already answered costs the user a second read. `experiments-mutex/decide-correct-design-not-preference.md`, `experiments-mutex/dont-reask-pending-decision.md`
 
 ## Why a Stop gate sends the agent here
