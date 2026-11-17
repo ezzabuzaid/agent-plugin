@@ -3,21 +3,14 @@ import { createInterface } from 'node:readline';
 
 export type TranscriptEntry = {
   type?: string;
+  subtype?: string;
   isMeta?: boolean;
-  sourceToolAssistantUUID?: string | null;
   origin?: {
     kind?: string;
   };
   message?: {
     role?: string;
     content?: unknown;
-  };
-  attachment?: {
-    type?: string;
-    content?: unknown;
-  };
-  payload?: {
-    turn_id?: string;
   };
 };
 

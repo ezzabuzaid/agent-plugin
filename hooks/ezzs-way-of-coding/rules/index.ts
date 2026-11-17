@@ -12,6 +12,7 @@ import { failuresRules } from './failures.ts';
 import { frontendRules } from './frontend.ts';
 import { infraRules } from './infra.ts';
 import { scopeRules } from './scope.ts';
+import { stopRules } from './stop.ts';
 import { subagentGuards } from './subagents.ts';
 import { testingRules } from './testing.ts';
 import { verificationGuards, verificationRules } from './verification.ts';
@@ -27,6 +28,7 @@ export const reminderRules: ReminderRule[] = [
   ...infraRules,
   ...failuresRules,
   ...verificationRules,
+  ...stopRules,
 ];
 
 export const guardRules: GuardRule[] = [...verificationGuards, ...subagentGuards];

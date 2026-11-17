@@ -13,7 +13,7 @@ type Agent = 'claude' | 'codex';
 
 /**
  * A Codex rollout opens with a `session_meta` entry; a Claude transcript never
- * has one. The `turn_context` entries that the stop audit counts come only
+ * has one. Its `turn_context` entries come only
  * after the first user message, so they cannot name the agent on the first
  * prompt. A missing or empty transcript names no agent.
  */

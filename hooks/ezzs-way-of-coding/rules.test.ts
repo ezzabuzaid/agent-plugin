@@ -339,341 +339,7 @@ test('subagents leave out-of-scope backlog writes to the root agent', async () =
 
     assert.doesNotMatch(
       output?.hookSpecificOutput?.additionalContext ?? '',
-      /(?:capture|audit)-out-of-scope-followups/,
-    );
-  }
-});
-
-test('root stop audits out-of-scope follow-ups every third Codex assistant message', async () => {
-  const transcriptDirectory = await mkdtemp(
-    join(tmpdir(), 'ezzs-way-of-coding-codex-'),
-  );
-
-  try {
-    const transcriptPath = join(transcriptDirectory, 'transcript.jsonl');
-
-    const evaluateStop = async () => {
-      const output = await evaluateReminderHook(
-        { hook_event_name: 'Stop', transcript_path: transcriptPath },
-        ezzsWayOfCodingConfig,
-      );
-      return output?.hookSpecificOutput?.additionalContext ?? '';
-    };
-    const writeTurns = async (turnIds: string[]) => {
-      const entries = turnIds.map((turnId) => ({
-        type: 'turn_context',
-        payload: { turn_id: turnId },
-      }));
-      await writeFile(
-        transcriptPath,
-        `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
-      );
-    };
-
-    await writeTurns(['turn-1']);
-    assert.doesNotMatch(await evaluateStop(), /audit-out-of-scope-followups/);
-
-    await writeTurns(['turn-1', 'turn-2']);
-    assert.doesNotMatch(await evaluateStop(), /audit-out-of-scope-followups/);
-
-    await writeTurns(['turn-1', 'turn-2', 'turn-3', 'turn-3']);
-    const thirdMessageContext = await evaluateStop();
-    assert.match(
-      thirdMessageContext,
-      /\[stop-feedback:audit-out-of-scope-followups\]/,
-    );
-    assert.match(thirdMessageContext, /Do not invent work/);
-    assert.match(thirdMessageContext, /agent-backlog done <id>/);
-    assert.match(thirdMessageContext, /Never run `agent-backlog remove`/);
-    assert.doesNotMatch(thirdMessageContext, /agent-backlog remove <id>/);
-    assert.match(thirdMessageContext, /Do not file upstream bug reports or dev-tooling audit items[^\n]*mention each one once in your reply/i);
-    assert.match(thirdMessageContext, /If storing or closing fails/);
-    assert.doesNotMatch(
-      thirdMessageContext,
-      /deduplicat|duplicate|equivalent open item/i,
-    );
-
-    await writeTurns(['turn-1', 'turn-2', 'turn-3', 'turn-4']);
-    assert.doesNotMatch(await evaluateStop(), /audit-out-of-scope-followups/);
-
-    await writeTurns([
-      'turn-1',
-      'turn-2',
-      'turn-3',
-      'turn-4',
-      'turn-5',
-      'turn-6',
-    ]);
-    assert.match(await evaluateStop(), /audit-out-of-scope-followups/);
-  } finally {
-    await rm(transcriptDirectory, { recursive: true, force: true });
-  }
-});
-
-test('root stop cadence counts Claude turns without counting tool results or meta messages', async () => {
-  const transcriptDirectory = await mkdtemp(
-    join(tmpdir(), 'ezzs-way-of-coding-claude-'),
-  );
-
-  try {
-    const transcriptPath = join(transcriptDirectory, 'transcript.jsonl');
-
-    const entries = [
-      { type: 'user', message: { role: 'user', content: 'First request' } },
-      {
-        type: 'user',
-        sourceToolAssistantUUID: 'assistant-1',
-        message: { role: 'user', content: [{ type: 'tool_result' }] },
-      },
-      { type: 'user', message: { role: 'user', content: 'Second request' } },
-      {
-        type: 'user',
-        isMeta: true,
-        message: { role: 'user', content: [{ type: 'text', text: 'Skill context' }] },
-      },
-      { type: 'user', message: { role: 'user', content: 'Third request' } },
-    ];
-    await writeFile(
-      transcriptPath,
-      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
-    );
-
-    const output = await evaluateReminderHook(
-      { hook_event_name: 'Stop', transcript_path: transcriptPath },
-      ezzsWayOfCodingConfig,
-    );
-
-    assert.match(
-      output?.hookSpecificOutput?.additionalContext ?? '',
-      /\[stop-feedback:audit-out-of-scope-followups\]/,
-    );
-  } finally {
-    await rm(transcriptDirectory, { recursive: true, force: true });
-  }
-});
-
-// Claude Code sends the work still in flight on Stop as `background_tasks`,
-// with the task type as a display name.
-async function stopOnThirdTurn(backgroundTasks: unknown[]) {
-  const transcriptDirectory = await mkdtemp(
-    join(tmpdir(), 'ezzs-way-of-coding-claude-'),
-  );
-
-  try {
-    const transcriptPath = join(transcriptDirectory, 'transcript.jsonl');
-    const entries = ['First request', 'Second request', 'Third request'].map(
-      (content) => ({ type: 'user', message: { role: 'user', content } }),
-    );
-    await writeFile(
-      transcriptPath,
-      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
-    );
-
-    const output = await evaluateReminderHook(
-      {
-        hook_event_name: 'Stop',
-        transcript_path: transcriptPath,
-        background_tasks: backgroundTasks,
-      },
-      ezzsWayOfCodingConfig,
-    );
-    return output?.hookSpecificOutput?.additionalContext ?? '';
-  } finally {
-    await rm(transcriptDirectory, { recursive: true, force: true });
-  }
-}
-
-test('root stop audit waits while a subagent or a workflow it started still runs', async () => {
-  for (const task of [
-    { id: 'a3a963ff468395a67', type: 'subagent', status: 'running', description: 'Group C: #3958', agent_type: 'general-purpose' },
-    { id: 'w1', type: 'workflow', status: 'pending', description: 'Fix tickets', name: 'fix-tickets' },
-  ]) {
-    assert.doesNotMatch(
-      await stopOnThirdTurn([task]),
-      /audit-out-of-scope-followups/,
-      task.type,
-    );
-  }
-});
-
-test('root stop audit runs when no delegated work is in flight', async () => {
-  for (const backgroundTasks of [
-    [],
-    // A dev server or a watcher can run all session; it is not work the turn waits on.
-    [{ id: 'b9i2ob8yk', type: 'shell', status: 'running', description: 'npm run dev', command: 'npm run dev' }],
-    [{ id: 'm1', type: 'monitor', status: 'running', description: 'CI run', server: 'github', tool: 'watch' }],
-  ]) {
-    assert.match(
-      await stopOnThirdTurn(backgroundTasks),
-      /\[stop-feedback:audit-out-of-scope-followups\]/,
-      JSON.stringify(backgroundTasks),
-    );
-  }
-});
-
-// Claude Code records the context a Stop hook adds as a transcript attachment.
-const AUDIT_FIRE = {
-  type: 'attachment',
-  attachment: {
-    type: 'hook_additional_context',
-    content: [
-      '[stop-feedback:audit-out-of-scope-followups]\nBefore stopping, capture each concrete, actionable follow-up outside the active request with `agent-backlog`.',
-    ],
-  },
-};
-
-async function stopAfter(entries: object[]) {
-  const transcriptDirectory = await mkdtemp(
-    join(tmpdir(), 'ezzs-way-of-coding-claude-'),
-  );
-
-  try {
-    const transcriptPath = join(transcriptDirectory, 'transcript.jsonl');
-    await writeFile(
-      transcriptPath,
-      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
-    );
-
-    const output = await evaluateReminderHook(
-      {
-        hook_event_name: 'Stop',
-        transcript_path: transcriptPath,
-        background_tasks: [],
-      },
-      ezzsWayOfCodingConfig,
-    );
-    return output?.hookSpecificOutput?.additionalContext ?? '';
-  } finally {
-    await rm(transcriptDirectory, { recursive: true, force: true });
-  }
-}
-
-const userTurn = (content: string) => ({
-  type: 'user',
-  message: { role: 'user', content },
-});
-
-// User entries that Claude Code writes for work the user did not ask the
-// agent for, in the shapes the session transcripts hold them.
-const NOT_PROMPTS = [
-  {
-    type: 'user',
-    origin: { kind: 'task-notification' },
-    message: {
-      role: 'user',
-      content:
-        '<task-notification>\n<task-id>b0sht8ykj</task-id>\n<status>completed</status>\n<summary>Background command finished</summary>\n</task-notification>',
-    },
-  },
-  userTurn('<bash-input>git status</bash-input>'),
-  userTurn(
-    '<bash-stdout>On branch main</bash-stdout><bash-stderr></bash-stderr>',
-  ),
-  userTurn(
-    '<command-name>/effort</command-name>\n            <command-message>effort</command-message>\n            <command-args>xhigh</command-args>',
-  ),
-  userTurn(
-    '<local-command-stdout>Set effort level to xhigh</local-command-stdout>',
-  ),
-  // The 2.1.319 binary writes these tags too; no transcript starts with one yet.
-  userTurn('<bash-stderr>fatal: not a git repository</bash-stderr>'),
-  userTurn('<local-command-stderr>Unknown model</local-command-stderr>'),
-  {
-    type: 'user',
-    message: {
-      role: 'user',
-      content: [{ type: 'text', text: '[Request interrupted by user]' }],
-    },
-  },
-  {
-    type: 'user',
-    message: {
-      role: 'user',
-      content: [
-        { type: 'text', text: '[Request interrupted by user for tool use]' },
-      ],
-    },
-  },
-  {
-    type: 'user',
-    isMeta: true,
-    origin: { kind: 'peer' },
-    message: {
-      role: 'user',
-      content:
-        'Another Claude session sent a message:\n<agent-message from="a24c8559dff70a569">\n[Subagent hand-back] The report follows.\n</agent-message>',
-    },
-  },
-  {
-    type: 'user',
-    isMeta: true,
-    origin: { kind: 'auto-continuation' },
-    message: {
-      role: 'user',
-      content:
-        'Your claude.ai usage limit has reset. Continue the task you were working on when the limit was reached; do not repeat work that is already complete.',
-    },
-  },
-];
-
-test('root stop audit counts only prompts the user typed', async () => {
-  assert.doesNotMatch(
-    await stopAfter([
-      userTurn('First request'),
-      ...NOT_PROMPTS,
-      userTurn('Second request'),
-      ...NOT_PROMPTS,
-    ]),
-    /audit-out-of-scope-followups/,
-  );
-});
-
-test('root stop audit held back by delegated work runs on the first stop after that work ends', async () => {
-  // The third prompt's turn ended while a subagent ran, so no audit was
-  // recorded; the hand-back's turn ends with nothing in flight.
-  assert.match(
-    await stopAfter([
-      userTurn('First request'),
-      userTurn('Second request'),
-      userTurn('Third request'),
-      ...NOT_PROMPTS,
-    ]),
-    /\[stop-feedback:audit-out-of-scope-followups\]/,
-  );
-});
-
-test('root stop audit waits for three prompts after the audit it last ran', async () => {
-  // An audit made up on the fourth prompt's turn; the sixth prompt is not the
-  // third after it.
-  const sinceAudit = [
-    userTurn('First request'),
-    userTurn('Second request'),
-    userTurn('Third request'),
-    userTurn('Fourth request'),
-    AUDIT_FIRE,
-    userTurn('Fifth request'),
-    userTurn('Sixth request'),
-  ];
-  assert.doesNotMatch(
-    await stopAfter(sinceAudit),
-    /audit-out-of-scope-followups/,
-  );
-  assert.match(
-    await stopAfter([...sinceAudit, userTurn('Seventh request')]),
-    /\[stop-feedback:audit-out-of-scope-followups\]/,
-  );
-});
-
-test('root stop audit stays quiet without a readable transcript', async () => {
-  for (const transcriptPath of [undefined, '/missing/transcript.jsonl']) {
-    const output = await evaluateReminderHook(
-      { hook_event_name: 'Stop', transcript_path: transcriptPath },
-      ezzsWayOfCodingConfig,
-    );
-
-    assert.doesNotMatch(
-      output?.hookSpecificOutput?.additionalContext ?? '',
-      /audit-out-of-scope-followups/,
+      /capture-out-of-scope-followups/,
     );
   }
 });
@@ -1590,4 +1256,174 @@ test('the effort guard fails open on a malformed Agent input and leaves other to
     ezzsWayOfCodingConfig,
   );
   assert.notEqual(bash?.hookSpecificOutput?.permissionDecision, 'deny');
+});
+
+// A Stop whose transcript, when given, is written as JSONL the way Claude Code
+// writes it.
+async function stopContext(input: Record<string, unknown>, entries?: object[]) {
+  const directory = await mkdtemp(join(tmpdir(), 'ezzs-way-of-coding-stop-'));
+  try {
+    const transcriptPath = join(directory, 'transcript.jsonl');
+    if (entries) {
+      await writeFile(transcriptPath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`);
+    }
+    const output = await evaluateReminderHook(
+      { hook_event_name: 'Stop', ...(entries ? { transcript_path: transcriptPath } : {}), ...input },
+      ezzsWayOfCodingConfig,
+    );
+    return output?.hookSpecificOutput?.additionalContext ?? '';
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+const ASK_IN_THE_TOOL = /\[stop-feedback:ask-in-the-tool\]\nYour final message asks the user something, gives him a task, or waits on him in prose\. He reads only AskUserQuestion\./;
+
+test('stop sends a prose ask to AskUserQuestion when the final message waits on the user', async () => {
+  for (const message of [
+    // Real stalls that ended a turn with work for the user in prose.
+    'Still waiting on you at the mini:\n- **The four System Settings toggles:** Privacy, Login Items, Full Disk Access, Accessibility.\n- **One run in Terminal** of the setup script.',
+    "**Cleanup that's yours, through Mole:**\n- The 50 untracked files under `~/Desktop`.",
+    '| Gap | State |\n| --- | --- |\n| Restart storm | launchd has no restart limit; needs a design choice |',
+    '#3966 (the restart storm) is filed and needs your decision.',
+  ]) {
+    assert.match(await stopContext({ last_assistant_message: message }), ASK_IN_THE_TOOL, message);
+  }
+});
+
+test('stop sends a prose question, offer or request for input to AskUserQuestion', async () => {
+  for (const message of [
+    'Two questions before I proceed:\n1. Postgres or SQLite?\n2. Soft deletes?',
+    'Sure. A few questions first: which env? which db?',
+    'To clarify: do you mean staging or prod?',
+    'Just to confirm — are you on UAT or prod?',
+    'Clarifying questions before I propose a fix:\n1. Which env?\n2. Which DB?',
+    'Done.\n\nWant me to schedule an agent in 2 weeks to clean up the flag?',
+    'Migration is ready.\n\nShould I run it now?',
+    // The offer sits mid-message; the closing question has no offer phrase.
+    'Here is where we left off.\n\nSo the question is — what do you want to do next? A few directions:\n\n1. Explore\n2. Prototype\n\nWhat feels right?',
+    '**Decisions to confirm before I touch code:**\n\n1. **Storage** — postgres or sqlite?',
+    '**Decisions to confirm:**\n1. Postgres or sqlite\n2. Email-link or magic-token',
+    'Quick sanity check before I touch code. Want postgres or sqlite.',
+    'Done.\n\n- `sdk-it init` now refuses a nameless root manifest. Confirm the refusal, or say if you want a `--package-name` flag instead.',
+    'The release is ready and awaiting your approval.',
+    'Pushing main is your call.',
+    'Both options work. Tell me which one you prefer.',
+    // A quoted word is stripped before the check; the request around it stays.
+    'Say "go" to start with step 0, or tell me which steps to change or drop.',
+    'Nothing is committed yet, so either way is a small move. Say if you want it.',
+  ]) {
+    assert.match(await stopContext({ last_assistant_message: message }), ASK_IN_THE_TOOL, message);
+  }
+});
+
+test('stop stays quiet on a final message that reports, finishes or only mentions an ask', async () => {
+  for (const message of [
+    'You chose X, so I did Y.',
+    'Nothing needs your decision.',
+    'My last message only reported that U12 is committed. Nothing is waiting for your answer.',
+    'Nothing needs a decision right now; the prover is still running.',
+    'I sent the same two questions to the peer session.',
+    'All tests pass. The two rules are registered and the old audit rule is gone.',
+    'Per your decision on 2026-11-06, the client reads the declared body.',
+    'Every decision went through AskUserQuestion this round.',
+    'I am reading the memory to see whether it needs your approval first.',
+    "A Comparison can't say which stated items went unpaired.",
+    'There are some decisions to confirm with legal next week.',
+    'We should run the migration before we ship 1.0.',
+    'I want to read the spec before I code-review the diff with you.',
+    'Docs are at https://example.com/x?utm=foo&ref=bar. Done.',
+    'What changed? The migration now runs in two phases instead of one.',
+    // An offer phrase with no question mark in its paragraph describes.
+    'The CLI asks which option you want and stores it.',
+    '**Defect 2: the "two questions" pattern matched a report**',
+  ]) {
+    assert.doesNotMatch(await stopContext({ last_assistant_message: message }), /ask-in-the-tool/, message);
+  }
+});
+
+test('stop sends a prose ask to AskUserQuestion even when the same turn already used AskUserQuestion', async () => {
+  const context = await stopContext({}, [
+    { type: 'user', message: { role: 'user', content: 'Set up the mini.' } },
+    {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', id: 'q1', name: 'AskUserQuestion', input: { questions: [] } },
+          { type: 'text', text: 'Thanks. Still waiting on you for the Full Disk Access toggle.' },
+        ],
+      },
+    },
+  ]);
+  assert.match(context, ASK_IN_THE_TOOL);
+});
+
+test('a subagent stop and a stop that a stop hook already continued never get the Stop rules', async () => {
+  const sweepDue = [{ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] } }];
+  const ask = 'Two questions for you:\n1. A?\n2. B?';
+  for (const input of [
+    { hook_event_name: 'SubagentStop', last_assistant_message: ask },
+    { stop_hook_active: true, last_assistant_message: ask },
+  ]) {
+    assert.doesNotMatch(await stopContext(input, sweepDue), /ask-in-the-tool|housekeeping-due/, JSON.stringify(input));
+  }
+});
+
+const toolCall = (name: string, input: object = {}) => ({
+  type: 'assistant',
+  message: { role: 'assistant', content: [{ type: 'tool_use', id: `toolu_${name}`, name, input }] },
+});
+const sweep = toolCall('Skill', { skill: 'housekeeping', args: 'Before the done report.' });
+// Claude Code writes this entry each time a turn stops.
+const stopped = { type: 'system', subtype: 'stop_hook_summary', hookCount: 6, hookInfos: [] };
+const request = { type: 'user', message: { role: 'user', content: 'Fix the reaper.' } };
+const reply = { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Fixed.' }] } };
+const BEFORE_DONE = '[stop-feedback:housekeeping-due]\nBefore this turn ends, run the housekeeping skill in before-done mode.';
+
+test('stop asks for a housekeeping sweep once the agent worked after the last sweep was stopped on', async () => {
+  for (const [label, entries] of [
+    ['no sweep yet', [request, toolCall('Bash'), reply]],
+    ['sweep, stop, more work', [request, toolCall('Bash'), sweep, reply, stopped, request, toolCall('Edit'), reply]],
+  ] as const) {
+    assert.ok((await stopContext({}, [...entries])).includes(BEFORE_DONE), label);
+  }
+});
+
+test('stop stays quiet on housekeeping while no work followed the last sweep that was stopped on', async () => {
+  for (const [label, entries] of [
+    ['no tool call at all', [request, reply]],
+    ['sweep in the current turn', [request, toolCall('Bash'), sweep, toolCall('Edit'), reply]],
+    ['an older sweep was stopped on, the last one ran this turn', [sweep, stopped, toolCall('Bash'), sweep, toolCall('Edit'), reply]],
+    ['a plugin-prefixed sweep in the current turn', [request, toolCall('Bash'), toolCall('Skill', { skill: 'ezzabuzaid:housekeeping' }), reply]],
+    ['sweep, stop, no tool call since', [request, toolCall('Bash'), sweep, reply, stopped, request, reply]],
+  ] as const) {
+    assert.doesNotMatch(await stopContext({}, [...entries]), /housekeeping-due/, label);
+  }
+  // Another skill is work, not a sweep.
+  assert.ok((await stopContext({}, [request, toolCall('Skill', { skill: 'write-test' }), reply])).includes(BEFORE_DONE));
+});
+
+test('stop asks for an idle housekeeping round while any background work still runs', async () => {
+  for (const task of [
+    { id: 'a3a963ff468395a67', type: 'subagent', status: 'running', description: 'Group C: #3958', agent_type: 'general-purpose' },
+    { id: 'w1', type: 'workflow', status: 'pending', description: 'Fix tickets', name: 'fix-tickets' },
+    { id: 'b9i2ob8yk', type: 'shell', status: 'running', description: 'npm run dev', command: 'npm run dev' },
+    { id: 'm1', type: 'monitor', status: 'running', description: 'CI run', server: 'github', tool: 'watch' },
+  ]) {
+    const context = await stopContext({ background_tasks: [task] }, [request, toolCall('Agent'), reply]);
+    assert.match(context, /\[stop-feedback:housekeeping-due\]\nBackground work is still running\. Before this turn ends, run the housekeeping skill in idle mode/, task.type);
+    assert.doesNotMatch(context, /before-done mode/, task.type);
+  }
+  assert.ok((await stopContext({ background_tasks: [] }, [request, toolCall('Bash'), reply])).includes(BEFORE_DONE));
+});
+
+test('stop stays quiet on housekeeping in a Codex session and without a transcript', async () => {
+  const codex = [
+    { type: 'turn_context', payload: { turn_id: 'turn-1' } },
+    toolCall('shell'),
+    reply,
+  ];
+  assert.doesNotMatch(await stopContext({}, codex), /housekeeping-due/);
+  assert.doesNotMatch(await stopContext({ last_assistant_message: 'Done.' }), /housekeeping-due/);
 });

@@ -35,7 +35,7 @@ function textOfContent(content: unknown): string {
 // Fenced code blocks quote output or messages, code spans name things (rule
 // ids, flags), and double quotes cite a word ("unverified") rather than say it.
 // A quote stays on one line, so a stray quote mark cannot hide the rest.
-function prose(text: string): string {
+export function prose(text: string): string {
   return text
     .replaceAll(
       /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^ {0,3}\1[^\n]*$|(?![\s\S]))/gm,
@@ -45,7 +45,9 @@ function prose(text: string): string {
     .replaceAll(/"[^"\n]*"|“[^”\n]*”/g, ' ');
 }
 
-async function finalAssistantText(input: ClaudeHookInput): Promise<string> {
+export async function finalAssistantText(
+  input: ClaudeHookInput,
+): Promise<string> {
   if (typeof input.last_assistant_message === 'string')
     return prose(input.last_assistant_message);
   // On SubagentStop, transcript_path is the parent session's; the subagent's own
