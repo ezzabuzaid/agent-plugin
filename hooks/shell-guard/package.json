@@ -1,0 +1,11 @@
+{
+  "name": "shell-guard-hook",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --no-warnings shell-traps.test.ts block-git-mutation.test.ts"
+  },
+  "devDependencies": {
+    "@zukhruf/fs": "^0.8.22"
+  }
+}

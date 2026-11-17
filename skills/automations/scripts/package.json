@@ -10,8 +10,8 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
-    "@zukhruf/fs": "^0.8.20",
-    "@zukhruf/launchd": "^0.8.20",
+    "@zukhruf/fs": "^0.8.22",
+    "@zukhruf/launchd": "^0.8.22",
     "rrule-temporal": "^2.2.9",
     "yaml": "^2.9.1"
   },

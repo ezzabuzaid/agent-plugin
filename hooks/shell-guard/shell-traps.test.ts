@@ -1,9 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+
+import { TemporaryFiles } from '@zukhruf/fs';
 
 // GIT_GUARD_SCRIPT lets the suite run against a scratch copy before the real hook is replaced.
 const SCRIPT =
@@ -383,26 +385,23 @@ test('leaves other tools alone', () => {
 // A copy of the real entry beside a file that is broken on purpose. HOME is the child's input, so
 // the error goes to a log this test can read and the real log stays clean.
 function withBrokenFile(file: string, source: string | null, run: (decide: (command: string) => { status: number | null; denied: boolean }, log: () => string) => void) {
-  const dir = mkdtempSync(join(tmpdir(), 'broken-hook-'));
-  try {
-    const home = join(dir, 'home');
-    mkdirSync(join(home, '.claude/hooks'), { recursive: true });
-    for (const name of ['block-git-mutation.ts', 'shell-lex.ts', 'shell-traps.ts']) {
-      if (name !== file) copyFileSync(join(dirname(SCRIPT), name), join(dir, name));
-    }
-    if (source !== null) writeFileSync(join(dir, file), source);
-    const decide = (command: string) => {
-      const result = spawnSync('node', [join(dir, 'block-git-mutation.ts')], {
-        input: JSON.stringify({ tool_name: 'Bash', cwd: dir, tool_input: { command } }),
-        encoding: 'utf8',
-        env: { ...process.env, HOME: home },
-      });
-      return { status: result.status, denied: result.stdout.includes('"deny"') };
-    };
-    run(decide, () => readFileSync(join(home, '.claude/hooks/block-git-mutation.log'), 'utf8'));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+  using folder = new TemporaryFiles().directorySync('broken-hook-');
+  const dir = folder.path;
+  const home = join(dir, 'home');
+  mkdirSync(join(home, '.claude/hooks'), { recursive: true });
+  for (const name of ['block-git-mutation.ts', 'shell-lex.ts', 'shell-traps.ts']) {
+    if (name !== file) copyFileSync(join(dirname(SCRIPT), name), join(dir, name));
   }
+  if (source !== null) writeFileSync(join(dir, file), source);
+  const decide = (command: string) => {
+    const result = spawnSync('node', [join(dir, 'block-git-mutation.ts')], {
+      input: JSON.stringify({ tool_name: 'Bash', cwd: dir, tool_input: { command } }),
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home },
+    });
+    return { status: result.status, denied: result.stdout.includes('"deny"') };
+  };
+  run(decide, () => readFileSync(join(home, '.claude/hooks/block-git-mutation.log'), 'utf8'));
 }
 
 const BROKEN_CHECKS: [string, string | null][] = [
@@ -442,22 +441,19 @@ test('leaves = words to the shell, which reads them as text', () => {
 // The checks above assume this file. It runs before each Bash and Monitor command, so a broken edit
 // would bring back the traps that have no check, in every new session.
 test('the real agent shell splits a list and keeps unmatched globs and = words as text', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'agent-shell-'));
-  try {
-    const script = [
-      `source ${new URL('./agent-shell.zsh', import.meta.url).pathname}`,
-      'setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL',
-      'F="a b"; print -rl -- $F | wc -l | tr -d " "',
-      'print -r -- zz*.none',
-      'echo =====',
-      'echo =ls',
-      '[ a == a ] && echo equal',
-      'echo reached-the-end',
-    ].join('\n');
-    const result = spawnSync('zsh', ['-c', script], { cwd: dir, encoding: 'utf8' });
-    assert.equal(result.stderr, '');
-    assert.equal(result.stdout, ['2', 'zz*.none', '=====', '=ls', 'equal', 'reached-the-end', ''].join('\n'));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  using folder = new TemporaryFiles().directorySync('agent-shell-');
+  const dir = folder.path;
+  const script = [
+    `source ${new URL('./agent-shell.zsh', import.meta.url).pathname}`,
+    'setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL',
+    'F="a b"; print -rl -- $F | wc -l | tr -d " "',
+    'print -r -- zz*.none',
+    'echo =====',
+    'echo =ls',
+    '[ a == a ] && echo equal',
+    'echo reached-the-end',
+  ].join('\n');
+  const result = spawnSync('zsh', ['-c', script], { cwd: dir, encoding: 'utf8' });
+  assert.equal(result.stderr, '');
+  assert.equal(result.stdout, ['2', 'zz*.none', '=====', '=ls', 'equal', 'reached-the-end', ''].join('\n'));
 });

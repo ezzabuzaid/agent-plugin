@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
 
 import { type ClaudeHookInput, evaluateReminderHook } from '@deepagents/experimental/coding-agent-reminders';
+import { TemporaryFiles } from '@zukhruf/fs';
 
 import { ezzsWayOfCodingConfig } from './rules/index.ts';
 
@@ -496,29 +496,23 @@ test('destructive reminder ignores harmless remove wording', async () => {
 });
 
 async function evaluateWithTranscript(entries: object[], prompt: string) {
-  const transcriptDirectory = await mkdtemp(
-    join(tmpdir(), 'ezzs-way-of-coding-register-'),
+  await using folder = await new TemporaryFiles().directory('ezzs-way-of-coding-register-');
+  const transcriptDirectory = folder.path;
+  const transcriptPath = join(transcriptDirectory, 'transcript.jsonl');
+  await writeFile(
+    transcriptPath,
+    `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
   );
 
-  try {
-    const transcriptPath = join(transcriptDirectory, 'transcript.jsonl');
-    await writeFile(
-      transcriptPath,
-      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
-    );
-
-    const output = await evaluateReminderHook(
-      {
-        hook_event_name: 'UserPromptSubmit',
-        transcript_path: transcriptPath,
-        prompt,
-      },
-      ezzsWayOfCodingConfig,
-    );
-    return output?.hookSpecificOutput?.additionalContext ?? '';
-  } finally {
-    await rm(transcriptDirectory, { recursive: true, force: true });
-  }
+  const output = await evaluateReminderHook(
+    {
+      hook_event_name: 'UserPromptSubmit',
+      transcript_path: transcriptPath,
+      prompt,
+    },
+    ezzsWayOfCodingConfig,
+  );
+  return output?.hookSpecificOutput?.additionalContext ?? '';
 }
 
 const commandEntry = (commandName: string) => ({
@@ -558,57 +552,51 @@ test('the /wait-what register ignores a command whose name only contains wait-wh
 });
 
 test('the /wait-what register ignores a transcript that only quotes the skill', async () => {
-  const transcriptDirectory = await mkdtemp(
-    join(tmpdir(), 'ezzs-way-of-coding-register-quote-'),
+  await using folder = await new TemporaryFiles().directory('ezzs-way-of-coding-register-quote-');
+  const transcriptDirectory = folder.path;
+  const transcriptPath = join(transcriptDirectory, 'transcript.jsonl');
+  const entries = [
+    { type: 'user', message: { role: 'user', content: 'Read that skill' } },
+    {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'toolu_1',
+            content:
+              'grep hit: <command-name>/mattpocock-skills:wait-what</command-name>',
+          },
+        ],
+      },
+    },
+    {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'The wait-what skill sets it.' }],
+      },
+    },
+  ];
+  await writeFile(
+    transcriptPath,
+    `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
   );
 
-  try {
-    const transcriptPath = join(transcriptDirectory, 'transcript.jsonl');
-    const entries = [
-      { type: 'user', message: { role: 'user', content: 'Read that skill' } },
-      {
-        type: 'user',
-        message: {
-          role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: 'toolu_1',
-              content:
-                'grep hit: <command-name>/mattpocock-skills:wait-what</command-name>',
-            },
-          ],
-        },
-      },
-      {
-        type: 'assistant',
-        message: {
-          role: 'assistant',
-          content: [{ type: 'text', text: 'The wait-what skill sets it.' }],
-        },
-      },
-    ];
-    await writeFile(
-      transcriptPath,
-      `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
-    );
+  const output = await evaluateReminderHook(
+    {
+      hook_event_name: 'UserPromptSubmit',
+      transcript_path: transcriptPath,
+      prompt: 'Carry on',
+    },
+    ezzsWayOfCodingConfig,
+  );
 
-    const output = await evaluateReminderHook(
-      {
-        hook_event_name: 'UserPromptSubmit',
-        transcript_path: transcriptPath,
-        prompt: 'Carry on',
-      },
-      ezzsWayOfCodingConfig,
-    );
-
-    assert.doesNotMatch(
-      output?.hookSpecificOutput?.additionalContext ?? '',
-      /wait-what-register/,
-    );
-  } finally {
-    await rm(transcriptDirectory, { recursive: true, force: true });
-  }
+  assert.doesNotMatch(
+    output?.hookSpecificOutput?.additionalContext ?? '',
+    /wait-what-register/,
+  );
 });
 
 // A body that asks for UI, dependency, test and fix work, so that the prompt
@@ -803,57 +791,108 @@ test('stop stays quiet when the final message reports completed live checks', as
 });
 
 test('stop reads the final assistant message from the transcript when the hook omits it', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'ezzs-way-of-coding-verify-'));
-  try {
-    const transcriptPath = join(directory, 'transcript.jsonl');
-    const entries = [
-      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Earlier, everything was checked.' }] } },
-      { type: 'user', message: { role: 'user', content: 'Ship it?' } },
-      {
-        type: 'assistant',
-        message: {
-          role: 'assistant',
-          content: [
-            { type: 'tool_use', name: 'Bash' },
-            { type: 'text', text: 'Done, but the OAuth consent path remains unverified.' },
-          ],
-        },
+  await using folder = await new TemporaryFiles().directory('ezzs-way-of-coding-verify-');
+  const directory = folder.path;
+  const transcriptPath = join(directory, 'transcript.jsonl');
+  const entries = [
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Earlier, everything was checked.' }] } },
+    { type: 'user', message: { role: 'user', content: 'Ship it?' } },
+    {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'tool_use', name: 'Bash' },
+          { type: 'text', text: 'Done, but the OAuth consent path remains unverified.' },
+        ],
       },
-    ];
-    await writeFile(transcriptPath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`);
+    },
+  ];
+  await writeFile(transcriptPath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`);
 
-    const output = await evaluateReminderHook(
-      { hook_event_name: 'Stop', transcript_path: transcriptPath },
-      ezzsWayOfCodingConfig,
-    );
+  const output = await evaluateReminderHook(
+    { hook_event_name: 'Stop', transcript_path: transcriptPath },
+    ezzsWayOfCodingConfig,
+  );
 
-    assert.match(
-      output?.hookSpecificOutput?.additionalContext ?? '',
-      /\[stop-feedback:live-verify-before-unverified\]/,
-    );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+  assert.match(
+    output?.hookSpecificOutput?.additionalContext ?? '',
+    /\[stop-feedback:live-verify-before-unverified\]/,
+  );
 });
 
 test('subagent stop ignores an unverified gap in the parent session transcript', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'ezzs-way-of-coding-verify-'));
-  try {
-    const parentTranscriptPath = join(directory, 'parent.jsonl');
-    const agentTranscriptPath = join(directory, 'agent.jsonl');
-    await writeFile(
-      parentTranscriptPath,
-      `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'The OAuth consent path remains unverified.' }] } })}\n`,
-    );
-    const agentEntries = [
-      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'The export is still unverified; probing now.' }] } },
-      { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Verified live against 960 real events.' }] } },
-    ];
-    await writeFile(
-      agentTranscriptPath,
-      `${agentEntries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
-    );
+  await using folder = await new TemporaryFiles().directory('ezzs-way-of-coding-verify-');
+  const directory = folder.path;
+  const parentTranscriptPath = join(directory, 'parent.jsonl');
+  const agentTranscriptPath = join(directory, 'agent.jsonl');
+  await writeFile(
+    parentTranscriptPath,
+    `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'The OAuth consent path remains unverified.' }] } })}\n`,
+  );
+  const agentEntries = [
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'The export is still unverified; probing now.' }] } },
+    { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Verified live against 960 real events.' }] } },
+  ];
+  await writeFile(
+    agentTranscriptPath,
+    `${agentEntries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+  );
 
+  const output = await evaluateReminderHook(
+    {
+      hook_event_name: 'SubagentStop',
+      transcript_path: parentTranscriptPath,
+      agent_transcript_path: agentTranscriptPath,
+    },
+    ezzsWayOfCodingConfig,
+  );
+
+  assert.doesNotMatch(
+    output?.hookSpecificOutput?.additionalContext ?? '',
+    /live-verify-before-unverified/,
+  );
+});
+
+test('subagent stop pushes back on an unverified gap in its own transcript', async () => {
+  await using folder = await new TemporaryFiles().directory('ezzs-way-of-coding-verify-');
+  const directory = folder.path;
+  const parentTranscriptPath = join(directory, 'parent.jsonl');
+  const agentTranscriptPath = join(directory, 'agent.jsonl');
+  await writeFile(
+    parentTranscriptPath,
+    `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Verified live against 960 real events.' }] } })}\n`,
+  );
+  await writeFile(
+    agentTranscriptPath,
+    `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Done, but the OAuth consent path remains unverified.' }] } })}\n`,
+  );
+
+  const output = await evaluateReminderHook(
+    {
+      hook_event_name: 'SubagentStop',
+      transcript_path: parentTranscriptPath,
+      agent_transcript_path: agentTranscriptPath,
+    },
+    ezzsWayOfCodingConfig,
+  );
+
+  assert.match(
+    output?.hookSpecificOutput?.additionalContext ?? '',
+    /\[stop-feedback:live-verify-before-unverified\]/,
+  );
+});
+
+test('subagent stop without its own transcript never judges the parent session transcript', async () => {
+  await using folder = await new TemporaryFiles().directory('ezzs-way-of-coding-verify-');
+  const directory = folder.path;
+  const parentTranscriptPath = join(directory, 'parent.jsonl');
+  await writeFile(
+    parentTranscriptPath,
+    `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'The OAuth consent path remains unverified.' }] } })}\n`,
+  );
+
+  for (const agentTranscriptPath of [undefined, '']) {
     const output = await evaluateReminderHook(
       {
         hook_event_name: 'SubagentStop',
@@ -866,99 +905,33 @@ test('subagent stop ignores an unverified gap in the parent session transcript',
     assert.doesNotMatch(
       output?.hookSpecificOutput?.additionalContext ?? '',
       /live-verify-before-unverified/,
+      String(agentTranscriptPath),
     );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test('subagent stop pushes back on an unverified gap in its own transcript', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'ezzs-way-of-coding-verify-'));
-  try {
-    const parentTranscriptPath = join(directory, 'parent.jsonl');
-    const agentTranscriptPath = join(directory, 'agent.jsonl');
-    await writeFile(
-      parentTranscriptPath,
-      `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Verified live against 960 real events.' }] } })}\n`,
-    );
-    await writeFile(
-      agentTranscriptPath,
-      `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Done, but the OAuth consent path remains unverified.' }] } })}\n`,
-    );
-
-    const output = await evaluateReminderHook(
-      {
-        hook_event_name: 'SubagentStop',
-        transcript_path: parentTranscriptPath,
-        agent_transcript_path: agentTranscriptPath,
-      },
-      ezzsWayOfCodingConfig,
-    );
-
-    assert.match(
-      output?.hookSpecificOutput?.additionalContext ?? '',
-      /\[stop-feedback:live-verify-before-unverified\]/,
-    );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test('subagent stop without its own transcript never judges the parent session transcript', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'ezzs-way-of-coding-verify-'));
-  try {
-    const parentTranscriptPath = join(directory, 'parent.jsonl');
-    await writeFile(
-      parentTranscriptPath,
-      `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'The OAuth consent path remains unverified.' }] } })}\n`,
-    );
-
-    for (const agentTranscriptPath of [undefined, '']) {
-      const output = await evaluateReminderHook(
-        {
-          hook_event_name: 'SubagentStop',
-          transcript_path: parentTranscriptPath,
-          agent_transcript_path: agentTranscriptPath,
-        },
-        ezzsWayOfCodingConfig,
-      );
-
-      assert.doesNotMatch(
-        output?.hookSpecificOutput?.additionalContext ?? '',
-        /live-verify-before-unverified/,
-        String(agentTranscriptPath),
-      );
-    }
-  } finally {
-    await rm(directory, { recursive: true, force: true });
   }
 });
 
 test('subagent stop judges its final message over its own transcript', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'ezzs-way-of-coding-verify-'));
-  try {
-    const agentTranscriptPath = join(directory, 'agent.jsonl');
-    await writeFile(
-      agentTranscriptPath,
-      `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Done, but the OAuth consent path remains unverified.' }] } })}\n`,
-    );
+  await using folder = await new TemporaryFiles().directory('ezzs-way-of-coding-verify-');
+  const directory = folder.path;
+  const agentTranscriptPath = join(directory, 'agent.jsonl');
+  await writeFile(
+    agentTranscriptPath,
+    `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Done, but the OAuth consent path remains unverified.' }] } })}\n`,
+  );
 
-    const output = await evaluateReminderHook(
-      {
-        hook_event_name: 'SubagentStop',
-        agent_transcript_path: agentTranscriptPath,
-        last_assistant_message: 'Verified live against 960 real events.',
-      },
-      ezzsWayOfCodingConfig,
-    );
+  const output = await evaluateReminderHook(
+    {
+      hook_event_name: 'SubagentStop',
+      agent_transcript_path: agentTranscriptPath,
+      last_assistant_message: 'Verified live against 960 real events.',
+    },
+    ezzsWayOfCodingConfig,
+  );
 
-    assert.doesNotMatch(
-      output?.hookSpecificOutput?.additionalContext ?? '',
-      /live-verify-before-unverified/,
-    );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+  assert.doesNotMatch(
+    output?.hookSpecificOutput?.additionalContext ?? '',
+    /live-verify-before-unverified/,
+  );
 });
 
 test('stop ignores talk about the verification rule itself', async () => {
@@ -1025,29 +998,26 @@ async function preHandback(
   agentEntries: unknown[],
   input: Record<string, unknown>,
 ) {
-  const directory = await mkdtemp(join(tmpdir(), 'ezzs-way-of-coding-handback-'));
-  try {
-    const transcriptPath = join(directory, 'session.jsonl');
-    await writeFile(transcriptPath, `${JSON.stringify({ type: 'user', message: { role: 'user', content: 'Delegate the probe.' } })}\n`);
-    await mkdir(join(directory, 'session', 'subagents'), { recursive: true });
-    await writeFile(
-      join(directory, 'session', 'subagents', 'agent-a1.jsonl'),
-      `${agentEntries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
-    );
-    return await evaluateReminderHook(
-      {
-        hook_event_name: 'PreToolUse',
-        transcript_path: transcriptPath,
-        agent_id: 'a1',
-        agent_type: 'general-purpose',
-        tool_use_id: 'toolu_current',
-        ...input,
-      },
-      ezzsWayOfCodingConfig,
-    );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+  await using folder = await new TemporaryFiles().directory('ezzs-way-of-coding-handback-');
+  const directory = folder.path;
+  const transcriptPath = join(directory, 'session.jsonl');
+  await writeFile(transcriptPath, `${JSON.stringify({ type: 'user', message: { role: 'user', content: 'Delegate the probe.' } })}\n`);
+  await mkdir(join(directory, 'session', 'subagents'), { recursive: true });
+  await writeFile(
+    join(directory, 'session', 'subagents', 'agent-a1.jsonl'),
+    `${agentEntries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
+  );
+  return await evaluateReminderHook(
+    {
+      hook_event_name: 'PreToolUse',
+      transcript_path: transcriptPath,
+      agent_id: 'a1',
+      agent_type: 'general-purpose',
+      tool_use_id: 'toolu_current',
+      ...input,
+    },
+    ezzsWayOfCodingConfig,
+  );
 }
 
 const brief = { type: 'user', message: { role: 'user', content: 'Probe the export and report.' } };
@@ -1154,40 +1124,37 @@ test('a hand-back that reports completed live checks goes through', async () => 
 });
 
 test('an unverified hand-back goes through when the subagent transcript cannot be read', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'ezzs-way-of-coding-handback-'));
-  try {
-    const transcriptPath = join(directory, 'session.jsonl');
-    const agentsPath = join(directory, 'session', 'subagents');
-    await writeFile(transcriptPath, `${JSON.stringify(brief)}\n`);
-    await mkdir(join(agentsPath, 'agent-a-directory.jsonl'), { recursive: true });
-    await writeFile(join(agentsPath, 'agent-a-garbled.jsonl'), '{"type":"user","message":{"ro\n');
-    await writeFile(join(agentsPath, 'agent-a-null.jsonl'), `${JSON.stringify(brief)}\nnull\n`);
-    await writeFile(join(agentsPath, 'agent-a-readable.jsonl'), `${JSON.stringify(brief)}\n`);
+  await using folder = await new TemporaryFiles().directory('ezzs-way-of-coding-handback-');
+  const directory = folder.path;
+  const transcriptPath = join(directory, 'session.jsonl');
+  const agentsPath = join(directory, 'session', 'subagents');
+  await writeFile(transcriptPath, `${JSON.stringify(brief)}\n`);
+  await mkdir(join(agentsPath, 'agent-a-directory.jsonl'), { recursive: true });
+  await writeFile(join(agentsPath, 'agent-a-garbled.jsonl'), '{"type":"user","message":{"ro\n');
+  await writeFile(join(agentsPath, 'agent-a-null.jsonl'), `${JSON.stringify(brief)}\nnull\n`);
+  await writeFile(join(agentsPath, 'agent-a-readable.jsonl'), `${JSON.stringify(brief)}\n`);
 
-    for (const input of [
-      { transcript_path: transcriptPath, agent_id: 'a-missing' },
-      { transcript_path: transcriptPath, agent_id: 'a-directory' },
-      { transcript_path: transcriptPath, agent_id: 'a-garbled' },
-      { transcript_path: transcriptPath, agent_id: 'a-null' },
-      { transcript_path: transcriptPath },
-      { agent_id: 'a-readable' },
-      { transcript_path: join(directory, 'session.jsonX'), agent_id: 'a-readable' },
-    ]) {
-      const output = await evaluateReminderHook(
-        {
-          hook_event_name: 'PreToolUse',
-          tool_name: 'SubagentHandback',
-          tool_use_id: 'toolu_current',
-          tool_input: { message: unverifiedReport },
-          ...input,
-        },
-        ezzsWayOfCodingConfig,
-      );
+  for (const input of [
+    { transcript_path: transcriptPath, agent_id: 'a-missing' },
+    { transcript_path: transcriptPath, agent_id: 'a-directory' },
+    { transcript_path: transcriptPath, agent_id: 'a-garbled' },
+    { transcript_path: transcriptPath, agent_id: 'a-null' },
+    { transcript_path: transcriptPath },
+    { agent_id: 'a-readable' },
+    { transcript_path: join(directory, 'session.jsonX'), agent_id: 'a-readable' },
+  ]) {
+    const output = await evaluateReminderHook(
+      {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'SubagentHandback',
+        tool_use_id: 'toolu_current',
+        tool_input: { message: unverifiedReport },
+        ...input,
+      },
+      ezzsWayOfCodingConfig,
+    );
 
-      assert.equal(output?.hookSpecificOutput?.permissionDecision, undefined, JSON.stringify(input));
-    }
-  } finally {
-    await rm(directory, { recursive: true, force: true });
+    assert.equal(output?.hookSpecificOutput?.permissionDecision, undefined, JSON.stringify(input));
   }
 });
 
@@ -1269,20 +1236,17 @@ test('the effort guard fails open on a malformed Agent input and leaves other to
 // A Stop whose transcript, when given, is written as JSONL the way Claude Code
 // writes it.
 async function stopContext(input: Record<string, unknown>, entries?: object[]) {
-  const directory = await mkdtemp(join(tmpdir(), 'ezzs-way-of-coding-stop-'));
-  try {
-    const transcriptPath = join(directory, 'transcript.jsonl');
-    if (entries) {
-      await writeFile(transcriptPath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`);
-    }
-    const output = await evaluateReminderHook(
-      { hook_event_name: 'Stop', ...(entries ? { transcript_path: transcriptPath } : {}), ...input },
-      ezzsWayOfCodingConfig,
-    );
-    return output?.hookSpecificOutput?.additionalContext ?? '';
-  } finally {
-    await rm(directory, { recursive: true, force: true });
+  await using folder = await new TemporaryFiles().directory('ezzs-way-of-coding-stop-');
+  const directory = folder.path;
+  const transcriptPath = join(directory, 'transcript.jsonl');
+  if (entries) {
+    await writeFile(transcriptPath, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`);
   }
+  const output = await evaluateReminderHook(
+    { hook_event_name: 'Stop', ...(entries ? { transcript_path: transcriptPath } : {}), ...input },
+    ezzsWayOfCodingConfig,
+  );
+  return output?.hookSpecificOutput?.additionalContext ?? '';
 }
 
 const ASK_IN_THE_TOOL = /\[stop-feedback:ask-in-the-tool\]\nYour final message asks the user something, gives him a task, or waits on him in prose\. He reads only AskUserQuestion\./;

@@ -46,5 +46,8 @@ A check must see the violation in the command text. For example, a background ru
 ## Test
 
 ```
-node --test hooks/shell-guard/shell-traps.test.ts hooks/shell-guard/block-git-mutation.test.ts
+npm install --prefix hooks/shell-guard
+npm test --prefix hooks/shell-guard
 ```
+
+The tests make their temporary folders with `TemporaryFiles` of `@zukhruf/fs`, a dev dependency of this folder. The hook itself has no dependencies.

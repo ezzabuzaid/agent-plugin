@@ -11,6 +11,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "@zukhruf/fs": "^0.8.22",
     "typescript": "^7.0.2"
   }
 }

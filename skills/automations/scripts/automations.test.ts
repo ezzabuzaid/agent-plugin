@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempDisposableSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
+
+import { TemporaryFiles } from '@zukhruf/fs';
 
 const CLI = new URL('./automations.ts', import.meta.url).pathname;
 
@@ -98,7 +99,7 @@ const OK_REPLY = {
 };
 
 test('sync names each automation it rejects with the reason, and installs no job, also for the valid ones', () => {
-  using home = mkdtempDisposableSync(join(tmpdir(), 'automations-'));
+  using home = new TemporaryFiles().directorySync('automations-');
   const cwd = home.path;
   const valid = `t${process.pid}x${Date.now().toString(36)}-valid`;
   writeAutomation(
@@ -143,7 +144,7 @@ test('sync names each automation it rejects with the reason, and installs no job
 });
 
 test('a run whose claude fails is notified as failed with the first line of its error, is not resumed, and run exits non-zero', () => {
-  using home = mkdtempDisposableSync(join(tmpdir(), 'automations-'));
+  using home = new TemporaryFiles().directorySync('automations-');
   writeAutomation(
     home.path,
     'nightly',
@@ -175,7 +176,7 @@ test('a run whose claude fails is notified as failed with the first line of its 
 });
 
 test('a run that outlives its timeout is stopped, notified as timed out, and run exits non-zero', () => {
-  using home = mkdtempDisposableSync(join(tmpdir(), 'automations-'));
+  using home = new TemporaryFiles().directorySync('automations-');
   writeAutomation(
     home.path,
     'slow',
@@ -195,7 +196,7 @@ test('a run that outlives its timeout is stopped, notified as timed out, and run
 });
 
 test('the timeout bounds the whole run, resumes included', () => {
-  using home = mkdtempDisposableSync(join(tmpdir(), 'automations-'));
+  using home = new TemporaryFiles().directorySync('automations-');
   writeAutomation(
     home.path,
     'long-resume',
@@ -227,7 +228,7 @@ process.stdout.write(JSON.stringify(${JSON.stringify(OK_REPLY)}));
 });
 
 test('a run whose claude cannot start is notified as failed, and run exits non-zero', () => {
-  using home = mkdtempDisposableSync(join(tmpdir(), 'automations-'));
+  using home = new TemporaryFiles().directorySync('automations-');
   writeAutomation(
     home.path,
     'no-claude',
@@ -244,7 +245,7 @@ test('a run whose claude cannot start is notified as failed, and run exits non-z
 });
 
 test('a resume that fails ends the run as failed, with no further resume', () => {
-  using home = mkdtempDisposableSync(join(tmpdir(), 'automations-'));
+  using home = new TemporaryFiles().directorySync('automations-');
   writeAutomation(
     home.path,
     'breaks',
@@ -272,7 +273,7 @@ process.exitCode = first ? 0 : 1;
 });
 
 test('a paused automation does not run when its time is due', () => {
-  using home = mkdtempDisposableSync(join(tmpdir(), 'automations-'));
+  using home = new TemporaryFiles().directorySync('automations-');
   writeAutomation(
     home.path,
     'paused',
@@ -288,7 +289,7 @@ test('a paused automation does not run when its time is due', () => {
 });
 
 test('an automation whose first time is in the future runs only when asked to run now', () => {
-  using home = mkdtempDisposableSync(join(tmpdir(), 'automations-'));
+  using home = new TemporaryFiles().directorySync('automations-');
   writeAutomation(
     home.path,
     'later',
@@ -308,7 +309,7 @@ test('an automation whose first time is in the future runs only when asked to ru
 });
 
 test('missed times make one run, and the next check runs nothing until a new time is due', () => {
-  using home = mkdtempDisposableSync(join(tmpdir(), 'automations-'));
+  using home = new TemporaryFiles().directorySync('automations-');
   writeAutomation(
     home.path,
     'hourly',
@@ -326,7 +327,7 @@ test('missed times make one run, and the next check runs nothing until a new tim
 });
 
 test('an automation that requires AC power waits on battery and runs at the next check on AC power', () => {
-  using home = mkdtempDisposableSync(join(tmpdir(), 'automations-'));
+  using home = new TemporaryFiles().directorySync('automations-');
   writeAutomation(
     home.path,
     'plugged',
@@ -356,7 +357,7 @@ test('an automation that requires AC power waits on battery and runs at the next
 });
 
 test('claude runs from ~/.local/bin in the cwd with the prompt, the options and the unattended system prompt, and never with an API key', () => {
-  using home = mkdtempDisposableSync(join(tmpdir(), 'automations-'));
+  using home = new TemporaryFiles().directorySync('automations-');
   const work = join(home.path, 'work');
   mkdirSync(work);
   writeAutomation(
@@ -390,7 +391,7 @@ test('claude runs from ~/.local/bin in the cwd with the prompt, the options and 
 });
 
 test('resume continues the same session with the open items while its check says work is open, at most its times', () => {
-  using home = mkdtempDisposableSync(join(tmpdir(), 'automations-'));
+  using home = new TemporaryFiles().directorySync('automations-');
   const work = join(home.path, 'ledger-work');
   mkdirSync(work);
   writeAutomation(
@@ -418,7 +419,7 @@ test('resume continues the same session with the open items while its check says
 });
 
 test('resume does not continue a session whose check says no work is open', () => {
-  using home = mkdtempDisposableSync(join(tmpdir(), 'automations-'));
+  using home = new TemporaryFiles().directorySync('automations-');
   writeAutomation(
     home.path,
     'finished',
@@ -434,7 +435,7 @@ test('resume does not continue a session whose check says no work is open', () =
 });
 
 test('the notification of a run names it, gives the first line of the reply, and its click resumes the session in the cwd', () => {
-  using home = mkdtempDisposableSync(join(tmpdir(), 'automations-'));
+  using home = new TemporaryFiles().directorySync('automations-');
   const work = join(home.path, 'my work');
   mkdirSync(work);
   writeAutomation(
@@ -468,7 +469,7 @@ test('the notification of a run names it, gives the first line of the reply, and
 });
 
 test('the Mac is held awake while claude runs', () => {
-  using home = mkdtempDisposableSync(join(tmpdir(), 'automations-'));
+  using home = new TemporaryFiles().directorySync('automations-');
   writeAutomation(
     home.path,
     'awake',
@@ -495,7 +496,7 @@ globalThis.extra = { caffeinated };`,
 });
 
 test('list gives the next time of an every-3-days rule and the last run', () => {
-  using home = mkdtempDisposableSync(join(tmpdir(), 'automations-'));
+  using home = new TemporaryFiles().directorySync('automations-');
   const id = `t${process.pid}x${Date.now().toString(36)}-every-three`;
   const start = minutesAgo(24 * 60).round({ smallestUnit: 'second', roundingMode: 'floor' });
   writeAutomation(
@@ -521,7 +522,7 @@ test('list gives the next time of an every-3-days rule and the last run', () => 
 });
 
 test('sync installs a launchd job for each active automation, launchd runs it through the job environment only when due, and sync removes the jobs of paused and deleted automations and no other', async () => {
-  using home = mkdtempDisposableSync(join(tmpdir(), 'automations-'));
+  using home = new TemporaryFiles().directorySync('automations-');
   const unique = `t${process.pid}x${Date.now().toString(36)}`;
   const [due, half, minutely, zoned] = [`${unique}-due`, `${unique}-half`, `${unique}-minutely`, `${unique}-zoned`];
   const target = (id: string) => `gui/${process.getuid?.()}/com.ezzabuzaid.automations.${id}`;

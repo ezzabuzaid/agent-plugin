@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempDisposableSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+
+import { TemporaryFiles } from '@zukhruf/fs';
 
 // GIT_GUARD_SCRIPT lets the suite run against a scratch copy before the real hook is replaced.
 const SCRIPT =
@@ -156,28 +157,22 @@ test('allows a staging dry run, and reads a heredoc body as commands only when a
 });
 
 test('blocks a clone of a local checkout and allows a remote or bare repository', async () => {
-  const { mkdtempSync, rmSync } = await import('node:fs');
-  const { tmpdir } = await import('node:os');
-  const { join } = await import('node:path');
-  const dir = mkdtempSync(join(tmpdir(), 'git-guard-clone-'));
-  try {
-    assert.equal(spawnSync('git', ['init', '-q', join(dir, 'work')]).status, 0);
-    assert.equal(spawnSync('git', ['init', '-q', '--bare', join(dir, 'remote.git')]).status, 0);
-    const clone = (command: string, cwd = dir) => runHook(command, cwd)?.hookSpecificOutput;
-    for (const command of [`git clone ${join(dir, 'work')} /tmp/copy`, 'git clone --no-local -b main ./work copy', `git clone file://${join(dir, 'work')} copy`]) {
-      assert.match(clone(command)?.permissionDecisionReason ?? '', CHECKOUT_CLONE, command);
-    }
-    assert.match(clone('git clone . /tmp/copy', join(dir, 'work'))?.permissionDecisionReason ?? '', CHECKOUT_CLONE);
-    for (const command of [`git clone ${join(dir, 'remote.git')} work2`, 'git clone $SRC copy', 'git clone https://github.com/x/y.git', 'git clone ssh://host/x.git', 'git clone --depth 1 git@github.com:x/y.git /tmp/y']) {
-      assert.equal(clone(command), undefined, command);
-    }
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+  using folder = new TemporaryFiles().directorySync('git-guard-clone-');
+  const dir = folder.path;
+  assert.equal(spawnSync('git', ['init', '-q', join(dir, 'work')]).status, 0);
+  assert.equal(spawnSync('git', ['init', '-q', '--bare', join(dir, 'remote.git')]).status, 0);
+  const clone = (command: string, cwd = dir) => runHook(command, cwd)?.hookSpecificOutput;
+  for (const command of [`git clone ${join(dir, 'work')} /tmp/copy`, 'git clone --no-local -b main ./work copy', `git clone file://${join(dir, 'work')} copy`]) {
+    assert.match(clone(command)?.permissionDecisionReason ?? '', CHECKOUT_CLONE, command);
+  }
+  assert.match(clone('git clone . /tmp/copy', join(dir, 'work'))?.permissionDecisionReason ?? '', CHECKOUT_CLONE);
+  for (const command of [`git clone ${join(dir, 'remote.git')} work2`, 'git clone $SRC copy', 'git clone https://github.com/x/y.git', 'git clone ssh://host/x.git', 'git clone --depth 1 git@github.com:x/y.git /tmp/y']) {
+    assert.equal(clone(command), undefined, command);
   }
 });
 
 test('allows a clone by URL from a folder that is not a repository, even of a repository checked out elsewhere', () => {
-  using dir = mkdtempDisposableSync(join(tmpdir(), 'git-guard-url-clone-'));
+  using dir = new TemporaryFiles().directorySync('git-guard-url-clone-');
   const work = join(dir.path, 'work');
   assert.equal(spawnSync('git', ['init', '-q', work]).status, 0);
   assert.equal(spawnSync('git', ['-C', work, 'remote', 'add', 'origin', 'https://github.com/JanuaryLabs/zukhruf.git']).status, 0);
@@ -186,7 +181,7 @@ test('allows a clone by URL from a folder that is not a repository, even of a re
 });
 
 test('allows a clone by URL of another repository from inside a checkout', () => {
-  using dir = mkdtempDisposableSync(join(tmpdir(), 'git-guard-url-clone-'));
+  using dir = new TemporaryFiles().directorySync('git-guard-url-clone-');
   const work = join(dir.path, 'work');
   assert.equal(spawnSync('git', ['init', '-q', work]).status, 0);
   assert.equal(spawnSync('git', ['-C', work, 'remote', 'add', 'origin', 'https://github.com/JanuaryLabs/zukhruf.git']).status, 0);
@@ -199,7 +194,7 @@ test('allows a clone by URL of another repository from inside a checkout', () =>
 // 2026-11-15: from inside the mutex checkout an agent ran `git clone --quiet --reference <mutex>
 // https://github.com/JanuaryLabs/zukhruf.git <scratch>`, a copy by URL of the repository checked out there.
 test('blocks a clone by URL of the repository checked out at the session cwd, and names the routes that stay open', () => {
-  using dir = mkdtempDisposableSync(join(tmpdir(), 'git-guard-url-clone-'));
+  using dir = new TemporaryFiles().directorySync('git-guard-url-clone-');
   const work = join(dir.path, 'work');
   assert.equal(spawnSync('git', ['init', '-q', work]).status, 0);
   assert.equal(spawnSync('git', ['-C', work, 'remote', 'add', 'origin', 'https://github.com/JanuaryLabs/zukhruf.git']).status, 0);
@@ -214,7 +209,7 @@ test('blocks a clone by URL of the repository checked out at the session cwd, an
 });
 
 test('blocks a clone by URL of the checked-out repository in its https, ssh and scp spellings, with or without .git and in any case', () => {
-  using dir = mkdtempDisposableSync(join(tmpdir(), 'git-guard-url-clone-'));
+  using dir = new TemporaryFiles().directorySync('git-guard-url-clone-');
   const pairs = [
     ['https://github.com/JanuaryLabs/zukhruf.git', 'git@github.com:JanuaryLabs/zukhruf.git'],
     ['https://github.com/JanuaryLabs/zukhruf.git', 'git@github.com:JanuaryLabs/zukhruf'],
@@ -234,7 +229,7 @@ test('blocks a clone by URL of the checked-out repository in its https, ssh and 
 });
 
 test('blocks a clone by URL of the repository that a remote other than origin names', () => {
-  using dir = mkdtempDisposableSync(join(tmpdir(), 'git-guard-url-clone-'));
+  using dir = new TemporaryFiles().directorySync('git-guard-url-clone-');
   const work = join(dir.path, 'work');
   assert.equal(spawnSync('git', ['init', '-q', work]).status, 0);
   assert.equal(spawnSync('git', ['-C', work, 'remote', 'add', 'origin', 'https://github.com/me/zukhruf.git']).status, 0);
@@ -244,7 +239,7 @@ test('blocks a clone by URL of the repository that a remote other than origin na
 });
 
 test('blocks a clone by URL from a folder inside the checkout', () => {
-  using dir = mkdtempDisposableSync(join(tmpdir(), 'git-guard-url-clone-'));
+  using dir = new TemporaryFiles().directorySync('git-guard-url-clone-');
   const work = join(dir.path, 'work');
   assert.equal(spawnSync('git', ['init', '-q', work]).status, 0);
   assert.equal(spawnSync('git', ['-C', work, 'remote', 'add', 'origin', 'https://github.com/JanuaryLabs/zukhruf.git']).status, 0);
@@ -256,7 +251,7 @@ test('blocks a clone by URL from a folder inside the checkout', () => {
 
 // --shared takes no path: it shares the objects of the clone source, which the local-folder check reads.
 test('blocks a clone that borrows the objects of a checkout through --reference, whatever its URL, and allows a bare reference', () => {
-  using dir = mkdtempDisposableSync(join(tmpdir(), 'git-guard-url-clone-'));
+  using dir = new TemporaryFiles().directorySync('git-guard-url-clone-');
   const work = join(dir.path, 'work');
   const bare = join(dir.path, 'cache.git');
   assert.equal(spawnSync('git', ['init', '-q', work]).status, 0);
@@ -567,24 +562,19 @@ test('allows status and path as arguments, in quotes, in another shell or langua
 });
 
 test('blocks a commit whose message carries an attribution trailer', async () => {
-  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
-  const { tmpdir } = await import('node:os');
-  const { join } = await import('node:path');
-  const dir = mkdtempSync(join(tmpdir(), 'git-guard-'));
-  try {
-    const message = join(dir, 'msg.txt');
-    writeFileSync(message, 'feat: x\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n');
-    assertBlocked('git commit -m "feat: x\n\nCo-Authored-By: Claude <noreply@anthropic.com>" -- a.ts', 'commit');
-    assertBlocked(["git commit -F - -- a.ts <<'EOF'", 'feat: x', '', 'Claude-Session: 1234', 'EOF'].join('\n'), 'commit');
-    assertBlocked(`git commit -F ${message} -- a.ts`, 'commit');
-    assertBlocked(`git commit --file ${message} -- a.ts`, 'commit');
-    assertBlocked(`git commit --file=${message} -- a.ts`, 'commit');
-    assertBlocked(`git commit -F${message} -- a.ts`, 'commit');
-    const relative = runHook('git commit -F msg.txt -- a.ts', dir)?.hookSpecificOutput;
-    assert.equal(relative?.permissionDecision, 'deny', 'expected deny for a message file relative to the session cwd');
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+  const { writeFileSync } = await import('node:fs');
+  using folder = new TemporaryFiles().directorySync('git-guard-');
+  const dir = folder.path;
+  const message = join(dir, 'msg.txt');
+  writeFileSync(message, 'feat: x\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n');
+  assertBlocked('git commit -m "feat: x\n\nCo-Authored-By: Claude <noreply@anthropic.com>" -- a.ts', 'commit');
+  assertBlocked(["git commit -F - -- a.ts <<'EOF'", 'feat: x', '', 'Claude-Session: 1234', 'EOF'].join('\n'), 'commit');
+  assertBlocked(`git commit -F ${message} -- a.ts`, 'commit');
+  assertBlocked(`git commit --file ${message} -- a.ts`, 'commit');
+  assertBlocked(`git commit --file=${message} -- a.ts`, 'commit');
+  assertBlocked(`git commit -F${message} -- a.ts`, 'commit');
+  const relative = runHook('git commit -F msg.txt -- a.ts', dir)?.hookSpecificOutput;
+  assert.equal(relative?.permissionDecision, 'deny', 'expected deny for a message file relative to the session cwd');
 });
 
 test('allows a commit that only mentions Claude, and a log search for a trailer', () => {
