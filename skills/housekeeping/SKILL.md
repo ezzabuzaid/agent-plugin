@@ -43,7 +43,7 @@ Each job is an outcome. Reach it the shortest way.
 - **Idle is no reason to hold questions.** While a subagent, a test gate or a peer runs, the decisions that the rest of the work needs are already known. Ask them now.
 - **A task for the user is a question.** "Toggle these four settings", "run this `!` command" and "trash this folder" go in AskUserQuestion as "Do X, then pick Done", with the command in the question text.
 - **A list of open items is a list of unasked questions.** A table row that says "needs a design choice", a "still to do: Phase 3, then Phase 4" line, or "#id needs your decision" in prose stops the session. Make each choice a question, with the options you would choose between.
-- **Remaining phases hide decisions.** Pushes to other repos, scope edges and overrides of a peer's hold come up later in the work. Find them now, not when the phase starts.
+- **Remaining phases hide decisions.** Scope edges and steps only the user can take come up later in the work. Find them now, not when the phase starts.
 - **Ask only what is the user's.** Drop what the transcript or `agent-backlog decisions` already answers, and decide what the design decides. Each question must stand alone: the user may see only the question dialog.
 - **Prose never carries an ask.** A status line in prose is fine. A question, a choice or a request in prose is not seen.
 
