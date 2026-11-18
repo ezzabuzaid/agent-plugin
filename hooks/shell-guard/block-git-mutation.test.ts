@@ -406,6 +406,18 @@ test('allows git stash show -p', () => {
   assertAllowed('git stash show -p');
 });
 
+test('allows git interpret-trailers --parse, which only reads a message and prints its trailers', () => {
+  assertAllowed('git interpret-trailers --parse < message.txt');
+  assertAllowed('printf "x\\n\\nCo-authored-by: a <a@b>\\n" | git interpret-trailers --parse');
+  assertAllowed('git interpret-trailers --parse message.txt');
+});
+
+test('blocks git interpret-trailers that writes a file or adds a trailer', () => {
+  assertBlocked('git interpret-trailers --parse --in-place message.txt', 'interpret-trailers', GUARD);
+  assertBlocked('git interpret-trailers --in-place --trailer "x: y" message.txt', 'interpret-trailers', GUARD);
+  assertBlocked('git interpret-trailers --trailer "x: y" message.txt', 'interpret-trailers', GUARD);
+});
+
 test('blocks the call when its input is not JSON', () => {
   const result = spawnSync('node', [SCRIPT], { input: 'not json', encoding: 'utf8' });
   assert.equal(result.status, 2, result.stderr);

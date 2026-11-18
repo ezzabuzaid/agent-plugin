@@ -485,6 +485,14 @@ function readOnlyReflog(tokens: string[]): boolean {
 	return READ_ONLY_REFLOG_SUBCOMMANDS.has(token);
 }
 
+// `git interpret-trailers --parse` only reads a message (stdin or files) and
+// prints its trailers. `--in-place` writes the files back, and a form without
+// `--parse` adds trailers, so only the reading form is inspection.
+function readOnlyInterpretTrailers(tokens: string[]): boolean {
+	const args = tokens.map(trimQuotes);
+	return args.includes('--parse') && !args.includes('--in-place');
+}
+
 // `git config` reads (--get*/--list/-l, or `git config <key>` with no value) are
 // inspection; only writes (`git config <key> <value>`, --add/--unset/--edit/...)
 // mutate state.
@@ -820,6 +828,11 @@ function blockedGitCommands(command: string, cwd: string, depth = 0): Blocked[] 
 
 		if (subcommand === 'config') {
 			if (!readOnlyConfig(args) && !hooksPathConfig(args)) guard(subcommand);
+			continue;
+		}
+
+		if (subcommand === 'interpret-trailers') {
+			if (!readOnlyInterpretTrailers(args)) guard(subcommand);
 			continue;
 		}
 
