@@ -1,6 +1,6 @@
 ---
 name: housekeeping
-description: Session housekeeping. Asks the user, in one AskUserQuestion round, every decision, permission or manual step that only the user can give for the rest of the work, and acts on the answers; brings every record the session's work made stale up to date (repo docs, memory, backlog items, plan status); files each problem noticed into agent-backlog; stops what the session started; finishes or hands off the session's own work; and says whether the session is safe to close. Use when a Stop reminder says housekeeping is due; when the user asks "what are you waiting for?", "what are you waiting on?", "do you need anything from me?", "use ask user question for any input you need", "take the time to update anything", "file any problems", "clean up", "wrap up", "I need to close this session", "anything remaining?" or "can I close this session?"; while waiting on subagents, CI, a deploy, a peer session or a long shell command; when the context window is nearly full; and before reporting a task as done.
+description: Session housekeeping. Asks the user, in one AskUserQuestion round, every decision, permission or manual step that only the user can give for the rest of the work, and acts on the answers; brings every record the session's work made stale up to date (repo docs, memory, backlog items, plan status); files each problem noticed into agent-backlog; stops what the session started; finishes or hands off the session's own work; and says whether the session is safe to close. Use when a Stop reminder says housekeeping is due; when the user asks "what are you waiting for?", "what are you waiting on?", "do you need anything from me?", "use ask user question for any input you need", "take the time to update anything", "file any problems", "clean up", "wrap up", "I need to close this session", "anything remaining?" or "can I close this session?"; while waiting on subagents, CI, a deploy, a peer session or a long shell command; and before reporting a task as done.
 ---
 
 # Housekeeping
@@ -22,7 +22,6 @@ Every mode has the same jobs. The mode sets their order.
 | Idle | Background work or a peer will wake the session | Ask, then the jobs that do not touch what the running work uses, then wait. |
 | Before done | You are about to report a task as done | Every job, for this task. The result goes in the done report. |
 | Close-out | The user closes the session or leaves | Every job, then hand off. |
-| Low context | The context is nearly full | Hand off first, then the rest. |
 
 ## Jobs
 
@@ -34,7 +33,7 @@ Each job is an outcome. Reach it the shortest way.
 - **File:** each problem you did not fix is an agent-backlog item that a new agent can act on without this transcript, in the repo that owns the fix, with no duplicate.
 - **Clean up:** nothing you started and no longer need still runs or takes disk.
 - **Finish:** your files are committed or listed, unpushed commits are listed, peers know what you finished, and each running job has a named receiver for its result. A step you can take now is taken, not reported.
-- **Hand off** (close-out, low context): the item that tracks the work says what is done (with commits), what is in progress and where, and the exact next step with its check.
+- **Hand off** (close-out): the item that tracks the work says what is done (with commits), what is in progress and where, and the exact next step with its check.
 
 ## Gotchas
 
