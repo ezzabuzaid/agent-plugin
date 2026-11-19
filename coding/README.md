@@ -83,6 +83,18 @@ releases it the way the repo releases, and moves each consumer off its copy with
 `remove-code`. [`references/RULINGS.md`](./skills/lib-creator/references/RULINGS.md) gives
 the decision behind each step and how conflicting rulings were settled.
 
+## update-docs skill
+
+[`skills/update-docs`](./skills/update-docs/SKILL.md) keeps the docs of each library project
+of a repository current from evidence: the project's commits, its consumers' call sites, Claude
+Code transcripts and memories. The `docs-analyst` agent finds the gaps, one `docs-writer` agent
+writes each picked file, and the blind `docs-judge` agent approves or rejects each draft before
+the lead commits it. A tool in [`scripts/`](./skills/update-docs/scripts) owns every change to
+git and to the ledger: a run claims its paths, stamps each draft, and commits only what the
+stamps prove is its own, so peer sessions in the same checkout keep their edits. A repository
+opts in with `.claude/update-docs.json`, which names its docs guide, its map file and the paths
+no run may claim. `/coding:update-docs all` runs one lead subagent per due project.
+
 ## Install
 
 ```

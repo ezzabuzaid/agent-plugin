@@ -39,8 +39,10 @@ It also ships the **write-test** skill and its four test agents (discoverer, cla
 comparator, mutation prover, gotcha reviewer), the **remove-code** skill, the
 **guardrail** skill, which turns a rule stated in words into a check that a machine runs,
 the **node-native** skill, which reports what the current Node LTS already does for a
-codebase, each claim proved by a probe, and the **lib-creator** skill, which creates a library
-package from the decision that it should exist to the last consumer that moves onto it. See
+codebase, each claim proved by a probe, the **lib-creator** skill, which creates a library
+package from the decision that it should exist to the last consumer that moves onto it, and the
+**update-docs** skill and its three docs agents, which keep each library project's docs current
+from evidence. See
 [coding/README.md](./coding/README.md).
 
 ## Selecting the style
