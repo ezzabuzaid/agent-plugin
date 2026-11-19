@@ -1,27 +1,42 @@
-import { glob, readFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { join, posix } from 'node:path';
 
 import { UnknownProject } from '../errors.ts';
+import type { Git } from '../git.ts';
 import { Project } from './project.ts';
 
-/** The Nx projects of the workspace whose root is under packages/. */
-export class Workspace {
-  readonly #root: string;
+interface Manifest {
+  readonly name: string;
+  readonly projectType: unknown;
+}
 
-  constructor(root: string) {
-    this.#root = root;
+/**
+ * The library projects of the workspace: each tracked project.json whose
+ * projectType is "library", wherever it sits. Tracked files only, so the
+ * project.json of an installed package in an ignored folder is none.
+ */
+export class Workspace {
+  readonly #git: Git;
+
+  constructor(git: Git) {
+    this.#git = git;
   }
 
   async projects(): Promise<Project[]> {
+    const files = (
+      await this.#git.run(['ls-files', '-z', '--', ':(glob)**/project.json'])
+    )
+      .split('\0')
+      .filter(Boolean);
     const projects: Project[] = [];
-    for await (const file of glob('packages/**/project.json', {
-      cwd: this.#root,
-      exclude: ['**/node_modules/**'],
-    })) {
-      const root = dirname(file).replaceAll('\\', '/');
-      const { name } = await this.#manifest(join(root, 'project.json'));
+    for (const file of files) {
+      const { name, projectType } = await this.#manifest(file);
+      if (projectType !== 'library') {
+        continue;
+      }
+      const root = posix.dirname(file);
       const { name: npmName } = await this.#manifest(
-        join(root, 'package.json'),
+        posix.join(root, 'package.json'),
       );
       projects.push(new Project(name, npmName, root));
     }
@@ -40,9 +55,9 @@ export class Workspace {
     return found;
   }
 
-  async #manifest(file: string): Promise<{ name: string }> {
+  async #manifest(file: string): Promise<Manifest> {
     const value: unknown = JSON.parse(
-      await readFile(join(this.#root, file), 'utf8'),
+      await readFile(join(this.#git.directory, file), 'utf8'),
     );
     if (
       typeof value === 'object' &&
@@ -50,7 +65,10 @@ export class Workspace {
       'name' in value &&
       typeof value.name === 'string'
     ) {
-      return { name: value.name };
+      return {
+        name: value.name,
+        projectType: 'projectType' in value ? value.projectType : undefined,
+      };
     }
     throw new TypeError(`${file} has no "name" string`);
   }

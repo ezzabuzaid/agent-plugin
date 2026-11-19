@@ -1,4 +1,5 @@
-import { join } from 'node:path';
+import { hash } from 'node:crypto';
+import { basename, join } from 'node:path';
 
 import { under } from './paths.ts';
 
@@ -15,9 +16,21 @@ export class ClaudeHome {
     return join(this.root, 'projects');
   }
 
-  /** The folder this tool keeps its config, ledger and run reports in. */
+  /** The folder of the tool's machine-wide config and each repo's state. */
   get state(): string {
     return join(this.root, 'plans', 'update-docs');
+  }
+
+  /**
+   * The folder of one repository's ledger, claims, run reports and work.
+   * The hash of the path keeps apart two repos whose paths differ only in
+   * punctuation, such as a/b and a-b.
+   */
+  repoState(repoRoot: string): string {
+    return join(
+      this.state,
+      `${basename(repoRoot)}-${hash('sha256', repoRoot).slice(0, 12)}`,
+    );
   }
 
   /** A session that ran here was a tool or hook run, not the user's work. */

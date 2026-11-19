@@ -19,6 +19,7 @@ import { TemporaryFiles } from '@zukhruf/fs';
 import {
   ClaimRefused,
   CommitRefused,
+  ConfigMissing,
   NoClaim,
   NotStamped,
   NothingToCommit,
@@ -66,15 +67,31 @@ async function commit(
   return git(directory, ['rev-parse', 'HEAD']);
 }
 
-/** A workspace with the pool package under packages/, committed once. */
+const REPO_CONFIG = {
+  guide: 'docs/writing-package-docs.md',
+  map: 'CONTEXT-MAP.md',
+  refuse: [
+    {
+      glob: '**/docs/copied-*.md',
+      reason:
+        'it is a copy ledger, which copy-check owns: edit it by hand and run copy-check',
+    },
+  ],
+};
+
+/** A workspace with the pool library and the repo's config, committed once. */
 async function workspace(root: string) {
   git(root, ['init', '-q']);
   return commit(
     root,
     {
-      'packages/pool/project.json': JSON.stringify({ name: 'pool' }),
+      'packages/pool/project.json': JSON.stringify({
+        name: 'pool',
+        projectType: 'library',
+      }),
       'packages/pool/package.json': JSON.stringify({ name: '@zukhruf/pool' }),
       'packages/pool/src/index.ts': 'export const pool = 1;\n',
+      '.claude/update-docs.json': JSON.stringify(REPO_CONFIG),
     },
     'feat(pool): the first pool',
     '2026-01-01T00:00:00Z',
@@ -176,7 +193,10 @@ async function docsWorkspace(root: string) {
   await commit(
     root,
     {
-      'packages/lease/project.json': JSON.stringify({ name: 'lease' }),
+      'packages/lease/project.json': JSON.stringify({
+        name: 'lease',
+        projectType: 'library',
+      }),
       'packages/lease/package.json': JSON.stringify({ name: '@zukhruf/lease' }),
       'packages/pool/README.md': '# pool\n',
       'packages/pool/docs/old.md': '# old\n',
@@ -187,6 +207,12 @@ async function docsWorkspace(root: string) {
     'chore: docs workspace',
     '2026-01-02T00:00:00Z',
   );
+}
+
+/** The folder of the repo's ledger, claims and run reports, as repo prints it. */
+async function state(tool: UpdateDocs): Promise<string> {
+  const { stdout } = await tool.run(['repo']);
+  return (JSON.parse(stdout) as { state: string }).state;
 }
 
 function sha256(text: string): string {
@@ -238,7 +264,7 @@ test('finish rejects a report with an empty title, names the field, and leaves t
     '--report',
     join(home.path, 'good.json'),
   ]);
-  const ledger = join(home.path, '.claude/plans/update-docs/ledger.json');
+  const ledger = join(await state(tool), 'ledger.json');
   const before = await readFile(ledger, 'utf8');
 
   // Act
@@ -308,10 +334,9 @@ test('finish rejects a report with an unknown key and a wrong type, each by its 
   assert.equal(extra.path, 'blocked[0].severity');
   assert.ok(type instanceof ReportInvalid);
   assert.equal(type.path, 'open[0].title');
-  await assert.rejects(
-    readFile(join(home.path, '.claude/plans/update-docs/ledger.json')),
-    { code: 'ENOENT' },
-  );
+  await assert.rejects(readFile(join(await state(tool), 'ledger.json')), {
+    code: 'ENOENT',
+  });
 });
 
 test('a transcript bundle keeps the prompt, tool input and assistant text that name the package, and drops echoes, task notifications and tool runs', async () => {
@@ -545,7 +570,7 @@ test("delta right after finish lists nothing for the project, though the run's d
   );
   const run = session(repo.path);
   await transcript(home.path, '-work', [
-    run.prompt('2026-06-01T00:00:01Z', '/update-docs pool'),
+    run.prompt('2026-06-01T00:00:01Z', '/coding:update-docs pool'),
     run.toolUse('2026-06-01T00:30:00Z', {
       command: 'node tools/update-docs/src/main.ts evidence pool',
     }),
@@ -578,10 +603,9 @@ test("delta right after finish lists nothing for the project, though the run's d
 
   // Assert
   assert.deepEqual(JSON.parse(stdout), { changed: [], neverRun: [] });
-  assert.deepEqual(
-    await readdir(join(home.path, '.claude/plans/update-docs/runs')),
-    ['2026-06-01T00-00-00Z-pool.json'],
-  );
+  assert.deepEqual(await readdir(join(await state(tool), 'runs')), [
+    '2026-06-01T00-00-00Z-pool.json',
+  ]);
 });
 
 test('delta counts a code commit made after the last run, and lists projects that never ran', async () => {
@@ -592,7 +616,10 @@ test('delta counts a code commit made after the last run, and lists projects tha
   await commit(
     repo.path,
     {
-      'packages/lease/project.json': JSON.stringify({ name: 'lease' }),
+      'packages/lease/project.json': JSON.stringify({
+        name: 'lease',
+        projectType: 'library',
+      }),
       'packages/lease/package.json': JSON.stringify({ name: '@zukhruf/lease' }),
     },
     'feat(lease): the first lease',
@@ -640,6 +667,106 @@ test('delta counts a code commit made after the last run, and lists projects tha
     ],
     neverRun: ['lease'],
   });
+});
+
+test('the projects are the tracked project.json files of type library wherever they sit, and neither an application nor an ignored copy of a library is one', async () => {
+  // Arrange
+  await using home = await new TemporaryFiles().directory('update-docs-home-');
+  await using repo = await new TemporaryFiles().directory('update-docs-repo-');
+  await workspace(repo.path);
+  await commit(
+    repo.path,
+    {
+      'libs/queue/project.json': JSON.stringify({
+        name: 'queue',
+        projectType: 'library',
+      }),
+      'libs/queue/package.json': JSON.stringify({ name: '@acme/queue' }),
+      'apps/site/project.json': JSON.stringify({
+        name: 'site',
+        projectType: 'application',
+      }),
+      'apps/site/package.json': JSON.stringify({ name: 'site' }),
+    },
+    'feat: a queue library and a site',
+    '2026-01-02T00:00:00Z',
+  );
+  // An installed package may ship its own project.json.
+  await commit(
+    repo.path,
+    { '.gitignore': 'node_modules\n' },
+    'chore: ignore node_modules',
+    '2026-01-03T00:00:00Z',
+  );
+  await write(repo.path, {
+    'node_modules/@acme/copy/project.json': JSON.stringify({
+      name: 'copy',
+      projectType: 'library',
+    }),
+    'node_modules/@acme/copy/package.json': JSON.stringify({
+      name: '@acme/copy',
+    }),
+  });
+  const tool = new UpdateDocs({
+    home: home.path,
+    repoRoot: repo.path,
+    variables: process.env,
+  });
+
+  // Act
+  const { stdout } = await tool.run(['delta']);
+
+  // Assert
+  assert.deepEqual(JSON.parse(stdout), {
+    changed: [],
+    neverRun: ['pool', 'queue'],
+  });
+});
+
+test("repo prints the folder that holds this repo's state, and the guide and map its config names; a repo with no config gets neither repo nor claim and is told the file to write", async () => {
+  // Arrange
+  await using home = await new TemporaryFiles().directory('update-docs-home-');
+  await using repo = await new TemporaryFiles().directory('update-docs-repo-');
+  await using bare = await new TemporaryFiles().directory('update-docs-bare-');
+  await workspace(repo.path);
+  git(bare.path, ['init', '-q']);
+  await commit(
+    bare.path,
+    {
+      'packages/pool/project.json': JSON.stringify({
+        name: 'pool',
+        projectType: 'library',
+      }),
+      'packages/pool/package.json': JSON.stringify({ name: '@acme/pool' }),
+      'packages/pool/README.md': '# pool\n',
+    },
+    'feat(pool): the first pool',
+    '2026-01-01T00:00:00Z',
+  );
+  const tool = (root: string) =>
+    new UpdateDocs({ home: home.path, repoRoot: root, variables: process.env });
+  const missing = (error: unknown) =>
+    error instanceof ConfigMissing &&
+    error.message.includes(join(bare.path, '.claude/update-docs.json'));
+
+  // Act
+  const { stdout } = await tool(repo.path).run(['repo']);
+
+  // Assert
+  const printed = JSON.parse(stdout) as Record<string, string>;
+  assert.deepEqual(
+    { guide: printed.guide, map: printed.map },
+    { guide: 'docs/writing-package-docs.md', map: 'CONTEXT-MAP.md' },
+  );
+  assert.equal(
+    dirname(printed.state ?? ''),
+    join(home.path, '.claude/plans/update-docs'),
+  );
+  await assert.rejects(tool(bare.path).run(['repo']), missing);
+  await assert.rejects(
+    tool(bare.path).run(['claim', 'pool', 'packages/pool/README.md']),
+    missing,
+  );
 });
 
 test('open exits 0 and prints each open item, and exits 1 when every item is blocked or there are none', async () => {
@@ -745,7 +872,7 @@ test('claim refuses a path a peer has edited or not committed, a non-Markdown pa
   await assert.rejects(tool.run(['stamp', 'pool']), NoClaim);
 });
 
-test('claim refuses a copy ledger, at the root or in the project, since copy-check owns it', async () => {
+test("claim refuses a path a glob of the repo's config refuses, at the root or in the project, with the config's reason", async () => {
   // Arrange
   await using home = await new TemporaryFiles().directory('update-docs-home-');
   await using repo = await new TemporaryFiles().directory('update-docs-repo-');
@@ -771,18 +898,103 @@ test('claim refuses a copy ledger, at the root or in the project, since copy-che
   assert.deepEqual(
     refusals.map((error) =>
       error instanceof ClaimRefused
-        ? { path: error.path, refusal: error.refusal }
+        ? { path: error.path, refusal: error.refusal, message: error.message }
         : error,
     ),
     [
-      { path: 'docs/copied-code.md', refusal: 'copy-ledger' },
+      {
+        path: 'docs/copied-code.md',
+        refusal: 'repo-config',
+        message: `Cannot claim docs/copied-code.md: ${REPO_CONFIG.refuse[0]?.reason}`,
+      },
       {
         path: 'packages/pool/docs/copied-from-lease.md',
-        refusal: 'copy-ledger',
+        refusal: 'repo-config',
+        message: `Cannot claim packages/pool/docs/copied-from-lease.md: ${REPO_CONFIG.refuse[0]?.reason}`,
       },
     ],
   );
   await assert.rejects(tool.run(['stamp', 'pool']), NoClaim);
+});
+
+test("claim takes the map file the repo's config names, and refuses another file at the root", async () => {
+  // Arrange
+  await using home = await new TemporaryFiles().directory('update-docs-home-');
+  await using repo = await new TemporaryFiles().directory('update-docs-repo-');
+  await docsWorkspace(repo.path);
+  await commit(
+    repo.path,
+    {
+      '.claude/update-docs.json': JSON.stringify({
+        ...REPO_CONFIG,
+        map: 'GLOSSARY-MAP.md',
+      }),
+      'GLOSSARY-MAP.md': '# Glossary map\n',
+    },
+    'chore: the map is GLOSSARY-MAP.md',
+    '2026-01-03T00:00:00Z',
+  );
+  const tool = new UpdateDocs({
+    home: home.path,
+    repoRoot: repo.path,
+    variables: process.env,
+  });
+
+  // Act
+  const old = tool.run(['claim', 'pool', 'CONTEXT-MAP.md']);
+  await assert.rejects(
+    old,
+    (error) =>
+      error instanceof ClaimRefused &&
+      error.refusal === 'outside-project' &&
+      error.path === 'CONTEXT-MAP.md',
+  );
+  await tool.run(['claim', 'pool', 'GLOSSARY-MAP.md']);
+
+  // Assert
+  assert.deepEqual(await tool.run(['stamp', 'pool']), {
+    exitCode: 0,
+    stdout: `GLOSSARY-MAP.md sha256:${sha256('# Glossary map\n')}\n`,
+  });
+});
+
+test('two repos with a project of the same name keep apart their claims and their ledgers', async () => {
+  // Arrange
+  await using home = await new TemporaryFiles().directory('update-docs-home-');
+  await using one = await new TemporaryFiles().directory('update-docs-one-');
+  await using two = await new TemporaryFiles().directory('update-docs-two-');
+  await docsWorkspace(one.path);
+  await docsWorkspace(two.path);
+  const tool = (root: string) =>
+    new UpdateDocs({ home: home.path, repoRoot: root, variables: process.env });
+  await write(home.path, {
+    'report.json': JSON.stringify({
+      committed: [],
+      queued: [],
+      blocked: [],
+      open: [],
+    }),
+  });
+  await tool(one.path).run(['claim', 'pool', 'packages/pool/README.md']);
+  await tool(one.path).run([
+    'finish',
+    'pool',
+    '--started',
+    '2026-06-01T00:00:00Z',
+    '--report',
+    join(home.path, 'report.json'),
+  ]);
+
+  // Act
+  await tool(two.path).run(['claim', 'pool', 'packages/pool/README.md']);
+  const shown = await tool(two.path).run(['show', 'pool']);
+
+  // Assert
+  assert.deepEqual(JSON.parse(shown.stdout), { state: 'never-run' });
+  assert.deepEqual(await tool(two.path).run(['stamp', 'pool']), {
+    exitCode: 0,
+    stdout: `packages/pool/README.md sha256:${sha256('# pool\n')}\n`,
+  });
 });
 
 test('claim run as a command exits 2 with the reason on stderr', async () => {
@@ -805,6 +1017,41 @@ test('claim run as a command exits 2 with the reason on stderr', async () => {
   // Assert
   assert.equal(status, 2);
   assert.equal(stderr, 'Cannot claim notes.txt: it is not a .md file\n');
+});
+
+test("a command run from a folder inside the repo works on the repo's own claims", async () => {
+  // Arrange
+  await using home = await new TemporaryFiles().directory('update-docs-home-');
+  await using repo = await new TemporaryFiles().directory('update-docs-repo-');
+  await docsWorkspace(repo.path);
+  const main = (cwd: string, args: readonly string[]) =>
+    spawnSync(
+      process.execPath,
+      [join(import.meta.dirname, 'main.ts'), ...args],
+      {
+        cwd,
+        encoding: 'utf8',
+        env: { ...process.env, HOME: home.path },
+      },
+    );
+  const claimed = main(join(repo.path, 'packages/pool'), [
+    'claim',
+    'pool',
+    'packages/pool/README.md',
+  ]);
+  assert.equal(claimed.status, 0, claimed.stderr);
+
+  // Act
+  const stamped = main(repo.path, ['stamp', 'pool']);
+
+  // Assert
+  assert.deepEqual(
+    { status: stamped.status, stdout: stamped.stdout },
+    {
+      status: 0,
+      stdout: `packages/pool/README.md sha256:${sha256('# pool\n')}\n`,
+    },
+  );
 });
 
 test("claim refuses the context map that another project's claim holds, and a second claim of one project", async () => {

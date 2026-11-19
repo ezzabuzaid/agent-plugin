@@ -33,10 +33,10 @@ type Session =
     }
   | { readonly kind: 'dropped' };
 
-// This skill's own runs start with /update-docs, typed (<command-name>) or
-// passed to a headless run as the prompt itself.
+// This skill's own runs start with /update-docs, under a plugin's name or
+// none, typed (<command-name>) or passed to a headless run as the prompt.
 const UPDATE_DOCS =
-  /^\/update-docs(?:\s|$)|<command-name>\/(?:[\w-]+:)?update-docs<\/command-name>/;
+  /^\/(?:[\w-]+:)?update-docs(?:\s|$)|<command-name>\/(?:[\w-]+:)?update-docs<\/command-name>/;
 
 /**
  * The Claude Code transcripts of the user's sessions, read once for every

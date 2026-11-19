@@ -11,7 +11,7 @@ export class UnknownProject extends UpdateDocsError {
 
   constructor(project: string, known: readonly string[]) {
     super(
-      `No project under packages/ is named "${project}". Projects: ${known.join(', ')}`,
+      `No library project is named "${project}". Projects: ${known.join(', ')}`,
     );
   }
 }
@@ -34,6 +34,24 @@ export class LedgerCorrupt extends UpdateDocsError {
   }
 }
 
+export class ConfigMissing extends UpdateDocsError {
+  override name = 'ConfigMissing';
+
+  constructor(file: string) {
+    super(
+      `This repo has no ${file}: write it as {"guide": "<the docs guide>", "map": "<the map file at the root>", "refuse": [{"glob": "<paths no run may claim>", "reason": "<why>"}]}`,
+    );
+  }
+}
+
+export class ConfigInvalid extends UpdateDocsError {
+  override name = 'ConfigInvalid';
+
+  constructor(file: string, path: string, problem: string) {
+    super(`The config ${file} is invalid at ${path}: ${problem}`);
+  }
+}
+
 export class ClaimCorrupt extends UpdateDocsError {
   override name = 'ClaimCorrupt';
 
@@ -46,7 +64,7 @@ export class ClaimCorrupt extends UpdateDocsError {
 export type ClaimRefusal =
   | 'not-markdown'
   | 'outside-project'
-  | 'copy-ledger'
+  | 'repo-config'
   | 'uncommitted'
   | 'claimed';
 

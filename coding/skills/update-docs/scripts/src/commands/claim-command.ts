@@ -3,13 +3,9 @@ import { Claim } from '../claims/claim.ts';
 import type { ClaimedPaths } from '../claims/claimed-paths.ts';
 import { ClaimRefused } from '../errors.ts';
 import type { Project } from '../workspace/project.ts';
+import type { RepoConfig } from '../workspace/repo-config.ts';
 import type { Workspace } from '../workspace/workspace.ts';
 import type { Outcome } from './outcome.ts';
-
-/** The one file outside a project that a project's run may write. */
-const CONTEXT_MAP = 'CONTEXT-MAP.md';
-// The copy ledgers that copy-check reads: **/docs/copied-*.md.
-const COPY_LEDGER = /(?:^|\/)docs\/copied-[^/]*\.md$/;
 
 /**
  * Claims Markdown paths for one run of a project before any writer edits
@@ -18,13 +14,20 @@ const COPY_LEDGER = /(?:^|\/)docs\/copied-[^/]*\.md$/;
  */
 export class ClaimCommand {
   readonly #workspace: Workspace;
+  readonly #config: RepoConfig;
   readonly #paths: ClaimedPaths;
   readonly #store: ClaimStore;
 
-  constructor(workspace: Workspace, paths: ClaimedPaths, store: ClaimStore) {
-    this.#workspace = workspace;
-    this.#paths = paths;
-    this.#store = store;
+  constructor(parts: {
+    workspace: Workspace;
+    config: RepoConfig;
+    paths: ClaimedPaths;
+    store: ClaimStore;
+  }) {
+    this.#workspace = parts.workspace;
+    this.#config = parts.config;
+    this.#paths = parts.paths;
+    this.#store = parts.store;
   }
 
   /** `paths` are relative to the workspace, with forward slashes. */
@@ -53,8 +56,8 @@ export class ClaimCommand {
       stamp: { kind: 'none' },
     });
     await this.#store.create(claim);
-    // Checked after the exclusive create, so two runs that race for the root
-    // CONTEXT-MAP.md both see each other and both refuse, never both hold it.
+    // Checked after the exclusive create, so two runs that race for the map
+    // both see each other and both refuse, never both hold it.
     const others = (await this.#store.all()).filter(
       (other) => other.project !== project.name,
     );
@@ -76,18 +79,15 @@ export class ClaimCommand {
     if (!path.endsWith('.md')) {
       throw new ClaimRefused(path, 'not-markdown', 'it is not a .md file');
     }
-    if (COPY_LEDGER.test(path)) {
-      throw new ClaimRefused(
-        path,
-        'copy-ledger',
-        'it is a copy ledger, which copy-check owns: edit it by hand and run copy-check',
-      );
+    const refusal = this.#config.refusal(path);
+    if (refusal !== undefined) {
+      throw new ClaimRefused(path, 'repo-config', refusal.reason);
     }
-    if (!path.startsWith(`${project.root}/`) && path !== CONTEXT_MAP) {
+    if (!path.startsWith(`${project.root}/`) && path !== this.#config.map) {
       throw new ClaimRefused(
         path,
         'outside-project',
-        `it is neither under ${project.root}/ nor the root ${CONTEXT_MAP}`,
+        `it is neither under ${project.root}/ nor the map ${this.#config.map}`,
       );
     }
   }

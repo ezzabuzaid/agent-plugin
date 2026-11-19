@@ -1,4 +1,4 @@
-/** An Nx project under packages/, the unit whose docs a run updates. */
+/** A library project of the workspace, the unit whose docs a run updates. */
 export class Project {
   readonly name: string;
   readonly npmName: string;

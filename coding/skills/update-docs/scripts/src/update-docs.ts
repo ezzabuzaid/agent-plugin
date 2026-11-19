@@ -14,6 +14,7 @@ import { FinishCommand } from './commands/finish-command.ts';
 import { OpenCommand } from './commands/open-command.ts';
 import type { Outcome } from './commands/outcome.ts';
 import { ReleaseCommand } from './commands/release-command.ts';
+import { RepoCommand } from './commands/repo-command.ts';
 import { ShowCommand } from './commands/show-command.ts';
 import { StampCommand } from './commands/stamp-command.ts';
 import { UsageError } from './errors.ts';
@@ -23,9 +24,11 @@ import { Git, type Variables } from './git.ts';
 import { Ledger } from './ledger/ledger.ts';
 import { RunReport } from './ledger/run-report.ts';
 import { Since, parseInstant } from './since.ts';
+import { RepoConfig } from './workspace/repo-config.ts';
 import { Workspace } from './workspace/workspace.ts';
 
 const USAGE = `Usage:
+  update-docs repo
   update-docs evidence <project> [--since <ISO 8601>]
   update-docs delta
   update-docs open
@@ -39,7 +42,7 @@ const USAGE = `Usage:
 export interface Environment {
   /** The user's home folder, which holds ~/.claude. */
   readonly home: string;
-  /** The root of the Nx workspace whose packages/ the tool documents. */
+  /** The root of the repository whose library projects the tool documents. */
   readonly repoRoot: string;
   /** The environment of each process the tool starts: git. */
   readonly variables: Variables;
@@ -51,19 +54,29 @@ type Options = Record<string, { type: 'string' } | { type: 'boolean' }>;
 export class UpdateDocs {
   readonly #claude: ClaudeHome;
   readonly #repoRoot: string;
+  /** The folder of this repository's ledger, claims and run reports. */
+  readonly #state: string;
   readonly #git: Git;
   readonly #workspace: Workspace;
 
   constructor({ home, repoRoot, variables }: Environment) {
     this.#claude = new ClaudeHome(home);
     this.#repoRoot = repoRoot;
+    this.#state = this.#claude.repoState(repoRoot);
     this.#git = new Git(repoRoot, variables);
-    this.#workspace = new Workspace(repoRoot);
+    this.#workspace = new Workspace(this.#git);
   }
 
   async run(argv: readonly string[]): Promise<Outcome> {
     const [command, ...rest] = argv;
     switch (command) {
+      case 'repo': {
+        this.#bare(rest);
+        return new RepoCommand(
+          this.#state,
+          await RepoConfig.read(this.#repoRoot),
+        ).run();
+      }
       case 'evidence': {
         const { project, values } = this.#withProject(rest, {
           since: { type: 'string' },
@@ -107,7 +120,7 @@ export class UpdateDocs {
         return new FinishCommand(
           this.#workspace,
           this.#git,
-          join(this.#claude.state, 'runs'),
+          join(this.#state, 'runs'),
         ).run(
           project,
           parseInstant(values.started, '--started'),
@@ -121,11 +134,12 @@ export class UpdateDocs {
         if (paths.length === 0) {
           throw new UsageError(`claim takes one path or more\n${USAGE}`);
         }
-        return new ClaimCommand(
-          this.#workspace,
-          new ClaimedPaths(this.#git),
-          this.#claims(),
-        ).run(project, paths, Temporal.Now.instant());
+        return new ClaimCommand({
+          workspace: this.#workspace,
+          config: await RepoConfig.read(this.#repoRoot),
+          paths: new ClaimedPaths(this.#git),
+          store: this.#claims(),
+        }).run(project, paths, Temporal.Now.instant());
       }
       case 'stamp': {
         const { project } = this.#withProject(rest, {});
@@ -177,11 +191,11 @@ export class UpdateDocs {
   }
 
   #ledger(): Promise<Ledger> {
-    return Ledger.read(join(this.#claude.state, 'ledger.json'));
+    return Ledger.read(join(this.#state, 'ledger.json'));
   }
 
   #claims(): ClaimStore {
-    return new ClaimStore(join(this.#claude.state, 'claims'));
+    return new ClaimStore(join(this.#state, 'claims'));
   }
 
   /** A command that takes one project and the given options. */
