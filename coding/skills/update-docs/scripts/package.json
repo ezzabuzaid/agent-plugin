@@ -1,0 +1,17 @@
+{
+  "name": "update-docs",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "update-docs": "./src/main.ts"
+  },
+  "scripts": {
+    "test": "node --test --no-warnings src/update-docs.test.ts",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@zukhruf/fs": "^0.8.39",
+    "typescript": "^7.0.2"
+  }
+}
