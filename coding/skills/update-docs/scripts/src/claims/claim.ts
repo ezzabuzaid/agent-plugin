@@ -1,12 +1,16 @@
 import type { PathState } from './path-state.ts';
 
-/** The content of each claimed path when the writers finished. */
-export type Stamp =
-  | { readonly kind: 'none' }
+/**
+ * What one claimed path held when its writer finished, or no stamp yet. Each
+ * path is stamped on its own, so a run that dies after one writer leaves the
+ * proof for the drafts already written.
+ */
+export type PathStamp =
+  | { readonly kind: 'unstamped' }
   | {
-      readonly kind: 'taken';
+      readonly kind: 'stamped';
       readonly at: string;
-      readonly states: ReadonlyMap<string, PathState>;
+      readonly state: PathState;
     };
 
 /**
@@ -16,40 +20,36 @@ export type Stamp =
  */
 export class Claim {
   readonly project: string;
-  readonly paths: readonly string[];
+  /** Each claimed path, in the order claimed, with its stamp. */
+  readonly stamps: ReadonlyMap<string, PathStamp>;
   readonly head: string;
   readonly at: string;
-  readonly stamp: Stamp;
 
-  constructor(
-    fields: Pick<Claim, 'project' | 'paths' | 'head' | 'at' | 'stamp'>,
-  ) {
+  constructor(fields: Pick<Claim, 'project' | 'stamps' | 'head' | 'at'>) {
     this.project = fields.project;
-    this.paths = fields.paths;
+    this.stamps = fields.stamps;
     this.head = fields.head;
     this.at = fields.at;
-    this.stamp = fields.stamp;
   }
 
+  get paths(): readonly string[] {
+    return [...this.stamps.keys()];
+  }
+
+  /** The claim with the given paths stamped as they hold now. */
   stamped(at: string, states: ReadonlyMap<string, PathState>): Claim {
-    return new Claim({ ...this, stamp: { kind: 'taken', at, states } });
+    const stamps = new Map(this.stamps);
+    for (const [path, state] of states) {
+      stamps.set(path, { kind: 'stamped', at, state });
+    }
+    return new Claim({ ...this, stamps });
   }
 
   /** The claim without the released paths, or 'empty' when none is left. */
   without(released: readonly string[]): Claim | 'empty' {
-    const paths = this.paths.filter((path) => !released.includes(path));
-    if (paths.length === 0) {
-      return 'empty';
-    }
-    const stamp: Stamp =
-      this.stamp.kind === 'none'
-        ? this.stamp
-        : {
-            ...this.stamp,
-            states: new Map(
-              [...this.stamp.states].filter(([path]) => paths.includes(path)),
-            ),
-          };
-    return new Claim({ ...this, paths, stamp });
+    const stamps = new Map(
+      [...this.stamps].filter(([path]) => !released.includes(path)),
+    );
+    return stamps.size === 0 ? 'empty' : new Claim({ ...this, stamps });
   }
 }

@@ -9,9 +9,9 @@ import {
 } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { ClaimCorrupt, NoClaim, ProjectClaimed } from '../errors.ts';
+import { ClaimCorrupt, NoClaim } from '../errors.ts';
 import { ROOT, Shape } from '../ledger/shape.ts';
-import { Claim, type Stamp } from './claim.ts';
+import { Claim, type PathStamp } from './claim.ts';
 import { formatPathState, parsePathState } from './path-state.ts';
 
 /**
@@ -25,16 +25,22 @@ export class ClaimStore {
     this.#folder = folder;
   }
 
-  /** Records a new claim; a project with an open claim refuses another. */
-  async create(claim: Claim): Promise<void> {
+  /**
+   * Records a new claim. A project with an open claim gets no second one:
+   * the open claim comes back instead, so the caller can say how to undo it.
+   */
+  async create(
+    claim: Claim,
+  ): Promise<{ kind: 'created' } | { kind: 'open'; claim: Claim }> {
     await mkdir(this.#folder, { recursive: true });
     try {
       await writeFile(this.#file(claim.project), serialize(claim), {
         flag: 'wx',
       });
+      return { kind: 'created' };
     } catch (error) {
       if (Error.isError(error) && 'code' in error && error.code === 'EEXIST') {
-        throw new ProjectClaimed(claim.project);
+        return { kind: 'open', claim: await this.read(claim.project) };
       }
       throw error;
     }
@@ -89,26 +95,23 @@ export class ClaimStore {
 }
 
 function serialize(claim: Claim): string {
-  const stamp =
-    claim.stamp.kind === 'none'
-      ? { kind: 'none' }
-      : {
-          kind: 'taken',
-          at: claim.stamp.at,
-          states: Object.fromEntries(
-            [...claim.stamp.states].map(([path, state]) => [
-              path,
-              formatPathState(state),
-            ]),
-          ),
-        };
   return `${JSON.stringify(
     {
       project: claim.project,
-      paths: claim.paths,
       head: claim.head,
       at: claim.at,
-      stamp,
+      paths: Object.fromEntries(
+        [...claim.stamps].map(([path, stamp]) => [
+          path,
+          stamp.kind === 'unstamped'
+            ? { kind: 'unstamped' }
+            : {
+                kind: 'stamped',
+                at: stamp.at,
+                state: formatPathState(stamp.state),
+              },
+        ]),
+      ),
     },
     null,
     2,
@@ -128,45 +131,40 @@ function parse(file: string, text: string): Claim {
     }
     throw error;
   }
-  const claim = shape.object(value, ROOT, [
-    'project',
-    'paths',
-    'head',
-    'at',
-    'stamp',
-  ]);
-  const stampValue = shape.record(claim.get('stamp'), 'stamp');
-  let stamp: Stamp;
-  if (stampValue.kind === 'none') {
-    shape.object(stampValue, 'stamp', ['kind']);
-    stamp = { kind: 'none' };
-  } else {
-    const taken = shape.object(stampValue, 'stamp', ['kind', 'at', 'states']);
-    shape.oneOf(taken.get('kind'), 'stamp.kind', ['none', 'taken']);
-    const states = shape.record(taken.get('states'), 'stamp.states');
-    stamp = {
-      kind: 'taken',
-      at: shape.instant(taken.get('at'), 'stamp.at'),
-      states: new Map(
-        Object.entries(states).map(([path, each]) => {
-          const at = `stamp.states.${path}`;
-          const state = parsePathState(shape.text(each, at));
-          if (state === 'invalid') {
-            throw new ClaimCorrupt(file, at, 'expected absent or sha256:<hex>');
-          }
-          return [path, state];
-        }),
-      ),
-    };
-  }
+  const claim = shape.object(value, ROOT, ['project', 'head', 'at', 'paths']);
+  const paths = shape.record(claim.get('paths'), 'paths');
   return new Claim({
     project: shape.text(claim.get('project'), 'project'),
-    paths: shape.list(claim.get('paths'), 'paths', (each, at) =>
-      shape.text(each, at),
-    ),
     head: shape.text(claim.get('head'), 'head'),
     at: shape.instant(claim.get('at'), 'at'),
-    stamp,
+    stamps: new Map(
+      Object.entries(paths).map(([path, each]): [string, PathStamp] => {
+        const at = `paths.${path}`;
+        const kind = shape.oneOf(shape.record(each, at).kind, `${at}.kind`, [
+          'unstamped',
+          'stamped',
+        ]);
+        if (kind === 'unstamped') {
+          shape.object(each, at, ['kind']);
+          return [path, { kind }];
+        }
+        const stamp = shape.object(each, at, ['kind', 'at', 'state']);
+        const state = parsePathState(
+          shape.text(stamp.get('state'), `${at}.state`),
+        );
+        if (state === 'invalid') {
+          throw new ClaimCorrupt(
+            file,
+            `${at}.state`,
+            'expected absent or sha256:<hex>',
+          );
+        }
+        return [
+          path,
+          { kind, at: shape.instant(stamp.get('at'), `${at}.at`), state },
+        ];
+      }),
+    ),
   });
 }
 

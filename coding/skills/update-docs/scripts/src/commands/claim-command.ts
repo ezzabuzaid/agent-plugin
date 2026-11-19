@@ -1,7 +1,7 @@
 import type { ClaimStore } from '../claims/claim-store.ts';
 import { Claim } from '../claims/claim.ts';
 import type { ClaimedPaths } from '../claims/claimed-paths.ts';
-import { ClaimRefused } from '../errors.ts';
+import { ClaimRefused, NoClaim, ProjectClaimed } from '../errors.ts';
 import type { Project } from '../workspace/project.ts';
 import type { RepoConfig } from '../workspace/repo-config.ts';
 import type { Workspace } from '../workspace/workspace.ts';
@@ -37,6 +37,8 @@ export class ClaimCommand {
     now: Temporal.Instant,
   ): Promise<Outcome> {
     const project = await this.#workspace.project(name);
+    // First, since a gone run's own drafts make its paths look uncommitted.
+    await this.#refuseOpen(project.name);
     for (const path of paths) {
       this.#inScope(project, path);
     }
@@ -50,12 +52,14 @@ export class ClaimCommand {
     }
     const claim = new Claim({
       project: project.name,
-      paths,
+      stamps: new Map(paths.map((path) => [path, { kind: 'unstamped' }])),
       head: await this.#paths.head(),
       at: now.toString(),
-      stamp: { kind: 'none' },
     });
-    await this.#store.create(claim);
+    const created = await this.#store.create(claim);
+    if (created.kind === 'open') {
+      throw await this.#claimed(created.claim);
+    }
     // Checked after the exclusive create, so two runs that race for the map
     // both see each other and both refuse, never both hold it.
     const others = (await this.#store.all()).filter(
@@ -73,6 +77,34 @@ export class ClaimCommand {
       }
     }
     return { exitCode: 0, stdout: '' };
+  }
+
+  async #refuseOpen(project: string): Promise<void> {
+    let open: Claim;
+    try {
+      open = await this.#store.read(project);
+    } catch (error) {
+      if (error instanceof NoClaim) {
+        return;
+      }
+      throw error;
+    }
+    throw await this.#claimed(open);
+  }
+
+  async #claimed(open: Claim): Promise<ProjectClaimed> {
+    const stamped = open.paths.filter(
+      (path) => open.stamps.get(path)?.kind === 'stamped',
+    );
+    const unstamped = open.paths.filter((path) => !stamped.includes(path));
+    const drafted = await this.#paths.uncommitted(unstamped);
+    return new ProjectClaimed({
+      project: open.project,
+      at: open.at,
+      stamped,
+      untouched: unstamped.filter((path) => !drafted.includes(path)),
+      drafted,
+    });
   }
 
   #inScope(project: Project, path: string): void {

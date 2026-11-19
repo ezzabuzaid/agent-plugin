@@ -35,7 +35,7 @@ const USAGE = `Usage:
   update-docs show <project>
   update-docs finish <project> --started <ISO 8601> --report <path>
   update-docs claim <project> <path>...
-  update-docs stamp <project>
+  update-docs stamp <project> [<path>...]
   update-docs commit <project> --subject <text> [--body <text>]
   update-docs release <project> [--revert] [<path>...]`;
 
@@ -142,9 +142,10 @@ export class UpdateDocs {
         }).run(project, paths, Temporal.Now.instant());
       }
       case 'stamp': {
-        const { project } = this.#withProject(rest, {});
+        const { project, paths } = this.#withPaths(rest, {});
         return new StampCommand(this.#repoRoot, this.#claims()).run(
           project,
+          paths,
           Temporal.Now.instant(),
         );
       }

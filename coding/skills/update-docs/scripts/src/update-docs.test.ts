@@ -1405,6 +1405,146 @@ test('release --revert refuses without a stamp and when a file changed after the
   );
 });
 
+test('a claim of a project whose run died after stamping one draft refuses with the commands that undo it, and running them puts back the stamped draft, gives back the untouched path and keeps the unstamped draft claimed', async () => {
+  // Arrange
+  await using home = await new TemporaryFiles().directory('update-docs-home-');
+  await using repo = await new TemporaryFiles().directory('update-docs-repo-');
+  await docsWorkspace(repo.path);
+  const tool = new UpdateDocs({
+    home: home.path,
+    repoRoot: repo.path,
+    variables: process.env,
+  });
+  await tool.run([
+    'claim',
+    'pool',
+    'packages/pool/README.md',
+    'packages/pool/docs/old.md',
+    'packages/pool/docs/recipe.md',
+  ]);
+  await write(repo.path, { 'packages/pool/README.md': '# pool, drafted\n' });
+  await tool.run(['stamp', 'pool', 'packages/pool/README.md']);
+  // The run dies while its second writer writes the recipe.
+  await write(repo.path, {
+    'packages/pool/docs/recipe.md': '# A recipe, half',
+  });
+
+  // Act
+  const refused = await tool
+    .run(['claim', 'pool', 'packages/pool/README.md'])
+    .then(
+      () => 'claimed',
+      (error: unknown) => error,
+    );
+  assert.ok(refused instanceof ProjectClaimed, String(refused));
+  for (const line of refused.message.split('\n')) {
+    if (line.startsWith('  release ')) {
+      await tool.run(line.trim().split(' '));
+    }
+  }
+
+  // Assert
+  assert.equal(
+    await readFile(join(repo.path, 'packages/pool/README.md'), 'utf8'),
+    '# pool\n',
+  );
+  assert.equal(
+    await readFile(join(repo.path, 'packages/pool/docs/recipe.md'), 'utf8'),
+    '# A recipe, half',
+  );
+  assert.ok(
+    refused.message.includes('git diff -- packages/pool/docs/recipe.md'),
+    refused.message,
+  );
+  assert.deepEqual(await tool.run(['stamp', 'pool']), {
+    exitCode: 0,
+    stdout: `packages/pool/docs/recipe.md sha256:${sha256('# A recipe, half')}\n`,
+  });
+});
+
+test('a stamp of one claimed path lets release --revert put that path back, while release --revert and commit refuse a path with no stamp and name it', async () => {
+  // Arrange
+  await using home = await new TemporaryFiles().directory('update-docs-home-');
+  await using repo = await new TemporaryFiles().directory('update-docs-repo-');
+  await docsWorkspace(repo.path);
+  const tool = new UpdateDocs({
+    home: home.path,
+    repoRoot: repo.path,
+    variables: process.env,
+  });
+  await tool.run([
+    'claim',
+    'pool',
+    'packages/pool/README.md',
+    'packages/pool/docs/old.md',
+  ]);
+  await write(repo.path, {
+    'packages/pool/README.md': '# pool, a rejected draft\n',
+    'packages/pool/docs/old.md': '# old, still being written\n',
+  });
+  await tool.run(['stamp', 'pool', 'packages/pool/README.md']);
+  const unstamped = (error: unknown) =>
+    error instanceof NotStamped &&
+    error.paths.join() === 'packages/pool/docs/old.md';
+
+  // Act
+  const reverted = tool.run([
+    'release',
+    'pool',
+    '--revert',
+    'packages/pool/docs/old.md',
+  ]);
+  const committed = tool.run(['commit', 'pool', '--subject', 'the readme']);
+  await assert.rejects(reverted, unstamped);
+  await assert.rejects(committed, unstamped);
+  await tool.run(['release', 'pool', '--revert', 'packages/pool/README.md']);
+
+  // Assert
+  assert.equal(
+    await readFile(join(repo.path, 'packages/pool/README.md'), 'utf8'),
+    '# pool\n',
+  );
+  assert.equal(
+    await readFile(join(repo.path, 'packages/pool/docs/old.md'), 'utf8'),
+    '# old, still being written\n',
+  );
+  assert.equal(
+    git(repo.path, ['log', '-1', '--format=%s']),
+    'chore: docs workspace',
+  );
+});
+
+test('a second stamp of a path its writer rewrote lets commit take the rewrite', async () => {
+  // Arrange
+  await using home = await new TemporaryFiles().directory('update-docs-home-');
+  await using repo = await new TemporaryFiles().directory('update-docs-repo-');
+  await docsWorkspace(repo.path);
+  const tool = new UpdateDocs({
+    home: home.path,
+    repoRoot: repo.path,
+    variables: process.env,
+  });
+  await tool.run(['claim', 'pool', 'packages/pool/README.md']);
+  await write(repo.path, { 'packages/pool/README.md': '# pool, rejected\n' });
+  await tool.run(['stamp', 'pool', 'packages/pool/README.md']);
+  await write(repo.path, { 'packages/pool/README.md': '# pool, rewritten\n' });
+  await tool.run(['stamp', 'pool', 'packages/pool/README.md']);
+
+  // Act
+  const { stdout } = await tool.run([
+    'commit',
+    'pool',
+    '--subject',
+    'the readme says what pool is',
+  ]);
+
+  // Assert
+  assert.equal(
+    git(repo.path, ['show', `${stdout.trim()}:packages/pool/README.md`]),
+    '# pool, rewritten',
+  );
+});
+
 test('release without --revert gives back the listed paths, or all of them, and leaves the files as they are', async () => {
   // Arrange
   await using home = await new TemporaryFiles().directory('update-docs-home-');

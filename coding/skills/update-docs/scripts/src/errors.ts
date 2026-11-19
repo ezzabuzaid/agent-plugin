@@ -80,12 +80,39 @@ export class ClaimRefused extends UpdateDocsError {
   }
 }
 
+/**
+ * The paths of an open claim, sorted by what undoes them if the run that
+ * made the claim is gone.
+ */
+export interface OpenClaim {
+  readonly project: string;
+  readonly at: string;
+  /** Stamped: release --revert proves and puts back each draft. */
+  readonly stamped: readonly string[];
+  /** No stamp and no change since HEAD: there is nothing to put back. */
+  readonly untouched: readonly string[];
+  /** No stamp but changed: only a person can tell whose change it is. */
+  readonly drafted: readonly string[];
+}
+
 export class ProjectClaimed extends UpdateDocsError {
   override name = 'ProjectClaimed';
 
-  constructor(project: string) {
+  constructor({ project, at, stamped, untouched, drafted }: OpenClaim) {
     super(
-      `${project} already has an open claim: commit it or release it first`,
+      [
+        `${project} already has an open claim, made at ${at}: commit it or release it first. If the run that made it is gone, undo it:`,
+        ...(stamped.length > 0
+          ? [`  release ${project} --revert ${stamped.join(' ')}`]
+          : []),
+        ...(untouched.length > 0
+          ? [`  release ${project} ${untouched.join(' ')}`]
+          : []),
+        ...drafted.map(
+          (path) =>
+            `  ${path} has no stamp and differs from HEAD, so no run can tell its draft from another session's edit: read git diff -- ${path}, put back what the gone run wrote, then run release ${project} ${path}`,
+        ),
+      ].join('\n'),
     );
   }
 }
@@ -108,9 +135,13 @@ export class NotClaimed extends UpdateDocsError {
 
 export class NotStamped extends UpdateDocsError {
   override name = 'NotStamped';
+  readonly paths: readonly string[];
 
-  constructor(project: string, command: string) {
-    super(`${command} needs a stamp: run stamp ${project} first`);
+  constructor(project: string, command: string, paths: readonly string[]) {
+    super(
+      `${command} needs a stamp of ${paths.join(', ')}: run stamp ${project} ${paths.join(' ')} once its writer has handed back`,
+    );
+    this.paths = paths;
   }
 }
 
