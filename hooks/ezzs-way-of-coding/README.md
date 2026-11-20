@@ -74,16 +74,15 @@ exist. The transcript is the session state, so a new session starts with the
 register off and a resumed session keeps it on.
 
 Two Stop rules (root sessions only) keep a turn from ending on the user. The
-user reads only AskUserQuestion for a crisp pick, and AskUserQuestion answers
-inside the turn, so a turn ends only finished, or parked: machine work that
-will wake the session still runs and every decision for the user has been
-asked. A choice that needs its explanation is the exception: it ends the final
-message in chat, with the agent's own pick, because an open dialog hides the
-chat.
+user reads only AskUserQuestion, and AskUserQuestion answers inside the turn,
+so a turn ends only finished, or parked: machine work that will wake the
+session still runs and every decision for the user has been asked. A choice
+that needs an explanation is asked there too, with the explanation inside the
+question and its options, because an open dialog hides the chat.
 `ask-in-the-tool` fires when the final message asks the user something, gives
-him a task or waits on him in prose, also after an earlier AskUserQuestion. It
-stays quiet when the message gives the agent's own pick ("my pick", "my
-recommendation"), which marks a choice explained in chat.
+him a task or waits on him in prose, also after an earlier AskUserQuestion,
+including a message that explains a choice, gives its own pick, and ends on an
+answer format ("Reply **"A"** or **"B"**").
 `housekeeping-due` reads a Claude Code transcript: it fires once the agent
 called a tool after the first stop (`stop_hook_summary`) that follows the last
 `housekeeping` skill call, or called any tool when no sweep ran yet. With

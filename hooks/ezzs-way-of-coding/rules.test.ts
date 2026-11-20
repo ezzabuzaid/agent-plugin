@@ -1317,19 +1317,19 @@ test('stop stays quiet on a final message that reports, finishes or only mention
   }
 });
 
-test("stop stays quiet on a choice explained in chat with the agent's own pick", async () => {
+test('stop sends an explained choice to AskUserQuestion too, also with the agent\'s own pick and a reply format', async () => {
   for (const message of [
-    // 2026-11-20: the user answered these in chat ("I agree with you on four points");
-    // the rule had sent the agent to a dialog that would hide the explanation.
+    // 2026-11-20: "From now on, you must use ask user question to ask me, not fucking replay and stuff."
     'Four decisions still need your answer. Each has my pick:\n\n1. **Q2, a test starting a second program:** drop the rule.\n2. **Q3:** keep it as a written note.\n\nReply with something like **"2 drop, 3 note"**, or change any of them.',
-    'Cleanup can fail loudly or quietly:\n\n| Form | Test fails too |\n|---|---|\n| `try/finally` | the real failure is lost |\n| `await using` | both errors show |\n\nThe form is your call. **My recommendation:** `await using`.',
+    'Cleanup can fail loudly or quietly:\n\n| Form | Test fails too |\n|---|---|\n| `try/finally` | the real failure is lost |\n| `await using` | both errors show |\n\n**My pick: A.** It keeps both errors.\n\nReply **"A"**, **"B"** or **"C"**.',
+    '**My pick: B.** It reports loudly enough.\n\nReply like **"1 A, 2 B, 3 yes"**, or change any of them.',
   ]) {
-    assert.doesNotMatch(await stopContext({ last_assistant_message: message }), /ask-in-the-tool/, message);
+    assert.match(await stopContext({ last_assistant_message: message }), ASK_IN_THE_TOOL, message);
   }
-  // Without the pick, the same ask is a prose ask.
-  assert.match(
-    await stopContext({ last_assistant_message: 'Four decisions still need your answer:\n1. Q2\n2. Q3' }),
-    ASK_IN_THE_TOOL,
+  // A reply that is described, not asked for, stays quiet.
+  assert.doesNotMatch(
+    await stopContext({ last_assistant_message: 'The reply from mutex-2b says the pool work is committed.' }),
+    /ask-in-the-tool/,
   );
 });
 

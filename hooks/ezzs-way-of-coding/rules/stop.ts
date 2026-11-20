@@ -6,12 +6,11 @@ import type {
 import { readTranscriptEntries } from './transcript.ts';
 import { finalAssistantText } from './verification.ts';
 
-// The user reads only AskUserQuestion for a crisp pick, and AskUserQuestion
-// answers inside the turn. A turn ends only FINISHED, or PARKED: machine work
-// that will wake the session still runs, and every decision for the user has
-// been asked. A choice that needs its explanation is the exception: it ends the
-// final message in chat, with the agent's own pick, because an open dialog hides
-// the chat and the explanation would go unread.
+// The user reads only AskUserQuestion, never prose, and AskUserQuestion answers
+// inside the turn. A turn ends only FINISHED, or PARKED: machine work that will
+// wake the session still runs, and every decision for the user has been asked.
+// A choice that needs an explanation is asked there too, with the explanation
+// inside the question and its options: an open dialog hides the chat.
 
 // Verbs that signal "I am about to do something the user might want to weigh in on first".
 // Keep these strictly action-oriented and unambiguous; planning-statement verbs like
@@ -92,6 +91,10 @@ const MULTI_QUESTION_PATTERNS = [
   // Only as an imperative: at the start of a sentence or line, or after "or"/"so"/"just".
   // Mid-sentence "can't say which items …" describes, it does not ask.
   /(^|[.!;:]\s+|\b(or|so|just)\s+)(tell me|let me know|say) (if|whether|which)\b/im,
+  // An answer format handed to the user: "Reply **\"A\"** or **\"B\"**.",
+  // "Reply like \"1 A, 2 B\"", "Reply with something like …". Only a sentence that
+  // starts with Reply; "the reply from the peer" describes.
+  /(^|[.!?;:]\s+)(\*\*)?reply (with|like|\*\*|["“'`])/im,
   // Parking on the user: "Still waiting on you at the mini:", "blocked on you".
   /(?<!\b(?:nothing|no one|nobody|not)\s(?:is\s)?)\b(waiting|blocked) (on|for) you\b/i,
   // A task handed to the user: "**Cleanup that's yours, through Mole:**", "the next step is yours".
@@ -101,12 +104,7 @@ const MULTI_QUESTION_PATTERNS = [
 const OFFER_LEAD_PATTERN =
   /\b(want me to|should I|do you want|would you (like|prefer)|which (one|approach|option|of these)|can you (clarify|confirm)|let me know (if|whether))\b/i;
 
-// The agent's own pick marks a choice explained in chat, which the user answers
-// there: "answer me in chat not in the dialog box" (2026-11-19).
-const OWN_PICK_PATTERN = /\bmy (pick|recommendation)\b/i;
-
 function asksInProse(text: string): boolean {
-  if (OWN_PICK_PATTERN.test(text)) return false;
   if (MULTI_QUESTION_PATTERNS.some((re) => re.test(text))) return true;
   // Offer-framing must coexist with a question mark in the SAME paragraph (otherwise an
   // "if you want me to … " mid-prose with a `?` later in an unrelated sentence would
@@ -213,7 +211,7 @@ export const stopRules: ReminderRule[] = [
     events: ['Stop'],
     when: async (input) => !runsHeadless(input) && asksInProse(await finalAssistantText(input)),
     message:
-      "Your final message asks the user something, gives him a task, or waits on him in prose. He reads only AskUserQuestion. Re-issue each ask in AskUserQuestion (2-4 options each). A task for him becomes a question: 'Do X, then pick Done'. Do not restate the asks as text.",
+      "Your final message asks the user something, gives him a task, or waits on him in prose. He reads only AskUserQuestion. Re-issue each ask in AskUserQuestion (2-4 options each), with its explanation inside the question and the option descriptions: an open dialog hides the chat. A task for him becomes a question: 'Do X, then pick Done'. Do not restate the asks as text.",
   },
   {
     id: 'housekeeping-due',

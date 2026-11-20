@@ -1,6 +1,6 @@
 ---
 name: housekeeping
-description: Session housekeeping. Asks the user, in one AskUserQuestion round, every crisp decision, permission or manual step that only the user can give for the rest of the work, and acts on the answers; brings every record the session's work made stale up to date (repo docs, memory, backlog items, plan status); files each problem noticed into agent-backlog; stops what the session started; finishes or hands off the session's own work; and says whether the session is safe to close. Use when a Stop reminder says housekeeping is due; when the user asks "what are you waiting for?", "what are you waiting on?", "do you need anything from me?", "use ask user question for any input you need", "take the time to update anything", "file any problems", "clean up", "wrap up", "I need to close this session", "anything remaining?" or "can I close this session?"; while waiting on subagents, CI, a deploy, a peer session or a long shell command; and before reporting a task as done.
+description: Session housekeeping. Asks the user, in one AskUserQuestion round, every decision, permission or manual step that only the user can give for the rest of the work, and acts on the answers; brings every record the session's work made stale up to date (repo docs, memory, backlog items, plan status); files each problem noticed into agent-backlog; stops what the session started; finishes or hands off the session's own work; and says whether the session is safe to close. Use when a Stop reminder says housekeeping is due; when the user asks "what are you waiting for?", "what are you waiting on?", "do you need anything from me?", "use ask user question for any input you need", "take the time to update anything", "file any problems", "clean up", "wrap up", "I need to close this session", "anything remaining?" or "can I close this session?"; while waiting on subagents, CI, a deploy, a peer session or a long shell command; and before reporting a task as done.
 ---
 
 # Housekeeping
@@ -10,7 +10,7 @@ This skill brings the session to one of two states:
 - **Finished:** the work is done and proven, every record matches it, and nothing waits on the user.
 - **Parked:** work that will wake the session is running (a subagent, a workflow, a background shell, a peer that will send a message), and the user has already answered everything the rest of the work needs.
 
-A turn never ends to wait on the user, with one exception. For a crisp pick (a yes/no, a scope cut, a task) the user reads only AskUserQuestion, and AskUserQuestion returns the answer inside the turn. A choice that needs its explanation (the facts, the options, code or a trade-off, and your pick) is written in chat, and the turn ends there: an open dialog hides the chat, so the explanation would go unread. The evidence for each rule (the user's words, the incidents, the numbers) is in [references/RULINGS.md](references/RULINGS.md).
+A turn never ends to wait on the user. The user reads only AskUserQuestion, and AskUserQuestion returns the answer inside the turn. A choice that needs an explanation is asked there too: the explanation goes inside the question and its options, because an open dialog hides the chat. The evidence for each rule (the user's words, the incidents, the numbers) is in [references/RULINGS.md](references/RULINGS.md).
 
 ## Modes
 
@@ -27,7 +27,7 @@ Every mode has the same jobs. The mode sets their order.
 
 Each job is an outcome. Reach it the shortest way.
 
-- **Ask:** every crisp decision, permission or manual step that only the user can give for the rest of the work, from the session's first message to now, is in one AskUserQuestion round (at most 4 questions per call, more calls in the same round). You act on the answers in the same turn. A choice that needs its explanation is in the final message instead, in full, with your pick, and no dialog opens in that turn.
+- **Ask:** every decision, permission or manual step that only the user can give for the rest of the work, from the session's first message to now, is in one AskUserQuestion round (at most 4 questions per call, more calls in the same round). You act on the answers in the same turn.
 - **Look back:** you know what you changed, committed, filed, started and promised, the corrections the user gave, and the problems you saw in passing. Your diff holds no leftovers.
 - **Update:** each record that names what you changed matches the code as it is now: repo docs, AGENTS.md, memory, backlog items whose premise changed, conditions this session settled, and the plan's STATUS.
 - **File:** each problem you did not fix is an agent-backlog item that a new agent can act on without this transcript, in the repo that owns the fix, with no duplicate.
@@ -44,9 +44,8 @@ Each job is an outcome. Reach it the shortest way.
 - **A list of open items is a list of unasked questions.** A table row that says "needs a design choice", a "still to do: Phase 3, then Phase 4" line, or "#id needs your decision" in prose stops the session. Make each choice a question, with the options you would choose between.
 - **Remaining phases hide decisions.** Scope edges and steps only the user can take come up later in the work. Find them now, not when the phase starts.
 - **Ask only what is the user's.** Drop what the transcript or `agent-backlog decisions` already answers, and decide what the design decides. Each question must stand alone: the user may see only the question dialog.
-- **Prose carries no crisp ask.** A status line in prose is fine. A crisp question, choice or request in prose is not seen.
-- **An explained choice ends the final message, in full.** The user reads only the newest message, so a choice explained two turns back is gone. Each turn that ends while it is open restates the facts, the options and your pick, never "see above". Write the pick as "My pick:" or "My recommendation:"; that is how the Stop gate tells it from a crisp ask in prose.
-- **"Show me" or a pushback on a dialog moves the topic to chat.** Stay in chat for it, even when a Stop reminder asks for AskUserQuestion. A dialog that restates the argument hides the answer the user asked for.
+- **Prose never carries an ask.** A status line in prose is fine. A question, a choice, a "Reply A or B" or a request in prose is not seen, even right after a long explanation.
+- **The explanation lives inside the dialog.** While a dialog is open the user sees only the dialog, so chat text written before it goes unread. Put the facts and the trade-off in the question, what each option costs in its description, your pick first with "(Recommended)", and code or a comparison in an option's preview.
 
 **Records**
 
@@ -62,7 +61,7 @@ Each job is an outcome. Reach it the shortest way.
 
 ## Done when
 
-The jobs for the mode are done, every crisp question for the user went through AskUserQuestion, every choice that needs its explanation ends the final message in full, and the reply uses this shape. Leave out empty sections. A sweep that finds nothing new is one line: "Nothing new."
+The jobs for the mode are done, every question for the user went through AskUserQuestion, and the reply uses this shape. Leave out empty sections. A sweep that finds nothing new is one line: "Nothing new."
 
 - **Updated:** each record, and what changed in it.
 - **Filed:** `#id` and repo, one line each.
