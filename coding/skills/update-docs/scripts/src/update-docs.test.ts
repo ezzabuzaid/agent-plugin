@@ -1019,6 +1019,32 @@ test('claim run as a command exits 2 with the reason on stderr', async () => {
   assert.equal(stderr, 'Cannot claim notes.txt: it is not a .md file\n');
 });
 
+test('a command run from a folder outside any git repository exits 2 with one line that names the folder', async () => {
+  // Arrange
+  await using home = await new TemporaryFiles().directory('update-docs-home-');
+  await using elsewhere = await new TemporaryFiles().directory(
+    'update-docs-elsewhere-',
+  );
+
+  // Act
+  const { status, stderr } = spawnSync(
+    process.execPath,
+    [join(import.meta.dirname, 'main.ts'), 'delta'],
+    {
+      cwd: elsewhere.path,
+      encoding: 'utf8',
+      env: { ...process.env, HOME: home.path },
+    },
+  );
+
+  // Assert
+  assert.equal(status, 2);
+  assert.equal(
+    stderr,
+    `${elsewhere.path} is not inside a git repository: run update-docs from the repository whose docs it updates\n`,
+  );
+});
+
 test("a command run from a folder inside the repo works on the repo's own claims", async () => {
   // Arrange
   await using home = await new TemporaryFiles().directory('update-docs-home-');

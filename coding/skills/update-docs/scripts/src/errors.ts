@@ -2,6 +2,16 @@
 // and leave the stack out: every one of them is fixed by the caller's input.
 export abstract class UpdateDocsError extends Error {}
 
+export class NotInRepository extends UpdateDocsError {
+  override name = 'NotInRepository';
+
+  constructor(directory: string) {
+    super(
+      `${directory} is not inside a git repository: run update-docs from the repository whose docs it updates`,
+    );
+  }
+}
+
 export class UsageError extends UpdateDocsError {
   override name = 'UsageError';
 }
