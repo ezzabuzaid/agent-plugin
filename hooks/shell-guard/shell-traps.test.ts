@@ -82,6 +82,34 @@ test('allows the watchers that cannot hold each other: a bracket, a PID, an exac
   assertAllowed('until ! pgrep -f "a(b"; do sleep 5; done');
 });
 
+// Ezz asked four times that an agent never wait on a zukhruf release (memory no-waiting-on-releases),
+// and agents kept arming these loops on npm.
+test('denies a loop or watch that polls npm for a zukhruf release, in any tool', () => {
+  const wait = /this polls npm for a zukhruf release/;
+  assertDenied('until v=$(npm view @zukhruf/eslint version 2>/dev/null) && [ "$v" != "0.8.43" ]; do sleep 60; done', wait);
+  assertDenied('deadline=$((SECONDS+1800)); until [ "$(npm view @zukhruf/shadcn version)" = 0.8.44 ] || [ $SECONDS -gt $deadline ]; do sleep 30; done', wait);
+  assertDenied('while true; do npm view @zukhruf/nx version; sleep 60; done', wait);
+  assertDenied('watch -n 60 npm view @zukhruf/eslint version', wait);
+  assertDenied(`watch -n 60 'npm view @zukhruf/eslint version'`, wait);
+  assertDenied('until npm info --json @zukhruf/fs@0.8.23 >/dev/null 2>&1; do sleep 60; done', wait);
+  assertDenied('while ! npm v "@zukhruf/fs@>=0.8.23" version | grep -q .; do sleep 60; done', wait);
+  assertDenied('for i in $(seq 30); do npm show @zukhruf/nx dist-tags.latest && break; sleep 60; done', wait);
+  assertDenied('P=@zukhruf/eslint; until npm view $P version | grep -q 0.8.44; do sleep 60; done', wait);
+  assertDenied('until npm view @zukhruf/eslint version | grep -q 0.8.44; do sleep 60; done', wait, { tool: 'Monitor' });
+});
+
+test('allows a single registry read, a loop over another package, and a loop that never calls npm', () => {
+  assertAllowed('npm view @zukhruf/eslint version');
+  assertAllowed('npm view @zukhruf/eslint versions --json');
+  assertAllowed('until npm view react version; do sleep 60; done');
+  assertAllowed('for f in packages/*/package.json; do jq -r .name $f; done');
+  assertAllowed('for p in eslint shadcn nx; do npm view @zukhruf/$p version; done');
+  assertAllowed('npm view @zukhruf/eslint versions --json | while read -r v; do echo $v; done');
+  assertAllowed('until npm install @zukhruf/eslint; do sleep 5; done');
+  assertAllowed(`cat <<'EOF'\nuntil npm view @zukhruf/eslint version; do sleep 60; done\nEOF`);
+  assertAllowed(`echo 'until npm view @zukhruf/eslint version; do sleep 60; done'`);
+});
+
 test('denies a later && step that depends on a piped test or build', () => {
   const gated = /a pipe after a test or build hides its exit status/;
   assertDenied('nx run a:test 2>&1 | tail -3 && git push', gated);

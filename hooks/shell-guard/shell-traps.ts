@@ -388,9 +388,11 @@ function simpleCommand(text: string, at: number): string {
 // Two such watchers keep each other alive for ever (28 hours on 2026-11-07/08, 9.5
 // hours on 2026-11-06/07, both from foreground calls that the harness moved to the
 // background). So the tool and the background flag do not matter here.
-function loopSpans(text: string): { start: number; end: number }[] {
+type LoopSpan = { keyword: string; start: number; end: number };
+
+function loopSpans(text: string): LoopSpan[] {
 	const open = openPositions(text, 'unquoted', 'test');
-	const spans: { keyword: string; start: number; end: number }[] = [];
+	const spans: LoopSpan[] = [];
 	const stack: { keyword: string; at: number }[] = [];
 	for (const match of text.matchAll(/(?<![\w./=-])(while|until|for|repeat|done)(?![\w./=-])/g)) {
 		if (!open.has(match.index)) continue;
@@ -402,8 +404,10 @@ function loopSpans(text: string): { start: number; end: number }[] {
 		} else stack.push({ keyword: match[1], at: match.index });
 	}
 	for (const { keyword, at } of stack) spans.push({ keyword, start: at, end: text.length });
-	return spans.filter(({ keyword }) => keyword === 'while' || keyword === 'until');
+	return spans;
 }
+
+const waitLoops = (text: string) => loopSpans(text).filter(({ keyword }) => keyword === 'while' || keyword === 'until');
 
 const PGREP_VALUE_FLAGS = new Set(['-d', '-F', '-G', '-g', '-J', '-M', '-N', '-P', '-t', '-U', '-u', '-L']);
 
@@ -430,7 +434,7 @@ function pgrepCall(simple: string): { flags: string; pattern: string | undefined
 function pgrepWatcher(command: string): string | null {
 	const text = withoutDataHeredocs(command);
 	if (!text.includes('pgrep')) return null;
-	const spans = loopSpans(text);
+	const spans = waitLoops(text);
 	if (spans.length === 0) return null;
 	for (const at of commandPositions(text, 'pgrep')) {
 		const { flags, pattern } = pgrepCall(simpleCommand(text, at));
@@ -526,6 +530,51 @@ function killByPattern(command: string): string | null {
 		if (killIndex < 0 || killProbe(words.slice(killIndex))) continue;
 		const before = text.slice(Math.max(text.lastIndexOf('\n', at), 0), at);
 		if (selectsByPattern(before.slice(Math.max(before.lastIndexOf(';'), before.lastIndexOf('&&')) + 1))) return KILL_BY_PATTERN;
+	}
+	return null;
+}
+
+// ---- waiting on a release ----------------------------------------------------
+
+// Ezz asked four times (memory no-waiting-on-releases) that an agent never wait on a
+// zukhruf release, and agents kept polling npm for one: `until v=$(npm view @zukhruf/x
+// version) && [ "$v" != 0.8.43 ]; do sleep 60; done`, `watch -n 60 npm view …`. A while
+// or until loop, `watch`, or a for loop that sleeps between its reads is that wait. A
+// for loop with no sleep reads each package once.
+const REGISTRY_READS = new Set(['view', 'info', 'show', 'v']);
+
+function zukhrufPackage(word: string, text: string): boolean {
+	if (word.startsWith('@zukhruf/')) return true;
+	const variable = word.match(/^\$\{?([A-Za-z_]\w*)\}?/);
+	return variable !== null && new RegExp(`(?:^|[\\s;&(])${variable[1]}=["']?@zukhruf/`).test(text);
+}
+
+// `words` starts at npm.
+function readsZukhrufRelease(words: string[], text: string): boolean {
+	const [subcommand, ...rest] = words.slice(1).map(unquote).filter((word) => !word.startsWith('-'));
+	return REGISTRY_READS.has(subcommand ?? '') && rest.some((word) => zukhrufPackage(word, text));
+}
+
+const RELEASE_WAIT =
+	'Blocked: this polls npm for a zukhruf release, and Ezz has said never to wait on one. Prove the change now with an `npm pack` tarball extracted over the folder the host resolves (restore it from the published tarball after), and file the pin as an agent-backlog item with `--published "@zukhruf/<pkg>@>=<next>"`; that condition wakes the work. See memory no-waiting-on-releases.';
+
+function zukhrufReleaseWait(command: string): string | null {
+	const text = withoutDataHeredocs(command);
+	if (!text.includes('npm') || !text.includes('@zukhruf/')) return null;
+	for (const at of commandPositions(text, 'watch')) {
+		// `watch` takes its command as words or as one quoted string.
+		const words = shellWords(simpleCommand(text, at)).flatMap((word) => unquote(word).split(/\s+/));
+		const npm = words.indexOf('npm');
+		if (npm !== -1 && readsZukhrufRelease(words.slice(npm), text)) return RELEASE_WAIT;
+	}
+	const sleeps = commandPositions(text, 'sleep');
+	const waits = loopSpans(text).filter(
+		({ keyword, start, end }) => keyword === 'while' || keyword === 'until' || (keyword === 'for' && sleeps.some((at) => at > start && at < end)),
+	);
+	if (waits.length === 0) return null;
+	for (const at of commandPositions(text, 'npm')) {
+		if (!waits.some(({ start, end }) => at > start && at < end)) continue;
+		if (readsZukhrufRelease(shellWords(simpleCommand(text, at)), text)) return RELEASE_WAIT;
 	}
 	return null;
 }
@@ -934,7 +983,7 @@ function nodeModulesSymlink(command: string, cwd: string): string | null {
 
 // Monitor streams through grep by design, so the pipe checks are for Bash only.
 export function shellTrap({ command, tool, cwd }: ShellCommand): string | null {
-	const inEveryShell = [modifiedVariable, reservedAssignment, backtick, pipestatus, sedInPlace, bareQualifier, pgrepWatcher, killByPattern, nodeModulesSymlink];
+	const inEveryShell = [modifiedVariable, reservedAssignment, backtick, pipestatus, sedInPlace, bareQualifier, pgrepWatcher, killByPattern, zukhrufReleaseWait, nodeModulesSymlink];
 	for (const check of inEveryShell) {
 		const reason = check(command, cwd);
 		if (reason) return reason;
