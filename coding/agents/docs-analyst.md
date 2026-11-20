@@ -62,6 +62,6 @@ Only this JSON, no prose around it:
 }
 ```
 
-- `target` is a path from the repo root; `also` lists the other files the change must touch, such as the index files the guide names for a new recipe, concept or ADR.
+- `target` is the path from the repo root of a Markdown file the guide names; a change outside Markdown is no docs gap, so leave it out. `also` lists the other files the change must touch, such as the index files the guide names for a new recipe, concept or ADR.
 - `rank` orders the candidates by the weight of their evidence and the harm of the gap, 1 first.
 - An empty `candidates` list is a valid answer when the docs hold up against the evidence.

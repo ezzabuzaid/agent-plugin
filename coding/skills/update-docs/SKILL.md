@@ -70,13 +70,14 @@ Each step ends on the condition in its last sentence. Do not start the next step
    Run the stamps one at a time, never two at once. The stamp is the proof that the file holds the run's draft, so a run that dies later can still be undone. After a file's stamp, change it no more: `commit` refuses a file that changed since its stamp. A writer that gives up leaves its file for step 7 to revert. Done when every writer has handed back and every claimed file has a stamp.
 6. **Judge.** One `coding:docs-judge` call for all drafts, `effort: "medium"`, with REFERENCE.md § Judge brief. It gets the paths, the evidence refs of each candidate and the guide, never a writer's hand-back, so its verdict is blind. Save its JSON to `verdicts.json`. Done when each drafted file has a verdict. A rejected file gets one rewrite: a fresh `coding:docs-writer` call with the judge's reasons added to its brief, then `stamp <project> <path>` again once it hands back, and a fresh `coding:docs-judge` call for the rewritten files only. A second rejection is final.
 7. **Settle.**
-   - Revert each rejected file and each file a writer gave up on: `update-docs release <project> --revert <path…>`. When an approved file links to a reverted one (a README link to a rejected recipe), revert that file too, and block its other changes with the reason "reverted with <path>".
+   - Revert each rejected file and each file a writer gave up on: `update-docs release <project> --revert <path…>`.
+   - When an approved file links to a reverted one (a README link to a rejected recipe), give it one rewrite that drops only that link: a fresh `coding:docs-writer` call with that one change, then `update-docs stamp <project> <path>`, and a fresh `coding:docs-judge` call for that file only. When that rewrite is rejected, revert the file too, and block its other changes with the reason "reverted with <path>".
    - Watched and unattended: commit the approved files in one commit per project. Write the subject as the guide's commit rules say: the fact the docs now say. The tool adds `docs(<project>): `. Put the other facts in the body, one line each.
      ```sh
      update-docs commit <project> --subject '<fact>' --body '<facts>'
      ```
    - Dry-run: revert all drafts instead, approved ones too.
-   - Release any claim left: `update-docs release <project>`.
+   - When paths are still claimed (neither the commit nor a revert of every path ended the claim), release them: `update-docs release <project>`.
    - Write `report.json` as REFERENCE.md § Report says. Watched and unattended: then `update-docs finish <project> --started "$started" --report "$work/report.json"`. Dry-run: do not call `finish`, so the ledger stays as it was; the report stays in the work dir.
 
    Done when `finish` exits 0 (dry-run: when `report.json` exists). Then tell the owner (or the run log) the commit sha and subject, and the queued and blocked items.
