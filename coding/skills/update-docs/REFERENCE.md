@@ -20,10 +20,10 @@ The parts of the run that only some modes reach. SKILL.md points to each section
 Pick a candidate only when all of these hold:
 
 - `unattended` is `yes`.
-- Its kind is one of: `readme-section` that is out of step with the package's exports; `glossary-term` for a new term that `src/` already uses (no rename, no `_Avoid_` change); `context-map-row`; `recipe` with `needs: none`. A recipe stays picked only if the writer ran its program within the budget.
+- Its kind is one of: `readme-section`; `stale-claim`; `glossary-term` that adds or corrects a term `src/` uses (not a rename of a term); `context-map-row`; `recipe` with `needs: none`. A recipe stays picked only if the writer ran its program within the budget. The blind judge checks each of them against the code, so none needs the owner unless its text holds a decision.
 - It changes no text that holds a decision (an ADR's text, or a README or concept line that cites an ADR or the owner's words).
 
-Put every other candidate in the report's `queued` list, with its own `kind` and a `reason` that says why it waits for a watched run ("an ADR records the owner's words", "needs docker", "rewords text that holds a decision"). `blocked` is only for a real blocker: a refused claim, a rejected or abandoned draft, a failing commit hook.
+Put every other candidate (an `adr`, a `concept`, a glossary rename, a recipe that needs Docker or a server, and any change to text that holds a decision) in the report's `queued` list, with its own `kind` and a `reason` that says why it waits for a watched run ("an ADR records the owner's words", "needs docker", "rewords text that holds a decision"). `blocked` is only for a real blocker: a refused claim, a rejected or abandoned draft, a failing commit hook.
 
 ## Watched pick
 

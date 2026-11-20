@@ -35,7 +35,7 @@ Each candidate needs evidence you can cite: a bundle `ref`, `memory:<slug>`, or 
 
 ## Unattended and needs
 
-- `unattended: "yes"` only for: a README section out of step with the exports; a new glossary term that `src/` already uses (no rename, no change to the words to avoid); a row of the map; a recipe whose program needs nothing outside Node and the repo. Everything else is `"no"`: an ADR records the owner's words, and text that holds a decision needs the owner.
+- `unattended: "yes"` for: a README section; a stale claim; a glossary term that adds or corrects a term `src/` uses (not a rename); a row of the map; a recipe whose program needs nothing outside Node and the repo. Each is `"yes"` only when it changes no text that holds a decision (an ADR's text, or a line that cites an ADR or the owner's words). `"no"` for an ADR, a concept, a glossary rename and any change to text that holds a decision: an ADR records the owner's words, and a decision needs the owner.
 - `needs`: `"docker"` when a program needs a Docker engine, `"server"` when it needs any other running service or model, else `"none"`.
 
 ## Hand back
