@@ -1,4 +1,6 @@
 import type { ClaimStore } from '../claims/claim-store.ts';
+import type { Draft } from '../claims/claim.ts';
+import type { ClaimedPaths } from '../claims/claimed-paths.ts';
 import { formatPathState, readPathState } from '../claims/path-state.ts';
 import { NotClaimed } from '../errors.ts';
 import type { Outcome } from './outcome.ts';
@@ -12,10 +14,12 @@ import type { Outcome } from './outcome.ts';
 export class StampCommand {
   readonly #repoRoot: string;
   readonly #store: ClaimStore;
+  readonly #paths: ClaimedPaths;
 
-  constructor(repoRoot: string, store: ClaimStore) {
+  constructor(repoRoot: string, store: ClaimStore, paths: ClaimedPaths) {
     this.#repoRoot = repoRoot;
     this.#store = store;
+    this.#paths = paths;
   }
 
   /** No paths given stamps every claimed path. */
@@ -30,19 +34,21 @@ export class StampCommand {
     if (unknown.length > 0) {
       throw new NotClaimed(project, unknown);
     }
-    const states = new Map(
-      await Promise.all(
-        paths.map(
-          async (path) =>
-            [path, await readPathState(this.#repoRoot, path)] as const,
-        ),
-      ),
-    );
-    await this.#store.replace(claim.stamped(now.toString(), states));
+    const drafts = new Map<string, Draft>();
+    for (const path of paths) {
+      const state = await readPathState(this.#repoRoot, path);
+      drafts.set(
+        path,
+        state.kind === 'absent'
+          ? state
+          : { ...state, blob: await this.#paths.keep(path) },
+      );
+    }
+    await this.#store.replace(claim.stamped(now.toString(), drafts));
     return {
       exitCode: 0,
-      stdout: [...states]
-        .map(([path, state]) => `${path} ${formatPathState(state)}\n`)
+      stdout: [...drafts]
+        .map(([path, draft]) => `${path} ${formatPathState(draft)}\n`)
         .join(''),
     };
   }

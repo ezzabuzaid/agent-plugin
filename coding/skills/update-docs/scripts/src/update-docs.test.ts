@@ -17,6 +17,7 @@ import { test } from 'node:test';
 import { TemporaryFiles } from '@zukhruf/fs';
 
 import {
+  ClaimOvertaken,
   ClaimRefused,
   CommitRefused,
   ConfigMissing,
@@ -1568,6 +1569,85 @@ test('a second stamp of a path its writer rewrote lets commit take the rewrite',
   assert.equal(
     git(repo.path, ['show', `${stdout.trim()}:packages/pool/README.md`]),
     '# pool, rewritten',
+  );
+});
+
+test("release --revert of a draft that another session changed after its stamp refuses and shows the draft's own lines, not the other session's", async () => {
+  // Arrange
+  await using home = await new TemporaryFiles().directory('update-docs-home-');
+  await using repo = await new TemporaryFiles().directory('update-docs-repo-');
+  await docsWorkspace(repo.path);
+  const tool = new UpdateDocs({
+    home: home.path,
+    repoRoot: repo.path,
+    variables: process.env,
+  });
+  await tool.run(['claim', 'pool', 'packages/pool/README.md']);
+  await write(repo.path, {
+    'packages/pool/README.md': '# pool\n\nA line of the draft.\n',
+  });
+  await tool.run(['stamp', 'pool', 'packages/pool/README.md']);
+  await write(repo.path, {
+    'packages/pool/README.md':
+      '# pool\n\nA line of the draft.\n\nA line of another session.\n',
+  });
+
+  // Act
+  const refused = await tool
+    .run(['release', 'pool', '--revert', 'packages/pool/README.md'])
+    .then(
+      () => 'reverted',
+      (error: unknown) => error,
+    );
+
+  // Assert
+  assert.ok(refused instanceof StampMismatch, String(refused));
+  assert.ok(refused.message.includes('+A line of the draft.'), refused.message);
+  assert.ok(!refused.message.includes('another session.'), refused.message);
+  assert.equal(
+    await readFile(join(repo.path, 'packages/pool/README.md'), 'utf8'),
+    '# pool\n\nA line of the draft.\n\nA line of another session.\n',
+  );
+});
+
+test("release --revert of a draft whose file another session committed after the claim refuses and shows the draft's own lines", async () => {
+  // Arrange
+  await using home = await new TemporaryFiles().directory('update-docs-home-');
+  await using repo = await new TemporaryFiles().directory('update-docs-repo-');
+  await docsWorkspace(repo.path);
+  const tool = new UpdateDocs({
+    home: home.path,
+    repoRoot: repo.path,
+    variables: process.env,
+  });
+  await tool.run(['claim', 'pool', 'packages/pool/README.md']);
+  const draft = '# pool\n\nA line of the draft.\n';
+  await write(repo.path, { 'packages/pool/README.md': draft });
+  await tool.run(['stamp', 'pool', 'packages/pool/README.md']);
+  // Another session commits its own version of the file, as a commit through
+  // a private index does, and leaves the draft in the working tree.
+  await commit(
+    repo.path,
+    { 'packages/pool/README.md': '# pool\n\nA line of another session.\n' },
+    'docs(pool): another session',
+    '2026-01-03T00:00:00Z',
+  );
+  await write(repo.path, { 'packages/pool/README.md': draft });
+
+  // Act
+  const refused = await tool
+    .run(['release', 'pool', '--revert', 'packages/pool/README.md'])
+    .then(
+      () => 'reverted',
+      (error: unknown) => error,
+    );
+
+  // Assert
+  assert.ok(refused instanceof ClaimOvertaken, String(refused));
+  assert.ok(refused.message.includes('+A line of the draft.'), refused.message);
+  assert.equal(
+    await readFile(join(repo.path, 'packages/pool/README.md'), 'utf8'),
+    draft,
   );
 });
 

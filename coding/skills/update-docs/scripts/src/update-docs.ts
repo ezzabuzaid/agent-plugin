@@ -143,11 +143,11 @@ export class UpdateDocs {
       }
       case 'stamp': {
         const { project, paths } = this.#withPaths(rest, {});
-        return new StampCommand(this.#repoRoot, this.#claims()).run(
-          project,
-          paths,
-          Temporal.Now.instant(),
-        );
+        return new StampCommand(
+          this.#repoRoot,
+          this.#claims(),
+          new ClaimedPaths(this.#git),
+        ).run(project, paths, Temporal.Now.instant());
       }
       case 'commit': {
         const { project, values } = this.#withProject(rest, {

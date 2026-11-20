@@ -11,7 +11,7 @@ import { join } from 'node:path';
 
 import { ClaimCorrupt, NoClaim } from '../errors.ts';
 import { ROOT, Shape } from '../ledger/shape.ts';
-import { Claim, type PathStamp } from './claim.ts';
+import { Claim, type Draft, type PathStamp } from './claim.ts';
 import { formatPathState, parsePathState } from './path-state.ts';
 
 /**
@@ -105,11 +105,14 @@ function serialize(claim: Claim): string {
           path,
           stamp.kind === 'unstamped'
             ? { kind: 'unstamped' }
-            : {
-                kind: 'stamped',
-                at: stamp.at,
-                state: formatPathState(stamp.state),
-              },
+            : stamp.draft.kind === 'absent'
+              ? { kind: 'stamped', at: stamp.at, state: 'absent' }
+              : {
+                  kind: 'stamped',
+                  at: stamp.at,
+                  state: formatPathState(stamp.draft),
+                  blob: stamp.draft.blob,
+                },
         ]),
       ),
     },
@@ -148,10 +151,8 @@ function parse(file: string, text: string): Claim {
           shape.object(each, at, ['kind']);
           return [path, { kind }];
         }
-        const stamp = shape.object(each, at, ['kind', 'at', 'state']);
-        const state = parsePathState(
-          shape.text(stamp.get('state'), `${at}.state`),
-        );
+        const record = shape.record(each, at);
+        const state = parsePathState(shape.text(record.state, `${at}.state`));
         if (state === 'invalid') {
           throw new ClaimCorrupt(
             file,
@@ -159,9 +160,21 @@ function parse(file: string, text: string): Claim {
             'expected absent or sha256:<hex>',
           );
         }
+        let draft: Draft;
+        if (state.kind === 'absent') {
+          shape.object(each, at, ['kind', 'at', 'state']);
+          draft = state;
+        } else {
+          const stamp = shape.object(each, at, ['kind', 'at', 'state', 'blob']);
+          draft = {
+            kind: 'file',
+            sha256: state.sha256,
+            blob: shape.text(stamp.get('blob'), `${at}.blob`),
+          };
+        }
         return [
           path,
-          { kind, at: shape.instant(stamp.get('at'), `${at}.at`), state },
+          { kind, at: shape.instant(record.at, `${at}.at`), draft },
         ];
       }),
     ),

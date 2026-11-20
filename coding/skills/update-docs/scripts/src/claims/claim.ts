@@ -1,6 +1,21 @@
 import type { PathState } from './path-state.ts';
 
 /**
+ * What a stamp keeps of a path: no file, or the file's hash and its git blob,
+ * so a refusal can show the draft's own lines.
+ */
+export type Draft =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'file'; readonly sha256: string; readonly blob: string };
+
+/** The state a draft had on disk, to compare with what the path holds now. */
+export function draftState(draft: Draft): PathState {
+  return draft.kind === 'absent'
+    ? draft
+    : { kind: 'file', sha256: draft.sha256 };
+}
+
+/**
  * What one claimed path held when its writer finished, or no stamp yet. Each
  * path is stamped on its own, so a run that dies after one writer leaves the
  * proof for the drafts already written.
@@ -10,7 +25,7 @@ export type PathStamp =
   | {
       readonly kind: 'stamped';
       readonly at: string;
-      readonly state: PathState;
+      readonly draft: Draft;
     };
 
 /**
@@ -37,10 +52,10 @@ export class Claim {
   }
 
   /** The claim with the given paths stamped as they hold now. */
-  stamped(at: string, states: ReadonlyMap<string, PathState>): Claim {
+  stamped(at: string, drafts: ReadonlyMap<string, Draft>): Claim {
     const stamps = new Map(this.stamps);
-    for (const [path, state] of states) {
-      stamps.set(path, { kind: 'stamped', at, state });
+    for (const [path, draft] of drafts) {
+      stamps.set(path, { kind: 'stamped', at, draft });
     }
     return new Claim({ ...this, stamps });
   }

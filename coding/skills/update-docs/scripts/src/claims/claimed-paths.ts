@@ -67,6 +67,35 @@ export class ClaimedPaths {
     );
   }
 
+  /** Keeps a path's content as a git blob, and gives the blob's id. */
+  async keep(path: string): Promise<string> {
+    return (await this.#git.run(['hash-object', '-w', '--', path])).trim();
+  }
+
+  /**
+   * What a draft changed: the diff from the path at a revision (or no file)
+   * to the draft's blob.
+   */
+  async draftDiff(
+    revision: string,
+    path: string,
+    blob: string,
+  ): Promise<string> {
+    const entry = await this.#literal(['ls-tree', '-z', revision, '--', path]);
+    const from = entry === '' ? await this.#emptyBlob() : `${revision}:${path}`;
+    return this.#git.run(['diff', '--no-color', from, blob]);
+  }
+
+  /** git knows the empty blob of its object format without storing it. */
+  async #emptyBlob(): Promise<string> {
+    const format = (
+      await this.#git.run(['rev-parse', '--show-object-format'])
+    ).trim();
+    return format === 'sha256'
+      ? '473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813'
+      : 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391';
+  }
+
   /** Puts a path back as it was at a revision: its content, or no file. */
   async restore(revision: string, path: string): Promise<void> {
     const entry = await this.#literal(['ls-tree', '-z', revision, '--', path]);

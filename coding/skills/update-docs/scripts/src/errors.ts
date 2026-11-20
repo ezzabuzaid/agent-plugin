@@ -160,9 +160,10 @@ export class StampMismatch extends UpdateDocsError {
   override name = 'StampMismatch';
   readonly paths: readonly string[];
 
-  constructor(paths: readonly string[]) {
+  /** `drafts` shows what the run's drafts changed, so a person can undo them. */
+  constructor(paths: readonly string[], drafts: string) {
     super(
-      `Changed after the stamp, so another session may have edited them: ${paths.join(', ')}`,
+      `Changed after the stamp, so another session may have edited them: ${paths.join(', ')}${drafts}`,
     );
     this.paths = paths;
   }
@@ -173,8 +174,9 @@ export class ClaimOvertaken extends UpdateDocsError {
   override name = 'ClaimOvertaken';
   readonly paths: readonly string[];
 
-  constructor(paths: readonly string[], how: string) {
-    super(`${how} since the claim: ${paths.join(', ')}`);
+  /** `drafts` shows what the run's drafts changed, so a person can undo them. */
+  constructor(paths: readonly string[], how: string, drafts: string) {
+    super(`${how} since the claim: ${paths.join(', ')}${drafts}`);
     this.paths = paths;
   }
 }
