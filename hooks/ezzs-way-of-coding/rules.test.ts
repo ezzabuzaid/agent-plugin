@@ -1317,6 +1317,22 @@ test('stop stays quiet on a final message that reports, finishes or only mention
   }
 });
 
+test("stop stays quiet on a choice explained in chat with the agent's own pick", async () => {
+  for (const message of [
+    // 2026-11-20: the user answered these in chat ("I agree with you on four points");
+    // the rule had sent the agent to a dialog that would hide the explanation.
+    'Four decisions still need your answer. Each has my pick:\n\n1. **Q2, a test starting a second program:** drop the rule.\n2. **Q3:** keep it as a written note.\n\nReply with something like **"2 drop, 3 note"**, or change any of them.',
+    'Cleanup can fail loudly or quietly:\n\n| Form | Test fails too |\n|---|---|\n| `try/finally` | the real failure is lost |\n| `await using` | both errors show |\n\nThe form is your call. **My recommendation:** `await using`.',
+  ]) {
+    assert.doesNotMatch(await stopContext({ last_assistant_message: message }), /ask-in-the-tool/, message);
+  }
+  // Without the pick, the same ask is a prose ask.
+  assert.match(
+    await stopContext({ last_assistant_message: 'Four decisions still need your answer:\n1. Q2\n2. Q3' }),
+    ASK_IN_THE_TOOL,
+  );
+});
+
 test('stop sends a prose ask to AskUserQuestion even when the same turn already used AskUserQuestion', async () => {
   const context = await stopContext({}, [
     { type: 'user', message: { role: 'user', content: 'Set up the mini.' } },
@@ -1380,16 +1396,31 @@ test('stop stays quiet on housekeeping while no work followed the last sweep tha
 });
 
 test('stop asks for an idle housekeeping round while any background work still runs', async () => {
-  for (const task of [
-    { id: 'a3a963ff468395a67', type: 'subagent', status: 'running', description: 'Group C: #3958', agent_type: 'general-purpose' },
-    { id: 'w1', type: 'workflow', status: 'pending', description: 'Fix tickets', name: 'fix-tickets' },
-    { id: 'b9i2ob8yk', type: 'shell', status: 'running', description: 'npm run dev', command: 'npm run dev' },
-    { id: 'm1', type: 'monitor', status: 'running', description: 'CI run', server: 'github', tool: 'watch' },
-  ]) {
+  for (const [task, named] of [
+    [{ id: 'a3a963ff468395a67', type: 'subagent', status: 'running', description: 'Group C: #3958', agent_type: 'general-purpose' }, 'subagent a3a963ff468395a67 (Group C: #3958)'],
+    [{ id: 'w1', type: 'workflow', status: 'pending', description: 'Fix tickets', name: 'fix-tickets' }, 'workflow w1 (Fix tickets)'],
+    [{ id: 'b9i2ob8yk', type: 'shell', status: 'running', description: 'npm run dev', command: 'npm run dev' }, 'shell b9i2ob8yk (npm run dev)'],
+    [{ id: 'm1', type: 'monitor', status: 'running', description: 'CI run', server: 'github', tool: 'watch' }, 'monitor m1 (CI run)'],
+    [{ status: 'running' }, 'a task'],
+  ] as const) {
     const context = await stopContext({ background_tasks: [task] }, [request, toolCall('Agent'), reply]);
-    assert.match(context, /\[stop-feedback:housekeeping-due\]\nBackground work is still running\. Before this turn ends, run the housekeeping skill in idle mode/, task.type);
-    assert.doesNotMatch(context, /before-done mode/, task.type);
+    assert.ok(
+      context.includes(`[stop-feedback:housekeeping-due]\nBackground work is still running: ${named}. Before this turn ends, run the housekeeping skill in idle mode`),
+      context,
+    );
+    assert.doesNotMatch(context, /before-done mode/, named);
   }
+  // A /clear keeps a subagent running; the reminder names every task, so none is reported as gone.
+  const both = await stopContext(
+    {
+      background_tasks: [
+        { id: 'a791e34a38c02e610', type: 'subagent', status: 'running', description: 'deepagents #3369 tests pass db.pool()' },
+        { id: 'b1', type: 'shell', status: 'running', description: 'race proof' },
+      ],
+    },
+    [request, toolCall('Agent'), reply],
+  );
+  assert.ok(both.includes('running: subagent a791e34a38c02e610 (deepagents #3369 tests pass db.pool()); shell b1 (race proof).'), both);
   assert.ok((await stopContext({ background_tasks: [] }, [request, toolCall('Bash'), reply])).includes(BEFORE_DONE));
 });
 

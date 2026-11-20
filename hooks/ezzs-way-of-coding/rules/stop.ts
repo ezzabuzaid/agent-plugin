@@ -6,9 +6,12 @@ import type {
 import { readTranscriptEntries } from './transcript.ts';
 import { finalAssistantText } from './verification.ts';
 
-// The user reads only AskUserQuestion, never prose, and AskUserQuestion answers
-// inside the turn. A turn ends only FINISHED, or PARKED: machine work that will
-// wake the session still runs, and every decision for the user has been asked.
+// The user reads only AskUserQuestion for a crisp pick, and AskUserQuestion
+// answers inside the turn. A turn ends only FINISHED, or PARKED: machine work
+// that will wake the session still runs, and every decision for the user has
+// been asked. A choice that needs its explanation is the exception: it ends the
+// final message in chat, with the agent's own pick, because an open dialog hides
+// the chat and the explanation would go unread.
 
 // Verbs that signal "I am about to do something the user might want to weigh in on first".
 // Keep these strictly action-oriented and unambiguous; planning-statement verbs like
@@ -98,7 +101,12 @@ const MULTI_QUESTION_PATTERNS = [
 const OFFER_LEAD_PATTERN =
   /\b(want me to|should I|do you want|would you (like|prefer)|which (one|approach|option|of these)|can you (clarify|confirm)|let me know (if|whether))\b/i;
 
+// The agent's own pick marks a choice explained in chat, which the user answers
+// there: "answer me in chat not in the dialog box" (2026-11-19).
+const OWN_PICK_PATTERN = /\bmy (pick|recommendation)\b/i;
+
 function asksInProse(text: string): boolean {
+  if (OWN_PICK_PATTERN.test(text)) return false;
   if (MULTI_QUESTION_PATTERNS.some((re) => re.test(text))) return true;
   // Offer-framing must coexist with a question mark in the SAME paragraph (otherwise an
   // "if you want me to … " mid-prose with a `?` later in an unrelated sentence would
@@ -168,9 +176,24 @@ async function housekeepingDue(input: ClaudeHookInput): Promise<boolean> {
   return swept ? workedSinceStop : worked;
 }
 
-function backgroundWorkRuns(input: ClaudeHookInput): boolean {
-  const tasks = input.background_tasks;
-  return Array.isArray(tasks) && tasks.length > 0;
+function stringField(task: unknown, key: string): string | undefined {
+  if (typeof task !== 'object' || task === null) return undefined;
+  const value = new Map(Object.entries(task)).get(key);
+  return typeof value === 'string' ? value : undefined;
+}
+
+// Each running task by kind, id and description, so the agent cannot report
+// "nothing is running" while a subagent it no longer remembers (one started
+// before a /clear) still edits the checkout.
+function runningWork(input: ClaudeHookInput): string[] {
+  const tasks: unknown = input.background_tasks;
+  if (!Array.isArray(tasks)) return [];
+  return tasks.map((task: unknown) => {
+    const name =
+      [stringField(task, 'type'), stringField(task, 'id')].filter(Boolean).join(' ') || 'a task';
+    const description = stringField(task, 'description');
+    return description ? `${name} (${description})` : name;
+  });
 }
 
 // A headless run (`claude -p`, the Agent SDKs) has no AskUserQuestion and no
@@ -197,9 +220,11 @@ export const stopRules: ReminderRule[] = [
     target: 'stop-feedback',
     events: ['Stop'],
     when: async (input) => !runsHeadless(input) && (await housekeepingDue(input)),
-    message: (input) =>
-      backgroundWorkRuns(input)
-        ? 'Background work is still running. Before this turn ends, run the housekeeping skill in idle mode: ask the user every decision only he can make for the rest of the work, from the session\'s first message, in one AskUserQuestion round, then keep waiting.'
-        : 'Before this turn ends, run the housekeeping skill in before-done mode.',
+    message: (input) => {
+      const running = runningWork(input);
+      return running.length > 0
+        ? `Background work is still running: ${running.join('; ')}. Before this turn ends, run the housekeeping skill in idle mode: ask the user every decision only he can make for the rest of the work, from the session's first message, in one AskUserQuestion round, then keep waiting.`
+        : 'Before this turn ends, run the housekeeping skill in before-done mode.';
+    },
   },
 ];

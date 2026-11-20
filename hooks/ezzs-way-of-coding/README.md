@@ -74,16 +74,22 @@ exist. The transcript is the session state, so a new session starts with the
 register off and a resumed session keeps it on.
 
 Two Stop rules (root sessions only) keep a turn from ending on the user. The
-user reads only AskUserQuestion, and AskUserQuestion answers inside the turn,
-so a turn ends only finished, or parked: machine work that will wake the
-session still runs and every decision for the user has been asked.
+user reads only AskUserQuestion for a crisp pick, and AskUserQuestion answers
+inside the turn, so a turn ends only finished, or parked: machine work that
+will wake the session still runs and every decision for the user has been
+asked. A choice that needs its explanation is the exception: it ends the final
+message in chat, with the agent's own pick, because an open dialog hides the
+chat.
 `ask-in-the-tool` fires when the final message asks the user something, gives
-him a task or waits on him in prose, also after an earlier AskUserQuestion.
+him a task or waits on him in prose, also after an earlier AskUserQuestion. It
+stays quiet when the message gives the agent's own pick ("my pick", "my
+recommendation"), which marks a choice explained in chat.
 `housekeeping-due` reads a Claude Code transcript: it fires once the agent
 called a tool after the first stop (`stop_hook_summary`) that follows the last
 `housekeeping` skill call, or called any tool when no sweep ran yet. With
-`background_tasks` running it asks for the skill's idle mode, otherwise for its
-before-done mode. It is off in a Codex transcript and without one.
+`background_tasks` running it asks for the skill's idle mode and names each
+task by kind, id and description, otherwise it asks for its before-done mode.
+It is off in a Codex transcript and without one.
 Both rules are off in a headless run (`claude -p`, the Agent SDKs), which has
 no AskUserQuestion and no person to sweep for: `hook.ts` copies Claude Code's
 `CLAUDE_CODE_ENTRYPOINT` (`cli` in a terminal, `sdk-cli` under `-p`) into the
