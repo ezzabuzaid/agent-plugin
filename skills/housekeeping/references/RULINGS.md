@@ -30,6 +30,8 @@ These are the four Ask gotchas: idle, a task is a question, open items are quest
 
 **Count running work from the harness, not from memory.** On 2026-11-20 a handoff said _"Nothing of mine is running or uncommitted"_ while a subagent it had started (deepagents #3369, 78 tool calls) was still editing 20 files of the shared checkout. The subagent lived through the `/clear`, and its report reached the new context, which had never started it. One turn after the Stop reminder said _"Background work is still running"_, the new context repeated the claim (_"Still running: nothing. I started no background work."_). Both statements came from memory, and `ListAgents` listed the subagent the whole time. The idle reminder now names each task by kind, id and description.
 
+**Running work is no reason to stop working.** _"Can't you start on something while it's releasing?"_ (2026-11-20), _"Can't you do some work whilst you're waiting?"_ (2026-11-20, a second session), _"cannot you do work whilst shell is running?"_ (2026-11-21). Each time the agent asked its questions, did the record jobs and ended the turn on a CI, release or npm watch, while decided work waited on nothing that ran: sdk-it #3923 (1), #4901 and #4907; #5006; #5127's exploration and plan. The Idle row ended "then wait" and the `housekeeping-due` reminder "then keep waiting", and the agent followed them over its own memory. The 2026-11-20 reflection named the fix; it landed on 2026-11-21. `January-sdk-it/feedback_work_while_waiting.md`
+
 ## Why a Stop gate sends the agent here
 
 **This skill did not run itself.** Its earlier description said "use it without being asked while waiting on subagents, CI, a deploy or a long shell command". The idle stalls above happened anyway.

@@ -221,7 +221,7 @@ export const stopRules: ReminderRule[] = [
     message: (input) => {
       const running = runningWork(input);
       return running.length > 0
-        ? `Background work is still running: ${running.join('; ')}. Before this turn ends, run the housekeeping skill in idle mode: ask the user every decision only he can make for the rest of the work, from the session's first message, in one AskUserQuestion round, then keep waiting.`
+        ? `Background work is still running: ${running.join('; ')}. Before this turn ends, run the housekeeping skill in idle mode: ask the user every decision only he can make for the rest of the work, from the session's first message, in one AskUserQuestion round, then start every queued item that does not depend on that work. End the turn only when every remaining item waits on it.`
         : 'Before this turn ends, run the housekeeping skill in before-done mode.';
     },
   },

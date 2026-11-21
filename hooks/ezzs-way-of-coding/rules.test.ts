@@ -1409,6 +1409,9 @@ test('stop asks for an idle housekeeping round while any background work still r
       context,
     );
     assert.doesNotMatch(context, /before-done mode/, named);
+    // Running work is no reason to stop: the reminder sends the agent on to the work that does not wait on it.
+    assert.match(context, /then start every queued item that does not depend on that work/, named);
+    assert.doesNotMatch(context, /keep waiting/, named);
   }
   // A /clear keeps a subagent running; the reminder names every task, so none is reported as gone.
   const both = await stopContext(

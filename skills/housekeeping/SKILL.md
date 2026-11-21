@@ -8,7 +8,7 @@ description: Session housekeeping. Asks the user, in one AskUserQuestion round, 
 This skill brings the session to one of two states:
 
 - **Finished:** the work is done and proven, every record matches it, and nothing waits on the user.
-- **Parked:** work that will wake the session is running (a subagent, a workflow, a background shell, a peer that will send a message), and the user has already answered everything the rest of the work needs.
+- **Parked:** work that will wake the session is running (a subagent, a workflow, a background shell, a peer that will send a message), every remaining item waits on it, and the user has already answered everything the rest of the work needs.
 
 A turn never ends to wait on the user. The user reads only AskUserQuestion, and AskUserQuestion returns the answer inside the turn. A choice that needs an explanation is asked there too: the explanation goes inside the question and its options, because an open dialog hides the chat. The evidence for each rule (the user's words, the incidents, the numbers) is in [references/RULINGS.md](references/RULINGS.md).
 
@@ -19,7 +19,7 @@ Every mode has the same jobs. The mode sets their order.
 | Mode | When | Order |
 |---|---|---|
 | Asked | The user asks what you wait for or what you need | Ask first, act on the answers, then continue the work. |
-| Idle | Background work or a peer will wake the session | Ask, then the jobs that do not touch what the running work uses, then wait. |
+| Idle | Background work or a peer will wake the session | Ask, then the jobs that do not touch what the running work uses, then start every queued item that does not depend on it. Wait only when nothing else can start. |
 | Before done | You are about to report a task as done | Every job, for this task. The result goes in the done report. |
 | Close-out | The user closes the session or leaves | Every job, then hand off. |
 

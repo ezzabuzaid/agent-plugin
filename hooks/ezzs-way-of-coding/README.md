@@ -86,8 +86,9 @@ answer format ("Reply **"A"** or **"B"**").
 `housekeeping-due` reads a Claude Code transcript: it fires once the agent
 called a tool after the first stop (`stop_hook_summary`) that follows the last
 `housekeeping` skill call, or called any tool when no sweep ran yet. With
-`background_tasks` running it asks for the skill's idle mode and names each
-task by kind, id and description, otherwise it asks for its before-done mode.
+`background_tasks` running it asks for the skill's idle mode, names each task
+by kind, id and description, and sends the agent on to every queued item that
+does not depend on that work; otherwise it asks for its before-done mode.
 It is off in a Codex transcript and without one.
 Both rules are off in a headless run (`claude -p`, the Agent SDKs), which has
 no AskUserQuestion and no person to sweep for: `hook.ts` copies Claude Code's
