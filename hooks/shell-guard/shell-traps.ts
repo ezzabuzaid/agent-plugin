@@ -328,7 +328,8 @@ function bareQualifier(command: string): string | null {
 
 const unquote = (word: string) => word.replace(/^(['"])(.*)\1$/s, '$2');
 const shellWords = (simple: string) => simple.match(/(?:[^\s"'\\]+|\\.|'[^']*'|"(?:[^"\\]|\\.)*")+/g) ?? [];
-const PREFIX_WORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', 'time', 'nohup', 'sudo', 'command', 'exec', 'builtin', '!', '{', 'noglob']);
+// Shell keywords after which a command starts.
+const KEYWORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!', '{']);
 
 function openPositions(text: string, ...kinds: ZshContext[]): Set<number> {
 	const open = new Set<number>();
@@ -338,22 +339,123 @@ function openPositions(text: string, ...kinds: ZshContext[]): Set<number> {
 	return open;
 }
 
-// Where a command named `name` starts: read by the shell, first word of a command.
-function commandPositions(text: string, name: string): number[] {
-	const open = openPositions(text, 'unquoted', 'test');
-	const positions: number[] = [];
-	for (const match of text.matchAll(new RegExp(`(?<![\\w./=-])${name}(?![\\w./-])`, 'g'))) {
-		if (!open.has(match.index)) continue;
-		const before = text.slice(0, match.index).replace(/[ \t]+$/, '');
-		if (before === '' || /[;&|(\n`]$/.test(before)) {
-			positions.push(match.index);
+// A word that runs the command after its own options, as its synopsis gives them:
+// `flags` take no value, `values` take the rest of the cluster or the next word, `long`
+// are whole words that take no value, `longValues` take `=value` or the next word, and
+// `operands` reads what stands between the options and the command. `path` is true for a
+// program, which a path such as /usr/bin/time also names.
+interface Wrapper {
+	flags: string;
+	values: string;
+	long: string[];
+	longValues: string[];
+	operands: (words: string[], i: number) => number | null;
+	path: boolean;
+}
+
+const noOperands = (_words: string[], i: number) => i;
+const assignments = (pattern: RegExp) => (words: string[], i: number) => {
+	let j = i;
+	while (j < words.length && pattern.test(unquote(words[j]))) j += 1;
+	return j;
+};
+const DURATION = /^(?:\d+(?:\.\d+)?[smhd]?|\$\{?[A-Za-z_]\w*\}?)$/;
+const duration = (words: string[], i: number) => (i < words.length && DURATION.test(unquote(words[i])) ? i + 1 : null);
+const plain = (path: boolean): Wrapper => ({ flags: '', values: '', long: [], longValues: [], operands: noOperands, path });
+// zsh's precommand modifiers and its `time` keyword run a builtin such as cd in this shell.
+const PRECOMMANDS: [string, Wrapper][] = [
+	['command', { flags: 'p', values: '', long: [], longValues: [], operands: noOperands, path: false }],
+	['builtin', plain(false)],
+	['noglob', plain(false)],
+	['nocorrect', plain(false)],
+];
+const SHELL_PRECOMMANDS = new Map<string, Wrapper>([...PRECOMMANDS, ['time', plain(false)]]);
+// GNU and BSD timeout. Options that change the folder or the search path (env -C, env -P,
+// sudo -D) are left out, so the command after them is not read. xargs is left out too:
+// stdin adds operands to its command, so the text does not hold the call.
+const timeout: Wrapper = { flags: 'fpv', values: 'ks', long: ['--foreground', '--preserve-status', '--verbose'], longValues: ['--kill-after', '--signal'], operands: duration, path: true };
+const WRAPPERS = new Map<string, Wrapper>([
+	...PRECOMMANDS,
+	['exec', { flags: 'cl', values: 'a', long: [], longValues: [], operands: noOperands, path: false }],
+	// The zsh keyword, and /usr/bin/time with its options.
+	['time', { flags: 'alhp', values: 'o', long: [], longValues: [], operands: noOperands, path: true }],
+	['timeout', timeout],
+	['gtimeout', timeout],
+	['nice', { flags: '', values: 'n', long: [], longValues: [], operands: noOperands, path: true }],
+	['env', { flags: 'iv', values: 'u', long: ['-', '--ignore-environment'], longValues: ['--unset'], operands: assignments(/^[^=]+=/), path: true }],
+	['caffeinate', { flags: 'dimsu', values: 'tw', long: [], longValues: [], operands: noOperands, path: true }],
+	['nohup', plain(true)],
+	['sudo', { flags: 'AbEHiknPSs', values: 'CghpRTUu', long: [], longValues: [], operands: assignments(/^[A-Za-z_]\w*=/), path: true }],
+]);
+
+// The index after the wrapper at `i` and its options, or null when `words[i]` is no
+// wrapper or its words do not fit the synopsis.
+function afterWrapper(words: string[], i: number, wrappers: ReadonlyMap<string, Wrapper>): number | null {
+	const name = words[i].split('/').at(-1)!;
+	const wrapper = wrappers.get(name);
+	if (wrapper === undefined || (name !== words[i] && !wrapper.path)) return null;
+	let j = i + 1;
+	for (; j < words.length; j += 1) {
+		const word = unquote(words[j]);
+		if (word === '--') {
+			j += 1;
+			break;
+		}
+		if (wrapper.long.includes(word)) continue;
+		if (word.startsWith('--')) {
+			if (!wrapper.longValues.includes(word.split('=')[0])) return null;
+			if (!word.includes('=')) j += 1;
 			continue;
 		}
-		const previous = before.match(/(?:^|[\s;&|(`])([^\s;&|(`]+)$/)?.[1];
-		if (previous && (PREFIX_WORDS.has(previous) || /^[A-Za-z_]\w*=/.test(previous))) positions.push(match.index);
+		if (!/^-./.test(word)) break;
+		for (let k = 1; k < word.length; k += 1) {
+			if (wrapper.values.includes(word[k])) {
+				if (k === word.length - 1) j += 1;
+				break;
+			}
+			if (!wrapper.flags.includes(word[k])) return null;
+		}
+	}
+	return wrapper.operands(words, j);
+}
+
+// Whether `words` from `from` on are wrappers, each with its options, and nothing else.
+function onlyWrappers(words: string[], from: number, wrappers: ReadonlyMap<string, Wrapper>): boolean {
+	let i: number | null = from;
+	while (i !== null && i < words.length) i = afterWrapper(words, i, wrappers);
+	return i === words.length;
+}
+
+// A chain of wrappers is a few words long, so a command is looked for this far back.
+const WRAPPER_WORDS = 16;
+
+// Where a command named `name` starts: read by the shell, first word of a command or the
+// command that a chain of `wrappers` runs, after the start, a keyword or an assignment.
+function commandStarts(text: string, name: string, wrappers: ReadonlyMap<string, Wrapper>): number[] {
+	const { at, edges } = contexts(text);
+	const open = (i: number) => at[i] === 'unquoted' || at[i] === 'test';
+	const starts = (i: number) => (open(i) && /[;&|(\n`]/.test(text[i])) || (edges.has(i) && text[i] === '(');
+	const positions: number[] = [];
+	for (const match of text.matchAll(new RegExp(`(?<![\\w./=-])${name}(?![\\w./-])`, 'g'))) {
+		if (!open(match.index)) continue;
+		let start = match.index;
+		while (start > 0 && !starts(start - 1)) start -= 1;
+		const words = shellWords(text.slice(start, match.index));
+		for (let k = Math.max(0, words.length - WRAPPER_WORDS); k <= words.length; k += 1) {
+			const after = k === 0 || KEYWORDS.has(words[k - 1]) || /^[A-Za-z_]\w*=/.test(words[k - 1]);
+			if (after && onlyWrappers(words, k, wrappers)) {
+				positions.push(match.index);
+				break;
+			}
+		}
 	}
 	return positions;
 }
+
+// A program such as npm or ln runs after any wrapper.
+const commandPositions = (text: string, name: string) => commandStarts(text, name, WRAPPERS);
+// A builtin such as cd changes this shell only when no program wraps it.
+const builtinPositions = (text: string, name: string) => commandStarts(text, name, SHELL_PRECOMMANDS);
 
 // The simple command that starts at `at`: up to an unquoted ; & | newline or the ) that closes it.
 function simpleCommand(text: string, at: number): string {
@@ -556,8 +658,10 @@ function readsZukhrufRelease(words: string[], text: string): boolean {
 	return REGISTRY_READS.has(subcommand ?? '') && rest.some((word) => zukhrufPackage(word, text));
 }
 
+// No consumer runs an unreleased package (Ezz, 2026-11-22), so the refusal gives no way to
+// try the change in a consumer before npm has it.
 const RELEASE_WAIT =
-	'Blocked: this polls npm for a zukhruf release, and Ezz has said never to wait on one. Prove the change now with an `npm pack` tarball extracted over the folder the host resolves (restore it from the published tarball after), and file the pin as an agent-backlog item with `--published "@zukhruf/<pkg>@>=<next>"`; that condition wakes the work. See memory no-waiting-on-releases.';
+	'Blocked: this polls npm for a zukhruf release, and Ezz has said never to wait on one. Do not wait: the push already releases the package. File the consumer\'s pin as an agent-backlog item with `--published "@zukhruf/<pkg>@>=<next>"`, which wakes the work when npm has it, and go on with other work. See memory no-waiting-on-releases.';
 
 function zukhrufReleaseWait(command: string): string | null {
 	const text = withoutDataHeredocs(command);
@@ -917,7 +1021,7 @@ function expand(script: Script, word: string, at: number, pwd: string | null): s
 // Null when a `cd` goes where the text cannot tell.
 function folderAt(script: Script, at: number): string | null {
 	let folder = script.cwd;
-	for (const cd of commandPositions(script.text, 'cd')) {
+	for (const cd of builtinPositions(script.text, 'cd')) {
 		if (cd >= at || !reaches(script.groups, cd, at)) continue;
 		const words = wordsAt(script.text, cd);
 		if (!words) return null;

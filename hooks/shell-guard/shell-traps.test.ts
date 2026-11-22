@@ -86,6 +86,14 @@ test('allows the watchers that cannot hold each other: a bracket, a PID, an exac
 // and agents kept arming these loops on npm.
 test('denies a loop or watch that polls npm for a zukhruf release, in any tool', () => {
   const wait = /this polls npm for a zukhruf release/;
+  const command = 'while true; do npm view @zukhruf/nx version; sleep 60; done';
+  assert.equal(
+    decide(command),
+    `Blocked: this polls npm for a zukhruf release, and Ezz has said never to wait on one. Do not wait: the push already releases the package. File the consumer's pin as an agent-backlog item with ${BT}--published "@zukhruf/<pkg>@>=<next>"${BT}, which wakes the work when npm has it, and go on with other work. See memory no-waiting-on-releases. Command: ${command}`,
+  );
+  const decision = decide(command);
+  assert.ok(decision);
+  assert.doesNotMatch(decision, /npm pack|tarball|npm link/);
   assertDenied('until v=$(npm view @zukhruf/eslint version 2>/dev/null) && [ "$v" != "0.8.43" ]; do sleep 60; done', wait);
   assertDenied('deadline=$((SECONDS+1800)); until [ "$(npm view @zukhruf/shadcn version)" = 0.8.44 ] || [ $SECONDS -gt $deadline ]; do sleep 30; done', wait);
   assertDenied('while true; do npm view @zukhruf/nx version; sleep 60; done', wait);
@@ -447,6 +455,80 @@ test('allows a link whose destination the command text does not hold', () => {
   assertAllowed('cd $X && ln -s ../p node_modules/p', { cwd });
   assertAllowed('cd - && ln -s ../p node_modules/p', { cwd });
   assertAllowed('ln -s ../p ~other/node_modules/p', { cwd });
+});
+
+// Every trap finds its command with commandPositions. These are the forms it found before
+// wrappers: at the start, after a shell keyword, an assignment or a plain prefix word.
+test('finds a command at the start, after a shell keyword, an assignment or a plain prefix word', () => {
+  const cwd = '/Users/me/code/mutex';
+  const unreleased = new RegExp(RegExp.escape(UNRELEASED));
+  const top = /makes a link by hand in \/Users\/me\/code\/mutex\/node_modules; /;
+  assertDenied('if true; then npm link @a/b; fi', unreleased, { cwd });
+  assertDenied('X=1 npm link @a/b', unreleased, { cwd });
+  assertDenied('nohup npm link @a/b', unreleased, { cwd });
+  assertDenied('command npm link @a/b', unreleased, { cwd });
+  assertDenied('ls && (npm link @a/b)', unreleased, { cwd });
+  assertDenied('X=$(npm link @a/b)', unreleased, { cwd });
+  assertDenied('{ ln -s ../p node_modules/p; }', top, { cwd });
+  assertDenied('time ln -s ../p node_modules/p', top, { cwd });
+  assertDenied('while true; do kill $(pgrep -f x); sleep 1; done', /this kill picks targets by a pattern/);
+  assertAllowed('echo npm link @a/b', { cwd });
+  assertAllowed('command -v npm', { cwd });
+  assertAllowed('builtin cd /private/tmp/x && ln -s ../p node_modules/p', { cwd });
+  assertAllowed('command cd /private/tmp/x && ln -s ../p node_modules/p', { cwd });
+});
+
+// 2026-11: `timeout 600 npm link ../mutex/packages/docker` ran four times in deepagents and
+// text2sql, because commandPositions skipped only plain prefix words, not `timeout 600`.
+test('denies each refusal behind a wrapper that takes its own options: timeout, gtimeout, nice, env, caffeinate, sudo, time', () => {
+  const cwd = '/Users/me/code/mutex';
+  const unreleased = new RegExp(RegExp.escape(UNRELEASED));
+  const link = /makes a link by hand in \/Users\/me\/code\/mutex\/node_modules; /;
+  assertDenied('timeout 600 npm link ../x', unreleased, { cwd });
+  assertDenied('gtimeout -s KILL 30 npm link @a/b', unreleased, { cwd });
+  assertDenied('gtimeout -sKILL -k5 1.5m npm link @a/b', unreleased, { cwd });
+  assertDenied('gtimeout --signal=KILL --kill-after=5 --preserve-status 30 npm link @a/b', unreleased, { cwd });
+  assertDenied('gtimeout --signal KILL -- 30 npm link @a/b', unreleased, { cwd });
+  assertDenied('T=30; timeout $T npm link @a/b', unreleased, { cwd });
+  assertDenied('nice -n 15 caffeinate -dimsu npm link @a/b', unreleased, { cwd });
+  assertDenied('caffeinate -i -t 600 -w 123 npm link @a/b', unreleased, { cwd });
+  assertDenied('env -u NODE_ENV timeout 600 npm link @a/b', unreleased, { cwd });
+  assertDenied('env -i A=1 "B=x y" npm link @a/b', unreleased, { cwd });
+  assertDenied('sudo -u me -E npm link @a/b', unreleased, { cwd });
+  assertDenied('/usr/bin/time -p npm link @a/b', unreleased, { cwd });
+  assertDenied('NX_DAEMON=false caffeinate -dimsu gtimeout -s KILL 560 npm link @a/b', unreleased, { cwd });
+  assertDenied('timeout 5 ln -s ../x node_modules/y', link, { cwd });
+  assertDenied('kill 1; gtimeout -s KILL 5 ln -sfn ../x node_modules/y', link, { cwd });
+  assertDenied('timeout 5 kill $(pgrep -f x)', /this kill picks targets by a pattern/);
+  assertDenied('until ! timeout 5 pgrep -f "nx run a:test"; do sleep 5; done', /waits on a `pgrep -f` pattern that matches its own text/);
+  assertDenied('until gtimeout 30 npm view @zukhruf/pool version | grep -q 0.8.9; do sleep 60; done', /this polls npm for a zukhruf release/);
+  assertDenied('for i in $(seq 30); do npm view @zukhruf/nx version && break; caffeinate -i sleep 60; done', /this polls npm for a zukhruf release/);
+});
+
+test('denies npm install of a path outside the repo behind a wrapper', () => {
+  using folder = new TemporaryFiles().directorySync('checkout-');
+  const cwd = folder.path;
+  mkdirSync(join(cwd, '.git'));
+  const unreleased = new RegExp(RegExp.escape(UNRELEASED));
+  assertDenied('timeout 600 npm i ../other/pkg', unreleased, { cwd });
+  assertDenied('caffeinate -dimsu npm install ../other/pkg', unreleased, { cwd });
+});
+
+test('allows an allowed command behind a wrapper, text that only names one, and a wrapper that does not run the command', () => {
+  const cwd = '/Users/me/code/mutex';
+  assertAllowed('env FOO=1 npm link', { cwd });
+  assertAllowed('timeout 600 npm test', { cwd });
+  assertAllowed('timeout 600 npm link', { cwd });
+  assertAllowed('gtimeout -s KILL 30 npm view @zukhruf/pool version', { cwd });
+  assertAllowed('echo timeout 600 npm link @a/b', { cwd });
+  assertAllowed('echo nohup npm link @a/b', { cwd });
+  assertAllowed('timeout 600 echo npm link @a/b', { cwd });
+  assertAllowed('env -C /x npm link @a/b', { cwd });
+  assertAllowed('command -v npm link', { cwd });
+  // A wrapper runs cd in a child process, so the shell stays in its folder.
+  assertAllowed('ln -s ../p node_modules/p', { cwd: '/private/tmp/x' });
+  assertDenied('nohup cd /private/tmp/x && ln -s ../p node_modules/p', /makes a link by hand in \/Users\/me\/code\/mutex\/node_modules; /, { cwd });
+  assertDenied('timeout 5 cd /private/tmp/x && ln -s ../p node_modules/p', /makes a link by hand in \/Users\/me\/code\/mutex\/node_modules; /, { cwd });
 });
 
 test('denies a bare glob qualifier, and allows it once the option is on', () => {
