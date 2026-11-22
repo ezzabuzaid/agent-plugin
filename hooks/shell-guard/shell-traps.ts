@@ -2,6 +2,7 @@
 // was measured against 45 days of real commands: under about 1 hit in 10 on good
 // code. Word splitting, unmatched globs and `=word` have no check here: the agent shell
 // removes them with SH_WORD_SPLIT, NO_NOMATCH and NO_EQUALS (agent-shell.zsh, beside this file).
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import {
@@ -790,6 +791,10 @@ function exitAfterPipe(command: string): string | null {
 
 // ---- links into node_modules ---------------------------------------------------
 
+// How an agent consumes a change to another checkout's package (Ezz, 2026-11-22).
+const RELEASE_ROUTE =
+	'push the package (a push to its main releases it), then `npm install` the published version (`npm view <pkg> version` shows when npm has it)';
+
 // Ezz, 2026-11-02: "Always npm install". npm does not record a link made by hand in
 // node_modules, and the next install replaces or removes it. Of 892 past commands that
 // run `ln` (24,694 transcripts, to 2026-11-16), this check refuses 33, each a link into
@@ -976,14 +981,102 @@ function nodeModulesSymlink(command: string, cwd: string): string | null {
 		const segments = holder.split('/');
 		const nodeModules = segments.indexOf('node_modules');
 		if (nodeModules === -1 || inScratch(segments.slice(0, nodeModules).join('/') || '/')) continue;
-		return `Blocked: this \`ln -s\` makes a link by hand in ${holder}; npm never records it and the next \`npm install\` deletes it. Link through npm instead: \`npm install\` at the repo root for this repo's own workspaces; \`npm link <path>\`, \`npm install <path>\` (a \`file:\` dependency) or a root \`overrides\` entry for another checkout's package; \`npm rebuild <pkg>\` for a \`.bin\` link. Links in a scratch folder are allowed.`;
+		return `Blocked: this \`ln -s\` makes a link by hand in ${holder}; npm never records it and the next \`npm install\` deletes it. Run \`npm install\` at the repo root for this repo's own workspaces, and \`npm rebuild <pkg>\` for a \`.bin\` link. For another checkout's package, ${RELEASE_ROUTE}. Links in a scratch folder are allowed.`;
+	}
+	return null;
+}
+
+// ---- unreleased packages from another checkout -----------------------------------
+
+// Ezz, 2026-11-22: agents stop consuming an unreleased package through `npm link` or a
+// path to another checkout. A bare `npm link` stays open: it registers the current
+// package's CLI globally.
+const UNRELEASED = `Blocked: this consumes an unreleased package from another checkout (\`npm link <pkg>\`, or \`npm install\` of a path outside this repo). Instead, ${RELEASE_ROUTE}.`;
+
+const NPM_LINK = new Set(['link', 'ln']);
+// install and install-test with their aliases, from npm's lib/utils/cmd-list.js.
+const NPM_INSTALL = new Set(['install', 'i', 'add', 'in', 'ins', 'inst', 'insta', 'instal', 'isnt', 'isnta', 'isntal', 'isntall', 'install-test', 'it']);
+// npm options that an install or a link takes with the next word as their value (no
+// Boolean type in npm's config definitions), so that word is not read as a package.
+const NPM_VALUE_OPTIONS = new Set(['-w', '--workspace', '-C', '--prefix', '-L', '--location', '--tag', '--registry', '--omit', '--include', '--install-strategy', '--loglevel', '--cache', '--userconfig', '--globalconfig', '--save-prefix', '--before', '--min-release-age', '--allow-scripts', '--cpu', '--os', '--libc', '--lockfile-version', '--script-shell', '--otp']);
+
+interface NpmCall {
+	subcommand: string | undefined;
+	operands: string[];
+	prefix: string | undefined;
+	global: boolean;
+}
+
+// `words` starts at npm.
+function npmCall(words: string[]): NpmCall {
+	const operands: string[] = [];
+	let prefix: string | undefined;
+	let global = false;
+	for (let i = 1; i < words.length; i += 1) {
+		const word = words[i];
+		const redirect = redirection(word);
+		if (redirect) {
+			if (redirect.target) i += 1;
+		} else if (NPM_VALUE_OPTIONS.has(word)) {
+			const value = words[(i += 1)];
+			if (word === '-C' || word === '--prefix') prefix = value;
+			if ((word === '-L' || word === '--location') && value === 'global') global = true;
+		} else if (word.startsWith('--prefix=')) prefix = word.slice('--prefix='.length);
+		else if (word === '-g' || word === '--global' || word === '--location=global') global = true;
+		else if (!word.startsWith('-')) operands.push(word);
+	}
+	const [subcommand, ...rest] = operands;
+	return { subcommand, operands: rest, prefix, global };
+}
+
+// The folder that holds .git at or above `folder`: the checkout's root, or null outside one.
+function checkoutRoot(folder: string): string | null {
+	for (let dir = folder; ; dir = dirname(dir)) {
+		if (existsSync(join(dir, '.git'))) return dir;
+		if (dirname(dir) === dir) return null;
+	}
+}
+
+// The folder a path operand of npm install names, or null when the operand names a
+// package or the text does not hold its value. npm reads a spec as a path when it starts
+// with `file:`, `.`, `/` or `~/`, and resolves it against the folder npm runs in.
+function installPath(script: Script, word: string, at: number, pwd: string): string | null {
+	const expanded = expand(script, word, at, pwd);
+	if (expanded === null) return null;
+	const file = expanded.match(/^file:(?:\/\/(?=\/))?(.*)$/s);
+	const spec = file ? file[1] : expanded;
+	if (!file && !/^(?:[./]|~\/)/.test(spec)) return null;
+	return resolve(pwd, spec.startsWith('~/') ? join(homedir(), spec.slice(2)) : spec);
+}
+
+function unreleasedPackage(command: string, cwd: string): string | null {
+	const text = withoutDataHeredocs(command);
+	if (!/(?:^|[^\w./-])npm\s/.test(text)) return null;
+	const script: Script = { text, cwd, groups: groups(text), open: openPositions(text, 'unquoted') };
+	for (const at of commandPositions(text, 'npm')) {
+		const words = wordsAt(text, at);
+		if (!words) continue;
+		const call = npmCall(words);
+		if (call.subcommand === undefined) continue;
+		if (NPM_LINK.has(call.subcommand) && call.operands.length > 0) return UNRELEASED;
+		if (!NPM_INSTALL.has(call.subcommand) || call.global) continue;
+		const pwd = folderAt(script, at);
+		if (pwd === null) continue;
+		const prefix = call.prefix === undefined ? pwd : expand(script, call.prefix, at, pwd);
+		if (prefix === null) continue;
+		const root = checkoutRoot(resolve(pwd, prefix));
+		if (root === null) continue;
+		for (const operand of call.operands) {
+			const path = installPath(script, operand, at, pwd);
+			if (path !== null && path !== root && !path.startsWith(`${root}/`)) return UNRELEASED;
+		}
 	}
 	return null;
 }
 
 // Monitor streams through grep by design, so the pipe checks are for Bash only.
 export function shellTrap({ command, tool, cwd }: ShellCommand): string | null {
-	const inEveryShell = [modifiedVariable, reservedAssignment, backtick, pipestatus, sedInPlace, bareQualifier, pgrepWatcher, killByPattern, zukhrufReleaseWait, nodeModulesSymlink];
+	const inEveryShell = [modifiedVariable, reservedAssignment, backtick, pipestatus, sedInPlace, bareQualifier, pgrepWatcher, killByPattern, zukhrufReleaseWait, nodeModulesSymlink, unreleasedPackage];
 	for (const check of inEveryShell) {
 		const reason = check(command, cwd);
 		if (reason) return reason;

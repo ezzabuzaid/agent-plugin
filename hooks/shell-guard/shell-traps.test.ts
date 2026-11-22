@@ -282,7 +282,7 @@ test('denies a symbolic link that ln makes in the node_modules of a checkout, in
   const command = 'ln -s ../../packages/pipes node_modules/@zukhruf/pipes';
   assert.equal(
     decide(command, { cwd }),
-    `Blocked: this ${BT}ln -s${BT} makes a link by hand in /Users/me/code/mutex/node_modules/@zukhruf; npm never records it and the next ${BT}npm install${BT} deletes it. Link through npm instead: ${BT}npm install${BT} at the repo root for this repo's own workspaces; ${BT}npm link <path>${BT}, ${BT}npm install <path>${BT} (a ${BT}file:${BT} dependency) or a root ${BT}overrides${BT} entry for another checkout's package; ${BT}npm rebuild <pkg>${BT} for a ${BT}.bin${BT} link. Links in a scratch folder are allowed. Command: ${command}`,
+    `Blocked: this ${BT}ln -s${BT} makes a link by hand in /Users/me/code/mutex/node_modules/@zukhruf; npm never records it and the next ${BT}npm install${BT} deletes it. Run ${BT}npm install${BT} at the repo root for this repo's own workspaces, and ${BT}npm rebuild <pkg>${BT} for a ${BT}.bin${BT} link. For another checkout's package, push the package (a push to its main releases it), then ${BT}npm install${BT} the published version (${BT}npm view <pkg> version${BT} shows when npm has it). Links in a scratch folder are allowed. Command: ${command}`,
   );
   const scoped = /makes a link by hand in \/Users\/me\/code\/mutex\/node_modules\/@z; /;
   const top = /makes a link by hand in \/Users\/me\/code\/mutex\/node_modules; /;
@@ -306,10 +306,14 @@ test('denies a symbolic link that ln makes in the node_modules of a checkout, in
 
 // A judge of 33 real refusals, 2026-11-16: about half linked the repo's own workspace
 // package, which a plain `npm install` at the repo root links.
-test('the refusal of a node_modules link names npm install at the repo root and the scratch exemption', () => {
+test('the refusal of a node_modules link names npm install at the repo root, the release route for another checkout and the scratch exemption', () => {
   const cwd = '/Users/me/code/mutex';
   const command = 'ln -s ../../packages/pipes node_modules/@zukhruf/pipes';
-  assertDenied(command, new RegExp(`${BT}npm install${BT} at the repo root for this repo's own workspaces;`), { cwd });
+  assertDenied(command, new RegExp(`${BT}npm install${BT} at the repo root for this repo's own workspaces,`), { cwd });
+  assertDenied(command, /For another checkout's package, push the package \(a push to its main releases it\)/, { cwd });
+  const decision = decide(command, { cwd });
+  assert.ok(decision);
+  assert.doesNotMatch(decision, /npm link|file:|overrides/);
   assertDenied(command, /Links in a scratch folder are allowed\./, { cwd });
 });
 
@@ -350,10 +354,77 @@ test('allows a link in the node_modules of a scratch folder', () => {
   assertAllowed('(cd /private/tmp/x && ln -s ../p node_modules/p)', { cwd });
 });
 
-test('allows the links npm makes, links outside node_modules, and text that only names ln', () => {
+// Ezz, 2026-11-22: agents stop consuming an unreleased package through npm link or a
+// path to another checkout; they push the package, and the push releases it.
+const UNRELEASED = `Blocked: this consumes an unreleased package from another checkout (${BT}npm link <pkg>${BT}, or ${BT}npm install${BT} of a path outside this repo). Instead, push the package (a push to its main releases it), then ${BT}npm install${BT} the published version (${BT}npm view <pkg> version${BT} shows when npm has it).`;
+
+test('denies npm link of a package or a path, in each form npm and the shell take', () => {
   const cwd = '/Users/me/code/mutex';
-  assertAllowed('npm link ../mutex/packages/launchd', { cwd });
-  assertAllowed('npm install ../x', { cwd });
+  assert.equal(decide('npm link @zukhruf/nx', { cwd }), `${UNRELEASED} Command: npm link @zukhruf/nx`);
+  const unreleased = new RegExp(RegExp.escape(UNRELEASED));
+  assertDenied('npm link ../mutex/packages/nx', unreleased, { cwd });
+  assertDenied('npm ln @zukhruf/nx', unreleased, { cwd });
+  assertDenied('npm link -w x @a/b', unreleased, { cwd });
+  assertDenied('npm link --workspace x @a/b', unreleased, { cwd });
+  assertDenied('npm link --workspace=x @a/b', unreleased, { cwd });
+  assertDenied('cd ~/x && npm link @a/b', unreleased, { cwd });
+  assertDenied('npm --prefix packages/x link @a/b', unreleased, { cwd });
+  assertDenied('npm -C packages/x link @a/b', unreleased, { cwd });
+  assertDenied('npm link --save @a/b @c/d', unreleased, { cwd });
+  assertDenied('sudo npm link @a/b', unreleased, { cwd });
+  assertDenied('npm link @a/b', unreleased, { cwd, tool: 'Monitor' });
+});
+
+test('allows a bare npm link, which registers the current package globally, and npm unlink', () => {
+  const cwd = '/Users/me/code/mutex';
+  assertAllowed('npm link', { cwd });
+  assertAllowed('npm link -w x', { cwd });
+  assertAllowed('npm link --workspace x', { cwd });
+  assertAllowed('cd ~/code/agent-backlog && npm link', { cwd });
+  assertAllowed('npm unlink @a/b', { cwd });
+  assertAllowed('npm unlink', { cwd });
+  assertAllowed('echo "npm link @a/b"', { cwd });
+  assertAllowed(`cat <<'EOF'\nnpm link @a/b\nEOF`, { cwd });
+});
+
+test('denies npm install of a path outside the repo the command runs in', () => {
+  using folder = new TemporaryFiles().directorySync('checkout-');
+  const cwd = folder.path;
+  mkdirSync(join(cwd, '.git'));
+  const unreleased = new RegExp(RegExp.escape(UNRELEASED));
+  assertDenied('npm i ../other/pkg', unreleased, { cwd });
+  assertDenied('npm install ../other/pkg', unreleased, { cwd });
+  assertDenied('npm add /Users/me/code/other', unreleased, { cwd });
+  assertDenied('npm i ~/code/other', unreleased, { cwd });
+  assertDenied('npm i file:../other', unreleased, { cwd });
+  assertDenied('npm i -D ../other', unreleased, { cwd });
+  assertDenied('npm i -w packages/a ../other', unreleased, { cwd });
+  assertDenied('npm i @zukhruf/nx ../other', unreleased, { cwd });
+  assertDenied('npm i ./packages/../../other', unreleased, { cwd });
+  assertDenied('cd packages/a && npm i ../../../other', unreleased, { cwd });
+  assertDenied('npm i ../../../../other', unreleased, { cwd: join(cwd, 'packages/a/src') });
+  assertDenied('npm --prefix packages/a i ../other', unreleased, { cwd });
+});
+
+test('allows npm install of a published version, a path inside the repo, a global install, and any path outside a repo', () => {
+  using folder = new TemporaryFiles().directorySync('checkout-');
+  const cwd = folder.path;
+  mkdirSync(join(cwd, '.git'));
+  assertAllowed('npm i @zukhruf/nx@0.8.67', { cwd });
+  assertAllowed('npm i ./packages/local-workspace', { cwd });
+  assertAllowed('npm i file:./packages/local-workspace', { cwd });
+  assertAllowed('npm i ../b', { cwd: join(cwd, 'packages/a') });
+  assertAllowed('cd packages/a && npm i ../b', { cwd });
+  assertAllowed('npm i -w ../other @zukhruf/nx', { cwd });
+  assertAllowed('npm i -g ../other', { cwd });
+  assertAllowed('npm i', { cwd });
+  assertAllowed('npm ci', { cwd });
+  using outside = new TemporaryFiles().directorySync('no-repo-');
+  assertAllowed('npm i ../other', { cwd: outside.path });
+});
+
+test('allows links outside node_modules, and text that only names ln', () => {
+  const cwd = '/Users/me/code/mutex';
   assertAllowed('ln -s ../a b', { cwd });
   assertAllowed('ln -s ../../node_modules/.bin/x bin/x', { cwd });
   assertAllowed('ln -s ../p node_modules/../p', { cwd });
