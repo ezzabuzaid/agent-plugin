@@ -23,7 +23,7 @@ Copy this checklist into your response and tick it off as you go:
 - [ ] 5 Scaffold: copied from the newest package of the same kind; lockfile and root reference in the same commit
 - [ ] 6 Build: write-test; every CI step green, the workspace-wide ones too
 - [ ] 7 Release: the repo's own flow; version proved on the registry
-- [ ] 8 Consumers: each copy deleted; ledger and backlog item closed, when they exist
+- [ ] 8 Consumers: the published version installed in each; each copy deleted; ledger and backlog item closed, when they exist
 ```
 
 Before you count places or plan a migration, drop the repos that the user has ruled out of rollouts (their memory names them), and say so in the plan.
@@ -97,7 +97,7 @@ Before the first code commit, ask the user whether the package is public or priv
 
 ## 7. Release it the way the repo releases
 
-In a shared checkout, a commit on main ships with the next push of any session. Thus the gate (step 6, and a consumer proved through a link) runs before the commit. Commit verified work without asking; push only when the user asks. Never write `type!:` or a `BREAKING CHANGE:` footer; describe a break in plain words.
+In a shared checkout, a commit on main ships with the next push of any session. Thus the gate (step 6) runs before the commit. Commit verified work without asking. Push when the repo's own `.claude/settings.json` allows `git push`; otherwise ask the user, because step 8 waits for that push. Never write `type!:` or a `BREAKING CHANGE:` footer; describe a break in plain words.
 
 Before a push, run `git fetch origin`, list `git log origin/main..HEAD` with the authors, and ask each session that owns a commit in that range before you push. Push the whole of main (`git push origin main`), never a chosen commit.
 
@@ -114,7 +114,7 @@ Prove the publish on the registry (`npm view <pkg> version --prefer-online`), no
 Load `coding:remove-code` when you plan the migration, before the first `mv`, `rm` or rewrite.
 
 1. **The package leads.** The "now" part of the map is built and proved by the package's own tests before any migration starts, so that each consumer moves once. File one migration backlog item for each consumer repo, with a map from old names to new names.
-2. **Migrate now, through a link.** Do not wait for the release. Install the unreleased package through npm (`npm link`, a `file:` dependency or an override; never a hand-made symlink), and set up the source condition as the repo's README says. Only the commit that pins `^<version>` and the lockfile waits for the release; remove the link before it.
+2. **Release, then install the published version.** Push the package as step 7 says (in a repo that releases on push, a push to main releases it). When `npm view <pkg> version --prefer-online` shows the version, run `npm install <pkg>@<version>` in each consumer, and commit the migration with that pin and the lockfile. Never consume an unreleased package from another checkout: no `npm link`, no symlink, no `npm install` of a path or a `file:` spec. Through a link, each side loads its own copy of a shared dependency, so the consumer's tests prove a tree that never ships. The package's own tests prove it before the push, and the consumer's tests prove the consumer after the install. A red consumer is fixed forward with the next push of the package.
 3. **Test the copy before the swap.** Write a black-box test of the copy with golden values. It passes on the old code and passes unchanged after the swap. Where the swap fixes an old quirk on purpose, change that golden value in the swap commit and name the change to the user. Behavior that the copy cannot show without a test seam (it reads the time itself) is named as untested on the old side; the package's own tests cover it.
 4. **One slice at a time** (Strangler Fig): extractions and design fixes first, the swap last. Keep the best behavior, not the old quirks.
 5. **Delete the copies.** Leave no re-export at the old path. Close the copy ledger and its backlog item, when they exist.
@@ -127,4 +127,4 @@ Load `coding:remove-code` when you plan the migration, before the first `mv`, `r
 - `nx sync` with a stale project graph deletes valid tsconfig references. Run `NX_DAEMON=false npx nx reset` first, and diff the tsconfig files after.
 - A TS2307 under nx typecheck for a workspace package that exists and is linked comes from a stale `.tsbuildinfo`. Run `nx reset`; do not add paths or references.
 - Each esbuild `additionalEntryPoints` entry is its own bundle, so a class that two subpaths share gets two identities and `instanceof` fails.
-- Under `npm link`, the library loads shared dependencies (React, pg) from its own path. Fix the resolution in the consumer, not in the library.
+- A consumer that loads a shared dependency (React, pg, `ai`) twice gets two identities, and `instanceof` fails. Fix the resolution in the consumer, not in the library.
