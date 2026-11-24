@@ -97,7 +97,7 @@ export default {
     'zlib:zipFile.entries',
     'zlib:zlib.zipFiles',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'adm-zip@0.6.1': {
       getEntries: {

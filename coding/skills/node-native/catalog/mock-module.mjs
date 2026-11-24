@@ -39,7 +39,7 @@ const proxyquireIn = (dir, url) => createRequire(join(dir, 'lib.cjs'))(fileURLTo
 
 export default {
   apis: ['test:mock.module', 'test:MockModuleContext'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   flags: ['--experimental-test-module-mocks'],
   replaces: {
     'esmock@3.0.0': {

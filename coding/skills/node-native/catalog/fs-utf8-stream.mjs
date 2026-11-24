@@ -24,7 +24,7 @@ const native = (options) => new Utf8Stream(options);
 
 export default {
   apis: ['fs:fs.Utf8Stream', 'fs:new fs.Utf8Stream', 'fs:utf8Stream.write', 'fs:utf8Stream.end'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'sonic-boom@5.0.2': {
       default: {

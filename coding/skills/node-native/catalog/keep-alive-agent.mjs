@@ -30,7 +30,7 @@ const idleAfter = (agent, ms) =>
 
 export default {
   apis: ['http:http.Agent', 'http:new Agent', 'http:agent.destroy'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'agentkeepalive@4.6.0': {
       HttpAgent: {

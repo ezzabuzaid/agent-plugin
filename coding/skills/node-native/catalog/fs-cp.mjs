@@ -61,7 +61,7 @@ const ncpAsync = (ncp, options = {}) => (src, dest) =>
 
 export default {
   apis: ['fs:fsPromises.cp', 'fs:fs.cp', 'fs:fs.cpSync'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'fs-extra@11.4.1': {
       copy: {

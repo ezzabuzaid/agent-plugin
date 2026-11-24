@@ -40,7 +40,7 @@ const editedNative = () => {
 
 export default {
   apis: ['url:URL', 'url:new URL', 'url:URL.canParse', 'url:URL.parse', 'globals:URL', 'js:URL', 'js:URL.canParse', 'js:URL.parse'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'whatwg-url@17.3.0': {
       URL: {

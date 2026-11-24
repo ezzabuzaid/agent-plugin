@@ -7,7 +7,7 @@ import { outcome } from './support/outcome.mjs';
 const described = (error) => `${error.name}: ${error.message}`;
 export default {
   apis: ['vm:vm.runInNewContext'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'vm2@3.12.2': {
       VM: {

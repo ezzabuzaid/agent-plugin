@@ -35,7 +35,7 @@ const nativeSync = (path, options) => mkdirSync(path, { recursive: true, ...opti
 
 export default {
   apis: ['fs:fsPromises.mkdir', 'fs:fs.mkdir', 'fs:fs.mkdirSync'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'mkdirp@3.0.1': {
       mkdirp: {

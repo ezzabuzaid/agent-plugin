@@ -20,7 +20,7 @@ const letters = async function* () {
 
 export default {
   apis: ['stream:stream.Readable.from'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'into-stream@9.1.0': {
       default: {

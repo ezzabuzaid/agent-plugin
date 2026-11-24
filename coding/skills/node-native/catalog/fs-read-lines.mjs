@@ -25,7 +25,7 @@ const nReadlines = (LineByLine, path) => {
 
 export default {
   apis: ['fs:filehandle.readLines', 'fs:fsPromises.open'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'n-readlines@3.4.1': {
       default: {

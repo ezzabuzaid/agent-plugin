@@ -56,7 +56,7 @@ const passes = (condition) => {
 
 export default {
   apis: ['test:context.waitFor'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'wait-for-expect@4.0.0': {
       default: {

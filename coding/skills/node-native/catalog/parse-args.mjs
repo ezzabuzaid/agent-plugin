@@ -53,7 +53,7 @@ const rejects = (run) => {
 
 export default {
   apis: ['util:util.parseArgs'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'minimist@1.2.8': {
       default: {

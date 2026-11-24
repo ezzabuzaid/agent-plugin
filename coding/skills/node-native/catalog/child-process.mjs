@@ -49,7 +49,7 @@ export default {
     'child_process:child_process.spawnSync',
     'readline:readline.createInterface',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'execa@10.2.1': {
       execa: {

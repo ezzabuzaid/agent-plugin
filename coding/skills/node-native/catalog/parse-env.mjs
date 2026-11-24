@@ -24,7 +24,7 @@ const content = [
 
 export default {
   apis: ['util:util.parseEnv'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'dotenv@18.0.9': {
       parse: {

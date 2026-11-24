@@ -37,7 +37,7 @@ const typesOf = (names) => held.filter((type) => names.some((name) => name.toUpp
 
 export default {
   apis: ['process:process.getActiveResourcesInfo'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'why-is-node-running@3.2.3': {
       default: {

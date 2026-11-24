@@ -21,7 +21,7 @@ const report = async (handle) => {
 
 export default {
   apis: ['util:util.markPromiseAsHandled'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   idioms: {
     emptyCatch: {
       seed: '(?<=(?:^|[\\n;{)])[ \\t]*)(?:void\\s+)?(?:[\\w$#][\\w$.#?]*(?:\\((?:[^()]|\\([^()]*\\))*\\))?|\\}\\)\\(\\))\\.catch\\(\\s*\\(\\s*\\)\\s*=>\\s*(?:\\{\\s*\\}|undefined|null|void 0)\\s*\\)(?=[ \\t]*(?:;|\\n|$))',

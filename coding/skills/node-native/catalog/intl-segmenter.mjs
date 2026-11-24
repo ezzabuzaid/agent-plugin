@@ -9,7 +9,7 @@ const newerEmoji = ['🧑🏽‍🦰'];
 
 export default {
   apis: ['js:Intl.Segmenter', 'js:Intl.Segmenter.prototype.segment'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'graphemer@1.4.0': {
       splitGraphemes: {

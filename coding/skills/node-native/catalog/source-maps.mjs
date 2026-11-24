@@ -39,7 +39,7 @@ const packageFrame = ({ default: support }) => {
 
 export default {
   apis: ['cli:--enable-source-maps'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'source-map-support@0.5.21': {
       install: {

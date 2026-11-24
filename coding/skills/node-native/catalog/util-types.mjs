@@ -90,7 +90,7 @@ export default {
     'util:util.types.isBoxedPrimitive',
     'util:util.types.isPromise',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'is-regex@1.2.1': single('isRegExp'),
     'is-date-object@1.1.0': single('isDate'),

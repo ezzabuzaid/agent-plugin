@@ -53,7 +53,7 @@ async function listenOn(port) {
 
 export default {
   apis: ['net:net.createServer', 'net:server.listen', 'net:server.address'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'get-port@7.2.0': {
       default: {

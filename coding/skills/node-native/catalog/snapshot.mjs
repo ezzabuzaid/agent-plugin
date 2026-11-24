@@ -45,7 +45,7 @@ const jestLifecycle = (SnapshotState, first, changed) =>
 
 export default {
   apis: ['test:context.assert.snapshot', 'cli:--test-update-snapshots'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'jest-snapshot@30.5.2': {
       SnapshotState: {

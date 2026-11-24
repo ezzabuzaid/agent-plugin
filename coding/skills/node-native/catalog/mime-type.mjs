@@ -22,7 +22,7 @@ const view = (mime) => [mime.essence, mime.type, mime.subtype, Object.fromEntrie
 
 export default {
   apis: ['util:util.MIMEType', 'util:MIMEType.parse', 'util:util.MIMEParams'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'whatwg-mimetype@5.0.0': {
       MIMEType: {

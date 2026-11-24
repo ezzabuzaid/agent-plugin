@@ -38,7 +38,7 @@ const failedSide = (join) => {
 
 export default {
   apis: ['stream:stream.Duplex.from', 'stream:stream.duplexPair'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'duplexify@4.1.3': {
       default: {

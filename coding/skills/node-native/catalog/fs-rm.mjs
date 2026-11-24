@@ -36,7 +36,7 @@ const logs = (remove) =>
 
 export default {
   apis: ['fs:fsPromises.rm', 'fs:fs.rm', 'fs:fs.rmSync'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'rimraf@6.1.4': {
       rimraf: {

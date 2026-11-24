@@ -60,7 +60,7 @@ https.get('https://127.0.0.1:${server.address().port}/', async (response) => {
 
 export default {
   apis: ['tls:tls.setDefaultCACertificates', 'tls:tls.getCACertificates', 'cli:NODE_EXTRA_CA_CERTS'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'syswide-cas@5.3.0': {
       addCAs: {

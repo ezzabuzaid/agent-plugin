@@ -21,7 +21,7 @@ const moves = (move, target) =>
 
 export default {
   apis: ['fs:fsPromises.rename', 'fs:fs.rename', 'fs:fs.renameSync'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'fs-extra@11.4.1': {
       move: {

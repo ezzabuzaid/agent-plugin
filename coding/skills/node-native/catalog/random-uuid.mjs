@@ -11,7 +11,7 @@ const many = (generate) => Array.from({ length: 2000 }, () => generate());
 
 export default {
   apis: ['crypto:crypto.randomUUID', 'crypto:crypto.randomUUIDv7', 'webcrypto:crypto.randomUUID'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'uuid@14.0.3': {
       v4: {

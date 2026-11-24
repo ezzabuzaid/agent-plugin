@@ -8,7 +8,7 @@ const parts = (input) => {
 
 export default {
   apis: ['net:SocketAddress.parse', 'net:net.SocketAddress'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   idioms: {
     splitHostPort: {
       seed: String.raw`\[\s*(?:host|hostname|address|ip)\s*,\s*port\s*\]\s*=\s*[\w.]+\.split\(\s*['"]:['"]`,

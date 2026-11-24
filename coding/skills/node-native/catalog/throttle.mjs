@@ -39,7 +39,7 @@ const lodashRows = (lodash) => ({
 
 export default {
   apis: ['util:util.throttle'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'p-throttle@8.1.1': {
       default: {

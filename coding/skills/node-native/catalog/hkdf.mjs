@@ -10,7 +10,7 @@ const nativeHex = (digest, length) => hex(hkdfSync(digest, IKM(), SALT, INFO, le
 
 export default {
   apis: ['crypto:crypto.hkdf', 'crypto:crypto.hkdfSync', 'webcrypto:subtle.deriveBits'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'futoin-hkdf@1.5.3': {
       default: {

@@ -8,7 +8,7 @@ const VALUE = () => ({ id: 12345678901234567890n, count: 42, label: 'x', list: [
 
 export default {
   apis: ['js:JSON.parse', 'js:JSON.stringify', 'js:JSON.rawJSON'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'json-bigint@1.0.0': {
       // json-bigint builds null-prototype objects; structuredClone makes them

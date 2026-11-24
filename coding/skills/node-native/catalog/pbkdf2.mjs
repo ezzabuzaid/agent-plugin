@@ -13,7 +13,7 @@ const subtleHex = async (hash, bits) => {
 
 export default {
   apis: ['crypto:crypto.pbkdf2', 'crypto:crypto.pbkdf2Sync', 'webcrypto:subtle.deriveBits'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'pbkdf2@3.1.7': {
       pbkdf2Sync: {

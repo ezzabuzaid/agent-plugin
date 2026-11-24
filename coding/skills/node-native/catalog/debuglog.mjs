@@ -33,7 +33,7 @@ function logger(createDebug, namespaces, name = 'probe', { colors = false, date 
 
 export default {
   apis: ['util:util.debuglog', 'cli:NODE_DEBUG'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   env: { NODE_DEBUG: enabled },
   replaces: {
     'debug@4.4.3': {

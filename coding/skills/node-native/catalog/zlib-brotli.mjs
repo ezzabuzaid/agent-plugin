@@ -9,7 +9,7 @@ const textMode = { params: { [constants.BROTLI_PARAM_MODE]: constants.BROTLI_MOD
 
 export default {
   apis: ['zlib:zlib.brotliCompressSync', 'zlib:zlib.brotliDecompressSync', 'zlib:zlib.constants'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     // brotli is the reference encoder compiled to JavaScript: at the same
     // quality it writes the bytes zlib's Brotli writes.

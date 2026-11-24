@@ -14,7 +14,7 @@ const calls = (promisified) => Promise.all([settled(() => promisified(1, 2), mes
 
 export default {
   apis: ['util:util.promisify'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'pify@6.1.0': {
       default: {

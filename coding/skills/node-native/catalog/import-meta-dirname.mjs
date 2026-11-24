@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 export default {
   apis: ['js:import.meta.dirname', 'js:import.meta.filename'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'dirname-filename-esm@1.1.2': {
       dirname: {

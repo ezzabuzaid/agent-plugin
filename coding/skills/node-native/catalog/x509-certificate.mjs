@@ -41,7 +41,7 @@ export default {
     'crypto:x509.checkHost',
     'crypto:keyObject.export',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'node-forge@1.4.3': {
       'pki: subject': {

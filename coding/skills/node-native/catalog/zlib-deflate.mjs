@@ -55,7 +55,7 @@ export default {
     'zlib:zlib.createDeflate',
     'zlib:zlib.createInflate',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     // pako is a port of zlib: at the same options it writes the same bytes.
     'pako@3.0.3': {

@@ -10,7 +10,7 @@ const measuresSleep = async (start, elapsedNs) => {
 
 export default {
   apis: ['process:process.hrtime.bigint'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     // On Node the package exports process.hrtime, the legacy [seconds, nanoseconds] form.
     'browser-process-hrtime@1.0.0': {

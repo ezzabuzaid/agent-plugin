@@ -15,7 +15,7 @@ const unknown = (lookup) => outcome(() => lookup(999));
 
 export default {
   apis: ['node:http.STATUS_CODES', 'node:http.METHODS'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'statuses@2.0.2': {
       message: {

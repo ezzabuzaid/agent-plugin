@@ -185,7 +185,7 @@ export default {
     'http:server.closeAllConnections',
     'http:server[Symbol.asyncDispose]',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'stoppable@1.1.0': {
       default: {

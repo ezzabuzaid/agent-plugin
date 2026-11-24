@@ -64,7 +64,7 @@ const own = async (make) => {
 
 export default {
   apis: ['globals:BroadcastChannel', 'js:BroadcastChannel'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'broadcast-channel@7.4.0': {
       BroadcastChannel: {

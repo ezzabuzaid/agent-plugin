@@ -29,7 +29,7 @@ const into = (TextEncoder) => {
 
 export default {
   apis: ['globals:TextEncoder', 'globals:TextDecoder', 'js:TextEncoder.prototype.encodeInto'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'text-encoding@0.7.0': {
       TextEncoder: {

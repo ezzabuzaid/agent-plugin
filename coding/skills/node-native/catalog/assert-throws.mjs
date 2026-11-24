@@ -66,7 +66,7 @@ const failed = async (assertion) => {
 
 export default {
   apis: ['assert:assert.throws', 'assert:assert.rejects', 'assert:assert.doesNotThrow', 'assert:assert.doesNotReject'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'chai@6.3.0': {
       assert: {

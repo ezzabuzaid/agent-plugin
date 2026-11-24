@@ -42,7 +42,7 @@ const specifiers = {
 
 export default {
   apis: ['esm:import.meta.resolve'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'import-meta-resolve@4.2.0': {
       resolve: {

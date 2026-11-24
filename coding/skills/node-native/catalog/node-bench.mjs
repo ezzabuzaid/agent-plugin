@@ -65,7 +65,7 @@ export default {
     'bench:context.record',
     'cli:--experimental-bench',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   flags: ['--experimental-bench'],
   replaces: {
     'tinybench@6.2.3': {

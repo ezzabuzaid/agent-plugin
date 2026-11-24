@@ -89,7 +89,7 @@ export default {
     'cli:--test-coverage-lines',
     'test:run',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'c8@12.0.0': {
       Report: {

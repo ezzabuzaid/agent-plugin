@@ -16,7 +16,7 @@ const named = async (blob) => [blob.constructor.name, blob.name, typeof blob.las
 
 export default {
   apis: ['fs:fs.openAsBlob', 'fs:fs.openAsBlobSync'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'fetch-blob@4.0.0/from.js': {
       blobFrom: {

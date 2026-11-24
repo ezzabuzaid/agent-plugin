@@ -39,7 +39,7 @@ export default {
     'inspector:session.post',
     'inspector:session.disconnect',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'inspector-api@1.5.0': {
       'default: CPU profile': {

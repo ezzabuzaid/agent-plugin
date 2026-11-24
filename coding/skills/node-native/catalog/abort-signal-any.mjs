@@ -24,7 +24,7 @@ const forwardedOnce = (signals) => {
 
 export default {
   apis: ['globals:AbortSignal.any', 'js:AbortSignal.any'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'any-signal@4.2.0': {
       anySignal: {

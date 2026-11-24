@@ -7,7 +7,7 @@ const urls = ['file:///tmp/a%20b', 'file://localhost/tmp/x', 'file:///tmp/%C3%BC
 
 export default {
   apis: ['url:url.pathToFileURL', 'url:url.fileURLToPath'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'file-url@4.0.0': {
       default: {

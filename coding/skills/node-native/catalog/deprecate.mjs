@@ -20,7 +20,7 @@ const observe = async (event, wrap) => {
 
 export default {
   apis: ['util:util.deprecate'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'depd@2.0.0': {
       'default: function': {

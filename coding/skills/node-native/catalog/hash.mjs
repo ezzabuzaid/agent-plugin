@@ -56,7 +56,7 @@ const oneShot = (table, digest) =>
 
 export default {
   apis: ['crypto:crypto.hash', 'crypto:crypto.createHash', 'crypto:hash.update', 'crypto:hash.digest', 'webcrypto:subtle.digest'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'md5@2.3.0': {
       default: {

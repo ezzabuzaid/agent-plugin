@@ -34,7 +34,7 @@ const bounded = (wait) => Promise.race([wait, new Promise((resolve) => setTimeou
 
 export default {
   apis: ['stream:stream.finished'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'end-of-stream@1.4.5': {
       default: {

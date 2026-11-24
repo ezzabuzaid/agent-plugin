@@ -28,7 +28,7 @@ async function clockJumpsBack(run) {
 
 export default {
   apis: ['perf_hooks:performance.now', 'perf_hooks:performance.mark', 'perf_hooks:performance.measure'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     // On a runtime with a global performance, the package returns performance.now().
     'performance-now@2.1.0': {

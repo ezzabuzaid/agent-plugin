@@ -27,7 +27,7 @@ export default {
     'webstreams:streamConsumers.blob',
     'stream:readable.toArray',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'get-stream@9.0.1': {
       default: {

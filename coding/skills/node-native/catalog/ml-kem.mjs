@@ -19,7 +19,7 @@ export default {
     'crypto:crypto.encapsulate',
     'crypto:crypto.decapsulate',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     '@noble/post-quantum@0.7.1/ml-kem.js': {
       ...Object.fromEntries(

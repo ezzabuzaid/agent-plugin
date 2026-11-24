@@ -9,7 +9,7 @@ const checks = (check) => [all(check), all(check.posix), all(check.win32)];
 
 export default {
   apis: ['path:path.isAbsolute'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'is-absolute@1.0.0': {
       default: {

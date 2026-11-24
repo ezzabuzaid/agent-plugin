@@ -27,7 +27,7 @@ const withInherits = (inherits) => {
 
 export default {
   apis: ['js:syntax:class-extends'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'inherits@2.0.4': {
       default: {

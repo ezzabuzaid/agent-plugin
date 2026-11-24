@@ -99,7 +99,7 @@ const polyfillRows = {
 
 export default {
   apis: ['js:Temporal', 'js:Temporal.Now', 'js:Date.prototype.toTemporalInstant', 'js:Intl.DurationFormat'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'temporal-polyfill@1.0.8': polyfillRows,
     '@js-temporal/polyfill@0.5.1': polyfillRows,

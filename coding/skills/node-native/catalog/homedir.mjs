@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 
 export default {
   apis: ['os:os.homedir'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'os-homedir@2.0.0': {
       default: {

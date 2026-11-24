@@ -8,7 +8,7 @@ const all = (convert, list = inputs) => list.map((input) => convert(input));
 
 export default {
   apis: ['path:path.normalize', 'path:path.join'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'upath@3.0.8': {
       normalize: {

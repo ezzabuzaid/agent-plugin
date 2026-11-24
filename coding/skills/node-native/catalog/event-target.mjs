@@ -22,7 +22,7 @@ const dispatched = (EventTarget, Event, CustomEvent) => {
 
 export default {
   apis: ['globals:EventTarget', 'globals:Event', 'globals:CustomEvent', 'js:EventTarget', 'js:CustomEvent'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'event-target-shim@6.0.2': {
       EventTarget: {

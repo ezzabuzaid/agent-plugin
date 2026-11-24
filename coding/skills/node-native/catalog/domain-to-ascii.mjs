@@ -5,7 +5,7 @@ const domains = ['mañana.com', 'xn--maana-pta.com', '☃.net', 'a..b'];
 
 export default {
   apis: ['url:url.domainToASCII', 'url:url.domainToUnicode'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'punycode@2.3.1/punycode.js': {
       toASCII: {

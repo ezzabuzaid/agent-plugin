@@ -37,7 +37,7 @@ const rejected = async (call) => (await slow(call))[0] !== 'resolved';
 
 export default {
   apis: ['globals:AbortSignal.timeout', 'js:AbortSignal.timeout'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'timeout-signal@2.0.0': {
       default: {

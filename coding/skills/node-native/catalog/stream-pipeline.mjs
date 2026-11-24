@@ -52,7 +52,7 @@ const failingTransform = () => new Transform({ transform: (chunk, encoding, done
 
 export default {
   apis: ['stream:stream.pipeline', 'stream:stream.compose'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'pump@3.0.4': {
       default: {

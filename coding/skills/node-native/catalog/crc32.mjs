@@ -8,7 +8,7 @@ const unsigned = (value) => value >>> 0;
 
 export default {
   apis: ['zlib:zlib.crc32'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'crc-32@1.2.2': {
       buf: {

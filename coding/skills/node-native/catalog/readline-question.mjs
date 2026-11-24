@@ -22,7 +22,7 @@ const prompt = (input, text, options = {}) =>
 
 export default {
   apis: ['readline:readlinePromises.createInterface', 'readline:rl.question'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     '@inquirer/input@5.1.9': {
       default: {

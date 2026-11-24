@@ -44,7 +44,7 @@ const authorized = { headers: { authorization: 'Bearer t' } };
 
 export default {
   apis: ['globals:EventSource'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   flags: ['--experimental-eventsource'],
   replaces: {
     'eventsource@5.1.4': {

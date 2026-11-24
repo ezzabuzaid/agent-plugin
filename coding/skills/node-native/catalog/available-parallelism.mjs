@@ -3,7 +3,7 @@ import { availableParallelism, cpus } from 'node:os';
 
 export default {
   apis: ['os:os.availableParallelism'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'num-cpus@1.1.0': {
       default: {

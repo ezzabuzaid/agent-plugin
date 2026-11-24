@@ -27,7 +27,7 @@ export default {
     'crypto:mac.final',
     'webcrypto:subtle.sign',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'create-hmac@1.1.7': {
       default: {

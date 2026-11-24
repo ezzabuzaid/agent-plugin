@@ -39,7 +39,7 @@ export default {
     'globals:URLSearchParams',
     'js:URLSearchParams',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'qs@6.17.1': {
       parse: {

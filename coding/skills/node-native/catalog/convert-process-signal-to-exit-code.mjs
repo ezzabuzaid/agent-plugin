@@ -6,7 +6,7 @@ const names = ['SIGHUP', 'SIGINT', 'SIGKILL', 'SIGTERM', 'SIGUSR1'];
 
 export default {
   apis: ['util:util.convertProcessSignalToExitCode'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   idioms: {
     plus128: {
       seed: '128\\s*\\+\\s*(os\\.)?constants\\.signals|constants\\.signals\\[[^\\]]+\\]\\s*\\+\\s*128',

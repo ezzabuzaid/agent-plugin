@@ -13,7 +13,7 @@ const method = {
 
 export default {
   apis: ['util:util.getCallSites'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'callsites@4.2.0': {
       default: {

@@ -109,7 +109,7 @@ const refusal = (socket) =>
 
 export default {
   apis: ['globals:WebSocket', 'globals:CloseEvent', 'js:WebSocket'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'ws@8.22.1': {
       WebSocket: {

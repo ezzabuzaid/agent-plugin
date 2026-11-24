@@ -8,7 +8,7 @@ const size = ({ blocks, bsize }) => blocks * bsize;
 
 export default {
   apis: ['fs:fsPromises.statfs', 'fs:fs.statfs', 'fs:fs.statfsSync'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'check-disk-space@4.0.0': {
       checkDiskSpace: {

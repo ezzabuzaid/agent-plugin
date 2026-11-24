@@ -16,7 +16,7 @@ const sgrOnly = [escaped.sgr, escaped.truecolor, escaped.cursor, escaped.c1, esc
 
 export default {
   apis: ['util:util.stripVTControlCharacters'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'strip-ansi@7.2.0': {
       default: {

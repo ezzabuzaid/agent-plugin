@@ -20,7 +20,7 @@ export default {
     'js:Uint8Array.fromHex',
     'js:Uint8Array.prototype.toHex',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'base64-js@1.5.1': {
       fromByteArray: {

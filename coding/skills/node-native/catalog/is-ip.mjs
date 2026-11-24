@@ -16,7 +16,7 @@ const isIPv4Strict = (sample) => isIPv4(sample);
 
 export default {
   apis: ['net:net.isIP', 'net:net.isIPv4', 'net:net.isIPv6'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'is-ip@5.0.1': {
       isIP: {

@@ -30,7 +30,7 @@ const lodashRows = (lodash) => ({
 
 export default {
   apis: ['js:Object.groupBy', 'js:Map.groupBy'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'lodash@4.18.1': lodashRows(({ default: _ }) => _),
     'lodash-es@4.18.1': lodashRows((lodashEs) => lodashEs),

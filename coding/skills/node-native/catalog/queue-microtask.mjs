@@ -33,7 +33,7 @@ const thrown = (queue) =>
 
 export default {
   apis: ['globals:queueMicrotask', 'js:queueMicrotask'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'queue-microtask@1.2.3': {
       default: {

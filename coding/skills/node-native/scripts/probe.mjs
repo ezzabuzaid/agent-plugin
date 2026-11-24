@@ -58,7 +58,12 @@
 //     scratch directory (removed afterwards) and runs their rows. Packages keep
 //     their real names, so a plugin finds its peer (eslint-plugin-unicorn needs
 //     `eslint`); the catalog therefore probes one version of each package, and
-//     two versions of one package is refused. With `--entry`, only the selected
+//     two versions of one package is refused. The install runs with
+//     --legacy-peer-deps, whatever the user's npm config says: the catalog pins
+//     every peer itself, and two pins can want different versions of one
+//     optional peer (eslint-plugin-n@18.5.0 depends on eslint-plugin-es-x ^7.8,
+//     @zukhruf/eslint@0.8.12 has it as an optional peer ^9.7 || ^10), which
+//     npm's peer check refuses as ERESOLVE. With `--entry`, only the selected
 //     entry files are read.
 //   node scripts/probe.mjs --site <probe.mjs> --from <workspace>
 //     Runs one probe module of the same shape, whose `replaces` keys are bare
@@ -250,7 +255,16 @@ async function install(directory, specs) {
   try {
     await promisify(execFile)(
       'npm',
-      ['install', '--no-save', '--no-package-lock', '--ignore-scripts', '--no-audit', '--no-fund', ...specs],
+      [
+        'install',
+        '--no-save',
+        '--no-package-lock',
+        '--ignore-scripts',
+        '--no-audit',
+        '--no-fund',
+        '--legacy-peer-deps',
+        ...specs,
+      ],
       { cwd: directory },
     );
   } catch (error) {

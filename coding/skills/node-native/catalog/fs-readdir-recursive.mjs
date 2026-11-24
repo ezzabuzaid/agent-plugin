@@ -46,7 +46,7 @@ const walked = (walk, { link = false } = {}) => {
 
 export default {
   apis: ['fs:fsPromises.readdir', 'fs:fs.readdir', 'fs:fs.readdirSync', 'fs:fsPromises.opendir'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'readdirp@5.1.1': {
       readdirpPromise: {

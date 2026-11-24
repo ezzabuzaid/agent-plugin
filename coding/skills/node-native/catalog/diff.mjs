@@ -37,7 +37,7 @@ const jsdiffChunks = (changes) => changes.map((change) => [jsdiffOp(change), cha
 
 export default {
   apis: ['util:util.diff'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'fast-diff@1.3.0': {
       default: {

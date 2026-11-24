@@ -7,7 +7,7 @@ async function* numbers() {
 
 export default {
   apis: ['js:Array.fromAsync'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'it-all@3.0.11': {
       default: {

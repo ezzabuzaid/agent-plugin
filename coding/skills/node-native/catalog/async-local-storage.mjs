@@ -102,7 +102,7 @@ export default {
     'async_context:AsyncLocalStorage.snapshot',
     'async_context:AsyncResource.bind',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'cls-hooked@4.2.2': {
       ...propagation('probe-cls-hooked'),

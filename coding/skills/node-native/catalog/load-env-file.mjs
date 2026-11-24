@@ -34,7 +34,7 @@ const print = "process.stdout.write(String(process.env.PROBE_ENV_A) + ' ' + Stri
 
 export default {
   apis: ['process:process.loadEnvFile', 'cli:--env-file', 'cli:--env-file-if-exists'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'dotenv@18.0.9': {
       config: {

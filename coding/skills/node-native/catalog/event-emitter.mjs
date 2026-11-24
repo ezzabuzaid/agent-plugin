@@ -43,7 +43,7 @@ const mittScript = (bus) => {
 
 export default {
   apis: ['events:EventEmitter'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'eventemitter3@5.0.4': {
       default: {

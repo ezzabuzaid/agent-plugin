@@ -21,7 +21,7 @@ const cyclic = () => {
 
 export default {
   apis: ['v8:v8.serialize', 'v8:v8.deserialize'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'superjson@2.2.6': {
       parse: {

@@ -9,7 +9,7 @@ const copied = (change) => {
 
 export default {
   apis: ['js:Array.prototype.toSorted', 'js:Array.prototype.toReversed', 'js:Array.prototype.toSpliced', 'js:Array.prototype.with'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   idioms: {
     spreadSort: {
       seed: '\\[\\.\\.\\.(?:[\\w$]+|\\([^()]*\\))(?:\\??\\.#?[\\w$]+|\\[[^\\[\\]]*\\])*\\]\\.sort\\(',

@@ -46,7 +46,7 @@ export default {
     'webcrypto:subtle.encrypt',
     'webcrypto:subtle.decrypt',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'crypto-js@4.2.0': {
       'AES: encrypt': {

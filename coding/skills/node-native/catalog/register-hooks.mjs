@@ -36,7 +36,7 @@ const nativeHook = (wanted) => () => {
 
 export default {
   apis: ['module:module.registerHooks'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'pirates@4.0.7': {
       addHook: {

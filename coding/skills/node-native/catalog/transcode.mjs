@@ -24,7 +24,7 @@ const TEXT = 'hé€';
 
 export default {
   apis: ['globals:TextDecoder', 'buffer:buffer.transcode', 'buffer:Buffer.from', 'buffer:buf.toString'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'iconv-lite@0.7.3': {
       decode: {

@@ -26,7 +26,7 @@ const subtleSign = async () => {
 
 export default {
   apis: ['crypto:crypto.sign', 'crypto:crypto.verify', 'crypto:crypto.createPrivateKey', 'crypto:crypto.createPublicKey', 'crypto:keyObject.toCryptoKey', 'webcrypto:subtle.sign', 'webcrypto:subtle.verify'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'tweetnacl@1.0.3': {
       'sign: keyPair.fromSeed': {

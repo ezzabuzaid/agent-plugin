@@ -83,7 +83,7 @@ const lodashLike = (name, compare) => ({
 
 export default {
   apis: ['util:util.isDeepStrictEqual'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'fast-deep-equal@3.1.3': family(
       { name: 'default', compare: ({ default: equal }, a, b) => equal(a, b) },

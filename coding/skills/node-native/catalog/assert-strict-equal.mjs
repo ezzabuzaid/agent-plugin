@@ -22,7 +22,7 @@ const objectIsText = {
 
 export default {
   apis: ['assert:assert.strictEqual', 'assert:assert.notStrictEqual', 'assert:assert.ok', 'assert:assert.fail'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'chai@6.3.0': {
       assert: {

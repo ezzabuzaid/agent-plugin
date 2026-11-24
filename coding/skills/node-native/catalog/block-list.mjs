@@ -27,7 +27,7 @@ export default {
     'net:blockList.addAddress',
     'net:blockList.check',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'ip@2.0.1': {
       cidrSubnet: {

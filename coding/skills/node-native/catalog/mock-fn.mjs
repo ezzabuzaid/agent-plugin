@@ -88,7 +88,7 @@ export default {
     'test:context.assert.lastCalledWith',
     'test:context.assert.nthCalledWith',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'sinon@22.1.0': {
       spy: {

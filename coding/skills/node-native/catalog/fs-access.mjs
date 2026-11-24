@@ -27,7 +27,7 @@ const accessibleSync = (path) => {
 
 export default {
   apis: ['fs:fsPromises.access', 'fs:fs.accessSync', 'fs:fs.existsSync'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'path-exists@5.0.0': {
       pathExists: {

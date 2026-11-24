@@ -26,7 +26,7 @@ const perVariant = (row) => Object.fromEntries(VARIANTS.map((algorithm) => [algo
 
 export default {
   apis: ['crypto:crypto.argon2', 'crypto:crypto.argon2Sync', 'webcrypto:subtle.deriveBits'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'argon2@0.45.2': {
       hash: {

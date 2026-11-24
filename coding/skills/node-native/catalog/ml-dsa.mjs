@@ -20,7 +20,7 @@ export default {
     'crypto:crypto.sign',
     'crypto:crypto.verify',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     '@noble/post-quantum@0.7.1/ml-dsa.js': {
       ...Object.fromEntries(

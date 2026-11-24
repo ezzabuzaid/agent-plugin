@@ -17,7 +17,7 @@ const ALPHANUMERIC = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012345
 
 export default {
   apis: ['crypto:crypto.randomBytes', 'crypto:crypto.randomFillSync', 'crypto:crypto.randomInt', 'webcrypto:crypto.getRandomValues'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'randombytes@2.1.0': {
       default: {

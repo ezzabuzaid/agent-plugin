@@ -15,7 +15,7 @@ function withTmpdir(value, read) {
 
 export default {
   apis: ['os:os.tmpdir'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'os-tmpdir@2.0.0': {
       default: {

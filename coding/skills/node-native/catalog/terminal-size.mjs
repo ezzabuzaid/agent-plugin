@@ -17,7 +17,7 @@ function withSize(read) {
 
 export default {
   apis: ['tty:writeStream.columns', 'tty:writeStream.rows'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'terminal-size@4.0.1': {
       'default: piped stdout': {

@@ -18,7 +18,7 @@ async function split2Lines({ default: split2 }, text, ...options) {
 
 export default {
   apis: ['readline:readline.createInterface', 'readline:rl[Symbol.asyncIterator]'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'split2@4.2.0': {
       default: {

@@ -82,7 +82,7 @@ function withArgv(flag, read) {
 
 export default {
   apis: ['tty:writeStream.getColorDepth', 'tty:writeStream.hasColors', 'cli:FORCE_COLOR', 'cli:NO_COLOR'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'supports-color@11.0.0': {
       ...Object.fromEntries(

@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 
 export default {
   apis: ['js:syntax:import-attributes'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   idioms: {
     requireJson: {
       seed: "createRequire\\(\\s*import\\.meta\\.url\\s*\\)\\(\\s*[`'\"][^`'\"]+\\.json[`'\"]",

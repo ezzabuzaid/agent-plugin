@@ -12,7 +12,7 @@ const encodings = ['utf8', 'utf16le', 'base64', 'hex', 'latin1'];
 
 export default {
   apis: ['string_decoder:StringDecoder', 'string_decoder:stringDecoder.write', 'string_decoder:stringDecoder.end'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     // The bare name resolves to node:string_decoder, so the package is keyed by its file.
     'string_decoder@1.3.0/lib/string_decoder.js': {

@@ -77,7 +77,7 @@ const later = async (start) => {
 
 export default {
   apis: ['fs:fsPromises.watch', 'fs:fs.watch'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'chokidar@6.0.0': {
       watch: {

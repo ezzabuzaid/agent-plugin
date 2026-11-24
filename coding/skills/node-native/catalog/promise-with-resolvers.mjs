@@ -11,7 +11,7 @@ const rejectLater = async (deferred) => {
 
 export default {
   apis: ['js:Promise.withResolvers'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'p-defer@4.0.1': {
       default: {

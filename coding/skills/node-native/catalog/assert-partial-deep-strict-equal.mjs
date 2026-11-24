@@ -62,7 +62,7 @@ const family = (name, check, disagree) => {
 
 export default {
   apis: ['assert:assert.partialDeepStrictEqual'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'expect@30.5.2': family('expect', ({ expect }, actual, expected) => expect(actual).toMatchObject(expected), [
       'arrayPrefix',

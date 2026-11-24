@@ -31,7 +31,7 @@ async function whileHeld(name, attempt) {
 
 export default {
   apis: ['worker_threads:locks.request'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'async-mutex@0.5.0': {
       Mutex: {

@@ -117,7 +117,7 @@ export default {
     'stream:stream.duplexPair',
     'stream:stream.getDefaultHighWaterMark',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'readable-stream@4.8.0': {
       Readable: {

@@ -59,7 +59,7 @@ export default {
     'js:AbortController',
     'js:AbortSignal.prototype.reason',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'abort-controller@3.0.0': {
       AbortController: {

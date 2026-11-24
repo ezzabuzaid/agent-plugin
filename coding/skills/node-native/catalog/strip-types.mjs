@@ -136,7 +136,7 @@ function transpiler(member, transform) {
 
 export default {
   apis: ['cli:--no-strip-types', 'module:module.stripTypeScriptTypes'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'tsx@4.23.15/esm/api': loader(
       'register',

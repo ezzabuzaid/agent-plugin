@@ -50,7 +50,7 @@ const lodashRows = (lodash) => ({
 
 export default {
   apis: ['util:util.debounce'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'lodash.debounce@4.0.8': {
       default: {

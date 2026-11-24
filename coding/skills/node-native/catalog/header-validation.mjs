@@ -8,7 +8,7 @@ const VALUES = ['ok', 'tab\tok', ' lead', 'ü', 'a\nb', 'a\rb', '\x00', '\x7f', 
 
 export default {
   apis: ['http:http.isValidHeaderName', 'http:http.isValidHeaderValue', 'http:http.validateHeaderName', 'http:http.validateHeaderValue'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   idioms: {
     tokenRegex: {
       seed: String.raw`\[!#\$%&'\*\+`,

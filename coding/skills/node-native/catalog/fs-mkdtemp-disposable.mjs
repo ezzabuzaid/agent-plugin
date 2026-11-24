@@ -57,7 +57,7 @@ export default {
     'fs:fs.realpathSync',
     'os:os.tmpdir',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'tmp@0.2.7': {
       dirSync: {

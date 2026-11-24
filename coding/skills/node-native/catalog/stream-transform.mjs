@@ -42,7 +42,7 @@ export default {
     'webstreams:new TransformStream',
     'webstreams:transformStreamDefaultController.enqueue',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'through2@5.0.12': {
       default: {

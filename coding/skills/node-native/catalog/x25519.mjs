@@ -13,7 +13,7 @@ const shared = (ours = OURS(), theirs = THEIRS(), type = 'x25519') =>
 
 export default {
   apis: ['crypto:crypto.diffieHellman', 'crypto:crypto.createPrivateKey', 'crypto:crypto.createPublicKey', 'crypto:keyObject.export', 'webcrypto:subtle.deriveBits'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'tweetnacl@1.0.3': {
       scalarMult: {

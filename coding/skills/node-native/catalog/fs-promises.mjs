@@ -21,7 +21,7 @@ const lists = (list) => inScratch({ 'a.txt': 'text' }, async (dir) => (await lis
 
 export default {
   apis: ['fs:fsPromises.readFile', 'fs:fsPromises.writeFile', 'fs:fsPromises.stat', 'fs:fsPromises.readdir'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'mz@2.7.0/fs.js': {
       readFile: {

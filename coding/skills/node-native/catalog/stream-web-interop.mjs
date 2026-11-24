@@ -27,7 +27,7 @@ const failingNode = () =>
 
 export default {
   apis: ['stream:stream.Readable.fromWeb', 'stream:stream.Readable.toWeb'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'readable-web-to-node-stream@5.0.0': {
       ReadableWebToNodeStream: {

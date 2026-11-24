@@ -15,7 +15,7 @@ const ban = (name) => ({
 
 export default {
   apis: ['module:module.isBuiltin', 'node:module.builtinModules'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'is-builtin-module@5.0.0': {
       default: {

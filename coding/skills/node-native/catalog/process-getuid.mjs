@@ -3,7 +3,7 @@ const isRoot = () => process.getuid?.() === 0;
 
 export default {
   apis: ['process:process.getuid'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'is-root@3.0.0': {
       default: {

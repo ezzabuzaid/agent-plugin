@@ -41,7 +41,7 @@ export default {
     'js:Set.prototype.isSupersetOf',
     'js:Set.prototype.isDisjointFrom',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'lodash@4.18.1': rows(({ default: _ }) => _),
     'lodash-es@4.18.1': rows((lodashEs) => lodashEs),

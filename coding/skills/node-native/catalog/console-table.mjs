@@ -54,7 +54,7 @@ const cliTable = (Table, options = {}) => {
 
 export default {
   apis: ['console:console.table', 'console:new Console'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'cli-table3@0.6.5': {
       default: {

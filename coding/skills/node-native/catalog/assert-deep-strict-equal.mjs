@@ -85,7 +85,7 @@ const looseChai = ['prototype', 'nullPrototype', 'sparseArray'];
 
 export default {
   apis: ['assert:assert.deepStrictEqual', 'assert:assert.notDeepStrictEqual', 'assert:new assert.Assert'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'chai@6.3.0': {
       ...family('assert', ({ assert: chai }, a, b) => chai.deepStrictEqual(a, b), looseChai),

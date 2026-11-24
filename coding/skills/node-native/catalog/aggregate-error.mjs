@@ -4,7 +4,7 @@ const summary = (error) => [error.name, error instanceof Error, Error.isError(er
 
 export default {
   apis: ['js:AggregateError', 'js:AggregateError.prototype.message'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'aggregate-error@5.1.0': {
       default: {

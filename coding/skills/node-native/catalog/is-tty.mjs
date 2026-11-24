@@ -5,7 +5,7 @@ import { isatty } from 'node:tty';
 // deterministically, so the rows cover the piped case only.
 export default {
   apis: ['tty:tty.isatty', 'tty:writeStream.isTTY'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'is-interactive@2.0.0': {
       default: {

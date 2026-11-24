@@ -37,7 +37,7 @@ const rows = (format, Compressor, Decompressor) => ({
 
 export default {
   apis: ['globals:CompressionStream', 'globals:DecompressionStream', 'webstreams:new CompressionStream', 'webstreams:new DecompressionStream'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'fflate@0.8.3': {
       ...rows('gzip', 'Gzip', 'Gunzip'),

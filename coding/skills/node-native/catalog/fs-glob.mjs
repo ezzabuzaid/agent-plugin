@@ -34,7 +34,7 @@ const ban = (name) => ({
 
 export default {
   apis: ['fs:fsPromises.glob', 'fs:fs.glob', 'fs:fs.globSync'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'glob@14.0.4': {
       glob: {

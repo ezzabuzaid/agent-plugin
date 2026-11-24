@@ -12,7 +12,7 @@ const run = (listen) => {
 
 export default {
   apis: ['events:events.addAbortListener'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   idioms: {
     abortEventListener: {
       seed: "addEventListener\\(\\s*['\"]abort['\"]",

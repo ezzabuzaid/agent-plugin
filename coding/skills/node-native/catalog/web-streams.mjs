@@ -135,7 +135,7 @@ export default {
     'webstreams:CountQueuingStrategy',
     'webstreams:ByteLengthQueuingStrategy',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'web-streams-polyfill@4.5.0': {
       ReadableStream: {

@@ -73,7 +73,7 @@ const outcome = async (wait) => ((await wait) ? 'resolved' : 'timed out');
 
 export default {
   apis: ['net:net.connect', 'net:net.createConnection', 'net:socket.destroy'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'is-port-reachable@4.0.0': {
       default: {

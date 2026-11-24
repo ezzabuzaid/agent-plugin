@@ -52,7 +52,7 @@ export default {
     'buffer:buf.readBigUInt64LE',
     'buffer:buf.writeBigUInt64LE',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     // `buffer` names Node's own module, so the probe loads the npm package by
     // its file.

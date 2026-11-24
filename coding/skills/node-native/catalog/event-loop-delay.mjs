@@ -50,7 +50,7 @@ async function largest(read, ms) {
 
 export default {
   apis: ['perf_hooks:perf_hooks.monitorEventLoopDelay', 'perf_hooks:ELDHistogram extends Histogram'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'event-loop-lag@1.4.0': {
       default: {

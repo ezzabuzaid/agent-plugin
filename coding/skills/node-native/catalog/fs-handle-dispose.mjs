@@ -31,7 +31,7 @@ const throwsInside = (withResource, closed) =>
 
 export default {
   apis: ['fs:filehandle[Symbol.asyncDispose]', 'fs:dir[Symbol.asyncDispose]', 'fs:fsPromises.open', 'fs:fsPromises.opendir'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   idioms: {
     fileHandleTryFinally: {
       seed: '([\\w$]+)\\s*=\\s*await\\s+(?:[\\w$]*[fF]s[\\w$]*\\.|promises\\.)*open\\([\\s\\S]{0,2000}?\\}\\s*finally\\s*\\{\\s*await\\s+\\1\\.close\\(\\)',

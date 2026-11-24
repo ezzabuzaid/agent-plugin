@@ -11,7 +11,7 @@ const codec = (ZstdCodec) => new Promise((resolve) => ZstdCodec.run((zstd) => re
 
 export default {
   apis: ['zlib:zlib.zstdCompressSync', 'zlib:zlib.zstdDecompressSync'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'fzstd@0.1.1': {
       decompress: {

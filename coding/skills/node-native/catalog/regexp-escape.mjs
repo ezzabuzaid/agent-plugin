@@ -33,7 +33,7 @@ const escapers = {
 
 export default {
   apis: ['js:RegExp.escape'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: Object.fromEntries(
     Object.entries(escapers).map(([spec, [member, get, escapesHyphen]]) => [
       spec,

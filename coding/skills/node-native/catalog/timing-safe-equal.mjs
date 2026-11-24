@@ -15,7 +15,7 @@ const lengthGap = 'crypto.timingSafeEqual throws RangeError on inputs of differe
 
 export default {
   apis: ['crypto:crypto.timingSafeEqual'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'tsscmp@1.0.6': {
       default: {

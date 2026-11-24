@@ -192,7 +192,7 @@ export default {
     'js:Headers.prototype.getSetCookie',
     'js:Response.json',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'node-fetch@3.3.2': {
       ...fetchRows('node-fetch@3.3.2', fetchOf['node-fetch@3.3.2']),

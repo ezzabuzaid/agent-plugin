@@ -19,7 +19,7 @@ async function logged(run) {
 
 export default {
   apis: ['console:console.time', 'console:console.timeEnd', 'console:console.timeLog'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   idioms: {
     logElapsed: {
       seed: 'console\\.\\w+\\([^;]*Date\\.now\\(\\)\\s*-',

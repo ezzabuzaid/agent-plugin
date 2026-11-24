@@ -75,7 +75,7 @@ export default {
     'diagnostics_channel:channel.bindStore',
     'diagnostics_channel:channel.runStores',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     // On a Node that ships diagnostics_channel, dc-polyfill exports it.
     'dc-polyfill@0.1.11': {

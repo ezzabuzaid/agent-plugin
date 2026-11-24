@@ -24,7 +24,7 @@ const lodashRows = (lodash) => ({
 
 export default {
   apis: ['js:Error.isError'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'is-error@2.2.2': {
       default: {

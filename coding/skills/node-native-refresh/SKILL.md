@@ -63,7 +63,7 @@ const colors = Object.keys(inspect.colors);
 
 export default {
   apis: ['util:util.styleText'],              // surface ids
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   flags: [],                                  // CLI flags the native side needs
   replaces: {
     'chalk@5.6.0': {                          // one version per package, catalog-wide

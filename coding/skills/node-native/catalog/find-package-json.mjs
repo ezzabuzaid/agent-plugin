@@ -39,7 +39,7 @@ const inWorkspace = (find) =>
 
 export default {
   apis: ['module:module.findPackageJSON'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'package-up@5.0.0': {
       packageUp: {

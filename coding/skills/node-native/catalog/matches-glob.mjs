@@ -46,7 +46,7 @@ const rootGlobstar = [['/index.ts', '/**/index.ts']];
 
 export default {
   apis: ['path:path.matchesGlob'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'minimatch@11.0.5': {
       minimatch: {

@@ -18,7 +18,7 @@ export default {
     'js:Iterator.prototype.every',
     'js:Iterator.prototype.find',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'iterare@1.2.1': {
       iterate: {

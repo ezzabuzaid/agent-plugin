@@ -9,7 +9,7 @@ const ADDRESSES = ['127.0.0.1', '::1'];
 
 export default {
   apis: ['dns:dnsPromises.lookup'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   idioms: {
     promisifiedLookup: {
       seed: String.raw`promisify\(\s*dns\.(?:lookup|resolve\w*|reverse)\b`,

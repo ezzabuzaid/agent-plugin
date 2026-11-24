@@ -47,7 +47,7 @@ export default {
     'perf_hooks:histogram.export',
     'perf_hooks:perf_hooks.importHistogram',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'hdr-histogram-js@3.0.1': {
       build: {

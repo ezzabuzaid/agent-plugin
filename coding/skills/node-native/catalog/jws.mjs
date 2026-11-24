@@ -71,7 +71,7 @@ const codeOrName = (error) => error.code ?? error.name;
 
 export default {
   apis: ['webcrypto:subtle.sign', 'webcrypto:subtle.verify', 'crypto:crypto.createHmac', 'crypto:crypto.sign', 'crypto:crypto.verify', 'crypto:keyObject.toCryptoKey', 'js:Uint8Array.prototype.toBase64'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'jose@6.2.15': {
       'SignJWT: HS256': {

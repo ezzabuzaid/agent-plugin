@@ -144,7 +144,7 @@ export default {
     'test:timers.reset',
     'test:timers[Symbol.dispose]',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     '@sinonjs/fake-timers@15.4.0': rows('install', ({ install }) => install),
     'sinon@22.1.0': rows('useFakeTimers', ({ default: sinon }) => (options) => sinon.useFakeTimers(options)),

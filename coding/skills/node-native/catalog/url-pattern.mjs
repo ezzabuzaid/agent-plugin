@@ -25,7 +25,7 @@ export default {
     'globals:URLPattern',
     'js:URLPattern',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'path-to-regexp@9.0.0': {
       match: {

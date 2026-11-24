@@ -56,7 +56,7 @@ export default {
     'sqlite:database.serialize',
     'sqlite:database.deserialize',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'better-sqlite3@13.0.3': {
       default: {

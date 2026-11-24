@@ -9,7 +9,7 @@ export default {
     'js:WeakMap.prototype.getOrInsert',
     'js:WeakMap.prototype.getOrInsertComputed',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   idioms: {
     hasThenSet: {
       seed: 'if \\(!\\s*([\\w$.#]+)(?<![hH]eaders|[sS]earchParams)\\.has\\((?:[^()]|\\([^()]*\\))*\\)\\)\\s*\\{?\\s*(?<![\\w$#.])\\1\\.set\\(',

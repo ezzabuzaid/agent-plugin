@@ -13,7 +13,7 @@ const both = (match, doesNotMatch) =>
 
 export default {
   apis: ['assert:assert.match', 'assert:assert.doesNotMatch'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'chai@6.3.0': {
       assert: {

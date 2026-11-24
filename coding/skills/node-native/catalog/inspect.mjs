@@ -5,7 +5,7 @@ const same = () => [{ a: 1, b: 's' }, [1, 2], 'x', null, undefined, 1n, Symbol('
 
 export default {
   apis: ['util:util.inspect'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'object-inspect@1.13.4': {
       default: {

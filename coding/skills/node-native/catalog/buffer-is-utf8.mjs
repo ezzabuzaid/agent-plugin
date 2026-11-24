@@ -17,7 +17,7 @@ const checked = (check) => SAMPLES.map((bytes) => check(Buffer.from(bytes)));
 
 export default {
   apis: ['buffer:buffer.isUtf8', 'buffer:buffer.isAscii'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'utf-8-validate@6.0.6': {
       default: {

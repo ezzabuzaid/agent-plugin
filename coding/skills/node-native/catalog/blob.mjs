@@ -44,7 +44,7 @@ const family = (spec, get) => ({
 
 export default {
   apis: ['globals:Blob', 'globals:File', 'js:Blob', 'js:File', 'js:Blob.prototype.bytes'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'fetch-blob@4.0.0': (({ File, ...rows }) => rows)(family('fetch-blob', (module) => module)),
     'fetch-blob@4.0.0/file.js': {

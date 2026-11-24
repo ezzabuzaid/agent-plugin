@@ -74,7 +74,7 @@ const viaWrapper = async (http2Wrapper, request) => {
 
 export default {
   apis: ['http2:http2.connect', 'http2:clienthttp2session.request', 'http2:http2.createSecureServer'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'http2-wrapper@2.2.4': {
       request: {

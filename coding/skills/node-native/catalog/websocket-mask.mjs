@@ -21,7 +21,7 @@ const unmasked = (unmask) => {
 
 export default {
   apis: ['http:http.websocketMask', 'http:http.websocketUnmask'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'bufferutil@4.1.0': {
       mask: {

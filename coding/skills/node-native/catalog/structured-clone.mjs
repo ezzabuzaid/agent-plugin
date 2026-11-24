@@ -95,7 +95,7 @@ const familyRows = (spec, [member, get]) => ({
 
 export default {
   apis: ['js:structuredClone'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     ...Object.fromEntries(Object.entries(cloners).map(([spec, cloner]) => [spec, familyRows(spec, cloner)])),
     'rfdc@1.4.1': {

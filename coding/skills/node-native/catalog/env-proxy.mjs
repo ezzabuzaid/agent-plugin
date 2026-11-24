@@ -88,7 +88,7 @@ export default {
     'cli:NODE_USE_ENV_PROXY',
     'cli:--use-env-proxy',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'http-proxy-agent@9.1.0': {
       HttpProxyAgent: {

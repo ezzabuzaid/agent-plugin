@@ -28,7 +28,7 @@ const rows = (name, isMatch) => ({
 
 export default {
   apis: ['util:util.isPartialDeepStrictEqual'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'lodash.ismatch@4.4.0': rows('default', ({ default: isMatch }, object, source) => isMatch(object, source)),
     'lodash@4.18.1': rows('isMatch', ({ default: _ }, object, source) => _.isMatch(object, source)),

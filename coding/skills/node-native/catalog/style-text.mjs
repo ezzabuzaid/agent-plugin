@@ -41,7 +41,7 @@ const ansiColors = ({ default: colors }) => {
 
 export default {
   apis: ['util:util.styleText'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'chalk@6.0.1': {
       ...rows([...modifiers, ...base, ...backgrounds, ...bright, ...blackBright, 'grey', 'bgGray', 'bgGrey'], chalk),

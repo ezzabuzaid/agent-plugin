@@ -21,7 +21,7 @@ const past32Bits = 2 ** 31;
 
 export default {
   apis: ['timers:timersPromises.setTimeout', 'timers:timersPromises.setImmediate'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'delay@7.0.0': {
       default: {

@@ -18,7 +18,7 @@ const collect = async (iterator, pick) => {
 
 export default {
   apis: ['events:events.once', 'events:events.on'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'p-event@8.0.2': {
       pEvent: {

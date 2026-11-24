@@ -18,7 +18,7 @@ const flush = "await new Promise((resolve) => setTimeout(resolve, 10)); writeSyn
 
 export default {
   apis: ['process:Process'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'signal-exit@4.1.0': {
       onExit: {

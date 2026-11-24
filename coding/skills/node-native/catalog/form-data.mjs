@@ -43,7 +43,7 @@ const filled = (FormData, File) => {
 
 export default {
   apis: ['globals:FormData', 'js:FormData'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'form-data@4.0.6': {
       default: {

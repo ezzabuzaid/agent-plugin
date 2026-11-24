@@ -64,7 +64,7 @@ export default {
     'js:AsyncDisposableStack',
     'js:SuppressedError',
   ],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   idioms: {
     tryFinally: {
       seed: '\\}\\s*finally\\s*\\{\\s*(?:await\\s+)?[\\w$.]+(?:\\.(?:close|dispose|destroy)\\(|\\[Symbol\\.(?:asyncD|d)ispose\\]\\()',

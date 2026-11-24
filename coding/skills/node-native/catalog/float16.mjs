@@ -8,7 +8,7 @@ const written = (write) => {
 
 export default {
   apis: ['js:Float16Array', 'js:Math.f16round', 'js:DataView.prototype.getFloat16', 'js:DataView.prototype.setFloat16'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     '@petamoriken/float16@3.9.3': {
       Float16Array: {

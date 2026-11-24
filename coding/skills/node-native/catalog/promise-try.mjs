@@ -13,7 +13,7 @@ const order = async (start) => {
 
 export default {
   apis: ['js:Promise.try'],
-  reviewedAt: 'v26.13.0',
+  reviewedAt: 'v26.13.1',
   replaces: {
     'p-try@3.0.0': {
       default: {
