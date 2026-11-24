@@ -26,7 +26,7 @@ The refs point into `<work>/evidence.jsonl` (match `ref`), `<work>/memories.txt`
 - Cite the evidence for each claim: an issue (`#NNNN`), a commit, a test file, or an upstream doc with its link. A cited issue or commit must exist: check a commit with `git cat-file -e <sha>^{commit}`, and an issue with the tracker the guide names.
 - Use exported names and signatures exactly as `src/` has them.
 - A link to a file another writer creates now (from the brief) is allowed; any other relative link must resolve to a file that exists.
-- **An ADR records the owner's decision in the owner's own words.** Quote the words the brief gives. When the brief gives none, write the status line `Status: Proposed <date> for the owner's review` and record no decision as made. Take the highest ADR number in the folder plus one.
+- **An ADR's status, its decision-makers and its evidence follow the guide.** Name the decision-makers the brief gives. Quote the owner's words only where the brief gives them for a split that the evidence did not decide. Never write that the owner accepted or chose what the brief does not show. Take the highest ADR number in the folder plus one.
 
 ## A recipe's program
 

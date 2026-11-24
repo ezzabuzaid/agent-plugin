@@ -26,7 +26,7 @@ A draft is approved only when every rule holds. Reject on the first rule that fa
 4. **Shape.** The file follows the guide's shape for its kind: fixed titles, order, the glossary's form, the recipe skeleton, the ADR form and numbering.
 5. **Words.** The draft uses the words of the package's glossary and none of the words it says to avoid.
 6. **Recipe output is real.** The output block reads as program output, matches what the program prints (each `console.log` and its format), and the line before it says how the output varies when it can vary. A block that the program could not print fails.
-7. **Decisions are the owner's.** An ADR, or a line that states a decision, quotes or cites a `prompt` record, or has the status `Proposed`. An agent's recommendation stated as a decision fails.
+7. **Decisions name their decision-makers.** An ADR, or a line that states a decision, names its decision-makers and its evidence as the guide says. A quote of the owner is a `prompt` record. A draft that says the owner accepted or chose what no `prompt` record shows fails, and so does a decision that rests on neither the evidence nor a `prompt` record.
 8. **Nothing else changed.** The diff of an existing file changes only lines that the evidence refs bear on.
 
 ## Hand back

@@ -28,7 +28,7 @@ Done exploring when you can name, for each public export, where the docs describ
 - **context-map-row**: the package has a glossary and the map has no row for it, or the row's links are wrong.
 - **recipe**: a use case that consumers or transcripts show more than once, with no recipe.
 - **concept**: an idea of the package that the evidence shows readers or agents get wrong.
-- **adr**: a decision the owner stated in a `prompt` record that no ADR records. Cite the prompt; an agent's recommendation is not a decision.
+- **adr**: a decision that no ADR records: one the evidence decided, or one the owner chose on a split in a `prompt` record. Cite that evidence or prompt; an agent's recommendation without evidence is not a decision.
 - **stale-claim**: a doc line that `src/`, a test or a newer commit contradicts.
 
 Each candidate needs evidence you can cite: a bundle `ref`, `memory:<slug>`, or `path:line` from a numbered read. A candidate with no evidence is a guess; leave it out. Carry over an earlier queued or blocked item only when it still holds, with its original evidence.
