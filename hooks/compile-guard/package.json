@@ -1,0 +1,12 @@
+{
+  "name": "compile-guard-hook",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --no-warnings compile-guard.test.ts"
+  },
+  "devDependencies": {
+    "@zukhruf/fs": "^0.8.22",
+    "typescript": "^7.0.2"
+  }
+}
