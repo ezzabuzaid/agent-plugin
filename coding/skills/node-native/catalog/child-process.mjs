@@ -8,12 +8,15 @@ import { createInterface } from 'node:readline';
 import { text } from 'node:stream/consumers';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
+import { settled } from './support/outcome.mjs';
 
 // Every probe runs this Node binary, never a shell or another program.
 const node = process.execPath;
 const both = "process.stdout.write('out\\n'); process.stderr.write('err\\n')";
 // Output without a final newline, which nano-spawn strips.
 const bare = "process.stdout.write('out'); process.stderr.write('err')";
+// One byte more than execFile's default maxBuffer (1024 * 1024) on stdout.
+const loud = "process.stdout.write('x'.repeat(1024 * 1024 + 1))";
 const sortLines = "let s = ''; process.stdin.on('data', (d) => (s += d)).on('end', () => process.stdout.write(s.split('\\n').sort().join('\\n')))";
 // A child that ignores SIGTERM and writes `ready` once its handler is in place.
 const stubborn = "process.on('SIGTERM', () => {}); process.stdout.write('ready'); setInterval(() => {}, 1000)";
@@ -169,6 +172,12 @@ export default {
         native: () => exitCode(run(node, ['-e', 'setTimeout(() => {}, 5000)'], { timeout: 100 }), (error) => error.signal),
         package: ({ default: nanoSpawn }) =>
           exitCode(nanoSpawn(node, ['-e', 'setTimeout(() => {}, 5000)'], { timeout: 100 }), (error) => error.signalName),
+      },
+      'default: output over 1 MiB': {
+        gap: 'execFile kills the child and rejects with ERR_CHILD_PROCESS_STDIO_MAXBUFFER past its 1 MiB maxBuffer; nano-spawn keeps the whole output',
+        native: () => settled(() => run(node, ['-e', loud]).then(({ stdout }) => stdout.length), (error) => error.code),
+        package: ({ default: nanoSpawn }) =>
+          settled(() => nanoSpawn(node, ['-e', loud]).then(({ stdout }) => stdout.length), (error) => error.code),
       },
       'default: stdin string': {
         native: () => spawned(spawn(node, ['-e', 'process.stdin.pipe(process.stdout)']), 'hi'),
