@@ -172,10 +172,11 @@ function changesTasks(block: ContentBlock): boolean {
   return block.name === 'Bash' && field(block.input, 'run_in_background') === true;
 }
 
-// A real change since the last sweep: a commit, a push or a task-set change.
-// Edits alone are not one (forensics 2026-11-26, K1).
+// A real change since the last sweep: a commit or a push. Edits alone are not
+// one (forensics 2026-11-26, K1), and neither is a task-set change: the agent
+// that starts work is doing what idle mode asks (step 6c).
 function changesState(block: ContentBlock): boolean {
-  return changesTasks(block) || GIT_COMMIT_OR_PUSH.test(bashCommand(block));
+  return GIT_COMMIT_OR_PUSH.test(bashCommand(block));
 }
 
 const BACKLOG_WRITE = /\bagent-backlog (add|update|close|done|decide|note|edit|start|block)\b/;
@@ -187,7 +188,7 @@ const BASH_RECORD_WRITE =
 function writes(block: ContentBlock): boolean {
   if (block.name === 'Edit' || block.name === 'Write' || block.name === 'NotebookEdit') return true;
   const command = bashCommand(block);
-  return changesState(block) || BACKLOG_WRITE.test(command) || BASH_RECORD_WRITE.test(command);
+  return changesState(block) || changesTasks(block) || BACKLOG_WRITE.test(command) || BASH_RECORD_WRITE.test(command);
 }
 
 // The final message claims the session can close: the claims an inline sweep
@@ -196,8 +197,8 @@ const CLOSE_CLAIM =
   /\bSafe to close\b|\bNothing new\b|\bnothing (of mine )?(is )?(still )?running\b|\b(all|everything) (is )?(done|finished)\b/i;
 
 /**
- * Due when, since the last housekeeping sweep, the session committed, pushed
- * or changed its background task set, or when the final message makes a close
+ * Due when, since the last housekeeping sweep, the session committed or
+ * pushed, or when the final message makes a close
  * claim. A change in the sweep's own turn, after the sweep, is the sweep's
  * close-out and counts only after a stop. Only a Skill call for housekeeping
  * resets it: a sweep written from memory leaves it due, so the next stop fires

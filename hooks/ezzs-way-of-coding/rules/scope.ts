@@ -15,7 +15,7 @@ export const scopeRules: ReminderRule[] = [
       '- Classify each stored item on both axes: `--kind feature|defect|risk|debt` (what the item is) and `--work-type business|internal|change|unplanned` (how the work entered: planned follow-ups are usually `internal` or `change`; incident-driven ones `unplanned`).',
       '- When an item can start only after something, give that as a condition flag on `add` (or later with `agent-backlog wait <id>`), never as "Trigger:" prose: `--after <id>` (another item is done), `--published <pkg@range>` (npm has a version in the range), `--clean <repo:glob>` (no uncommitted file there, such as paths a peer holds), `--until "<event>"` (an event or a judgement, such as a third consumer). A question for the user is `agent-backlog ask <id> "<question>"`; read `agent-backlog decisions` before you ask one again.',
       '- Required blockers and explicit user additions remain in scope. Do not capture vague suggestions, speculative cleanup, or completed work.',
-      '- Do not file upstream bug reports or dev-tooling audit items (agent hooks, agent settings, test tooling) with `agent-backlog`. Mention each one once in your reply instead.',
+      "- A problem in the user's own hooks, skills or plugins (agent-plugin, `~/.claude/hooks`, `~/.agents/skills`) is filed in agent-plugin: `agent-backlog add --repo agent-plugin`. A problem in a third-party tool (an upstream bug, Claude Code itself) is not filed: mention it once in your reply instead.",
       '- If `agent-backlog` fails, do not claim the item was stored; follow its configuration guidance or report the failure.',
     ].join('\n'),
   },

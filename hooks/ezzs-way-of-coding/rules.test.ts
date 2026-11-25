@@ -325,7 +325,9 @@ test('root sessions receive out-of-scope capture guidance', async () => {
     const context = output?.hookSpecificOutput?.additionalContext ?? '';
     assert.match(context, /\[session:capture-out-of-scope-followups\]/);
     assert.match(context, /agent-backlog/);
-    assert.match(context, /Do not file upstream bug reports or dev-tooling audit items[^\n]*mention each one once in your reply/i);
+    assert.match(context, /A problem in the user's own hooks, skills or plugins \(agent-plugin, `~\/\.claude\/hooks`, `~\/\.agents\/skills`\) is filed in agent-plugin: `agent-backlog add --repo agent-plugin`\./);
+    assert.match(context, /A problem in a third-party tool[^\n]*is not filed: mention it once in your reply instead\./);
+    assert.doesNotMatch(context, /Do not file upstream bug reports or dev-tooling audit items/);
     assert.doesNotMatch(context, /deduplicat|duplicate|equivalent open item/i);
   }
 });
@@ -1402,21 +1404,19 @@ const BEFORE_DONE =
   '[stop-feedback:housekeeping-due]\nBefore this turn ends, call the housekeeping skill in before-done mode (a sweep from memory does not count).';
 
 // housekeeping-due fires on a real change since the last sweep: a commit or a
-// push, a change of the background task set (Agent, background Bash, Monitor,
-// TaskStop), or a close claim in the final message. Edits and reads alone do
-// not. Measured on the 2520 organic stops of 59 sessions (forensics
-// 2026-11-26, guardrail-scratch/segments.jsonl): the old "any tool since the
-// last sweep" trigger fired at 2297 (91 %); this trigger fires at 1327
-// (52.7 %): Agent 708, background Bash 413, git 310, close claim 126, TaskStop
-// 62, Monitor 22, a change from an earlier turn not yet swept 113.
-test('stop asks for a housekeeping sweep after a commit, a push, a task-set change or a close claim', async () => {
+// push, or a close claim in the final message. Edits, reads and a change of the
+// background task set (Agent, background Bash, Monitor, TaskStop) alone do not:
+// the agent that starts work is doing what idle mode asks. Measured on the 2520
+// organic stops of 59 sessions (forensics 2026-11-26,
+// guardrail-scratch/segments.jsonl): the old "any tool since the last sweep"
+// trigger fired at 2297 (91 %); step 6b's trigger, which also counted a
+// task-set change, at 1327 (52.7 %); this trigger fires at 493 (19.6 %): git
+// 354, close claim 126, a change from an earlier turn not yet swept 37
+// (hooks-6c-scratch/k1-6c-set.mjs).
+test('stop asks for a housekeeping sweep after a commit, a push or a close claim', async () => {
   for (const [label, entries] of [
     ['a commit', [request, commit, reply]],
     ['a push', [request, bash('git -C ~/Desktop/x push origin main'), reply]],
-    ['a background command', [request, bash('npm test', { run_in_background: true }), reply]],
-    ['a subagent launch', [request, toolCall('Agent', { prompt: 'Probe.' }), reply]],
-    ['a stopped task', [request, toolCall('TaskStop', { task_id: 'b1' }), reply]],
-    ['an armed watch', [request, toolCall('Monitor', { command: 'gh run watch' }), reply]],
     ['sweep, stop, then a commit', [request, commit, sweep, reply, stopped, request, commit, reply]],
   ] as const) {
     assert.ok((await stopContext({}, [...entries])).includes(BEFORE_DONE), label);
@@ -1426,9 +1426,13 @@ test('stop asks for a housekeeping sweep after a commit, a push, a task-set chan
   }
 });
 
-test('stop stays quiet on housekeeping after edits, reads and messages alone', async () => {
+test('stop stays quiet on housekeeping after edits, reads, messages and background launches alone', async () => {
   for (const [label, entries] of [
     ['no tool call at all', [request, reply]],
+    ['a background command', [request, bash('npm test', { run_in_background: true }), reply]],
+    ['a subagent launch', [request, toolCall('Agent', { prompt: 'Probe.' }), reply]],
+    ['a stopped task', [request, toolCall('TaskStop', { task_id: 'b1' }), reply]],
+    ['an armed watch', [request, toolCall('Monitor', { command: 'gh run watch' }), reply]],
     ['edits', [request, toolCall('Edit', { file_path: '/x/a.ts' }), toolCall('Write', { file_path: '/x/b.ts' }), reply]],
     ['reads', [request, bash('git status --short && git log --oneline -3'), toolCall('Read', { file_path: '/x/a.ts' }), reply]],
     ['a message to a peer', [request, toolCall('SendMessage', { to: 'a1', message: 'Go on.' }), reply]],
@@ -1461,7 +1465,7 @@ test('stop asks for an idle housekeeping round while any background work still r
     [{ id: 'm1', type: 'monitor', status: 'running', description: 'CI run', server: 'github', tool: 'watch' }, 'monitor m1 (CI run)'],
     [{ status: 'running' }, 'a task'],
   ] as const) {
-    const context = await stopContext({ background_tasks: [task] }, [request, toolCall('Agent'), reply]);
+    const context = await stopContext({ background_tasks: [task] }, [request, commit, reply]);
     assert.ok(
       context.includes(
         `[stop-feedback:housekeeping-due]\nBackground work is still running: ${named}. Before this turn ends, call the housekeeping skill in idle mode (a sweep from memory does not count)`,
@@ -1483,7 +1487,7 @@ test('stop asks for an idle housekeeping round while any background work still r
         { id: 'b1', type: 'shell', status: 'running', description: 'race proof' },
       ],
     },
-    [request, toolCall('Agent'), reply],
+    [request, commit, reply],
   );
   assert.ok(both.includes('running: subagent a791e34a38c02e610 (deepagents #3369 tests pass db.pool()); shell b1 (race proof).'), both);
   assert.ok((await stopContext({ background_tasks: [] }, [request, commit, reply])).includes(BEFORE_DONE));
@@ -1624,4 +1628,192 @@ test('ask-in-the-tool says to explain in the chat and ask briefly in the dialog'
   assert.match(context, /A task for him becomes a question: 'Do X, then pick Done'\./);
   assert.match(context, /A `!` command is the last line of the chat, with no dialog after it\./);
   assert.doesNotMatch(context, /explanation inside the question|an open dialog hides the chat/);
+});
+
+const preToolUse = (tool_name: string, tool_input: unknown) =>
+  evaluateReminderHook(
+    { hook_event_name: 'PreToolUse', tool_name, tool_input } as Parameters<typeof evaluateReminderHook>[0],
+    ezzsWayOfCodingConfig,
+  );
+const refusal = async (tool_name: string, tool_input: unknown) => {
+  const output = await preToolUse(tool_name, tool_input);
+  return output?.hookSpecificOutput?.permissionDecision === 'deny' ? (output.hookSpecificOutput.permissionDecisionReason ?? '') : undefined;
+};
+
+// The dialog only asks (the user's ruling, 2026-11-26): a question of at most
+// 150 characters, an option description of at most 100. Measured on the 746
+// real dialogs of the forensics corpus (guardrail-scratch/asks.jsonl, through
+// this guard: hooks-6c-scratch/measure.mts): the longest question per call has
+// a median of 493 characters among accepted dialogs and 412 among the 42
+// rejected ones, so length does not predict a rejection; the dialogs were
+// written to the old rule, which put the explanation inside the question.
+// These limits refuse 696 of 746 (38 of the 42 rejected): 682 have a question
+// over 150, 654 an option description over 100. Of the 50 that pass, the questions read like
+// "Battery is at 39% (about 28 min). Plug the Mac in, or stop the Docker work
+// for now?".
+const DIALOG_ONLY_ASKS =
+  /^The dialog only asks: put the explanation in the chat, in plain words, then ask a one-line question with short labels \(your pick first\)\./;
+const dialog = (question: string, descriptions: string[] = ['Push it.', 'Leave it unpushed.']) => ({
+  questions: [
+    {
+      question,
+      header: 'Push',
+      options: descriptions.map((description, index) => ({ label: `Option ${index + 1}`, description })),
+      multiSelect: false,
+    },
+  ],
+});
+
+test('an AskUserQuestion whose question or any option description is over its limit is refused', async () => {
+  for (const [label, input] of [
+    [
+      'a question with its explanation inside (178 characters, a real dialog)',
+      dialog(
+        'The websets API server still runs at http://localhost:4340 (PID 78754). It holds two demo datasets (Node.js releases) in ~/.local/share/websets. What do I do with the server now?',
+      ),
+    ],
+    ['a question one character over', dialog(`${'x'.repeat(150)}?`)],
+    [
+      'a short question with one long option description (a real one, 120 characters)',
+      dialog('Who writes the Slack reply?', [
+        'You do.',
+        "I write a Slack reply for you to paste yourself. I'll leave a blank for your hourly rate and anything else I can't find.",
+      ]),
+    ],
+    ['a description one character over', dialog('Push #5408 now?', ['y'.repeat(101)])],
+    [
+      'a second question over the limit',
+      { questions: [...dialog('Push #5408 now?').questions, ...dialog(`${'x'.repeat(151)}`).questions] },
+    ],
+  ] as const) {
+    assert.match((await refusal('AskUserQuestion', input)) ?? '', DIALOG_ONLY_ASKS, label);
+  }
+});
+
+test('a one-line question with short labels goes through, and a malformed dialog is the tool\'s to reject', async () => {
+  for (const [label, input] of [
+    ['a bare question', dialog('Push #5408 now?')],
+    ['a question and a description at their limits', dialog('x'.repeat(150), ['y'.repeat(100)])],
+    ['options with no description', { questions: [{ question: 'Push #5408 now?', options: [{ label: 'Push' }, { label: 'Wait' }] }] }],
+    ['no questions array', { questions: 'Push #5408 now?' }],
+    ['a null input', null],
+  ] as const) {
+    assert.equal(await refusal('AskUserQuestion', input), undefined, label);
+  }
+  assert.equal(await refusal('Bash', { command: 'x'.repeat(500) }), undefined, 'another tool');
+});
+
+// A MEMORY.md compaction is the user's to start. Measured on every Agent call
+// of this machine whose prompt names MEMORY.md (48, hooks-6c-scratch/measure.mts):
+// the guard refuses 4, and all 4 are compaction briefs (the 2 the forensics
+// found, 9a40fd6b:376 and 610b54f9:1388, plus ecfe9d8e:282 and 250c5307:3900);
+// the 44 it lets through read, audit or name the index. Of the 2 Writes of an
+// auto-memory MEMORY.md on this machine, it refuses neither (one adds lines,
+// one drops the only entry of a one-entry index).
+const COMPACTION_IS_THE_USERS =
+  "A MEMORY.md compaction is the user's to start (memory-compaction-needs-consent). Add your line above line ~190 and leave the rest.";
+const MUTEX_MEMORY = '/Users/ezzabuzaid/.claude/projects/-Users-ezzabuzaid-Desktop-experiments-mutex/memory/MEMORY.md';
+
+test('an Agent brief that orders a MEMORY.md compaction under a size is refused', async () => {
+  for (const prompt of [
+    `Fix one file: \`${MUTEX_MEMORY}\`, the index of an auto-memory directory. It is 34.2KB (about 250 lines). Only the first 24.4KB loads into each session, so its last 62 lines are never read. Rewrite it to under 17.1KB, with about 15KB as the target.`,
+    'Compact the Claude Code auto-memory index /Users/ezzabuzaid/.claude/projects/-Users-ezzabuzaid-Desktop-January-deepagents/memory/MEMORY.md from ~194 lines to UNDER 140 lines. It is loaded into every session and truncated past 200 lines.',
+    'MEMORY.md is too long.\nTrim the index below 200 lines.',
+  ]) {
+    assert.equal(await refusal('Agent', { prompt, effort: 'low' }), COMPACTION_IS_THE_USERS, prompt);
+  }
+});
+
+test('an Agent brief that reads MEMORY.md, or asks for a shrink and a size in different sentences, goes through', async () => {
+  for (const prompt of [
+    `Read ${MUTEX_MEMORY} and list the entries about Docker.`,
+    'Never rewrite history. Fix the hook; the session-harvest rule names auto-memory/MEMORY.md. Report under 30 lines.',
+    'Rewrite the README intro to under 100 lines.',
+    `Lens: DUPLICATION. Corpus: the index at ${MUTEX_MEMORY}. Compact dump (no bodies) is attached. Goal context: the index must drop from 168 to under 140 lines.`,
+  ]) {
+    assert.equal(await refusal('Agent', { prompt, effort: 'low' }), undefined, prompt);
+  }
+});
+
+// An auto-memory folder under a temporary home, so the guard reads the index on disk.
+async function memoryIndex(entries: number) {
+  const folder = await new TemporaryFiles().directory('ezzs-way-of-coding-memory-');
+  const memory = join(folder.path, '.claude', 'projects', '-Users-x-repo', 'memory');
+  await mkdir(memory, { recursive: true });
+  const lines = Array.from({ length: entries }, (_, index) => `- [Memory ${index}](memory-${index}.md) — when ${index} matters`);
+  const filePath = join(memory, 'MEMORY.md');
+  await writeFile(filePath, `${lines.join('\n')}\n`);
+  return { folder, filePath, lines, [Symbol.asyncDispose]: () => folder[Symbol.asyncDispose]() };
+}
+
+test('a Write of a MEMORY.md that drops more than one index line and more than a tenth of them is refused', async () => {
+  await using index = await memoryIndex(20);
+  const { filePath, lines } = index;
+  for (const [label, kept] of [
+    ['3 of 20 dropped', lines.slice(3)],
+    ['every line shortened', lines.map((line) => line.replace(/ — .*/, ''))],
+    ['an index cut in half with a new line added', [...lines.slice(10), '- [New](new.md) — new']],
+  ] as const) {
+    assert.equal(await refusal('Write', { file_path: filePath, content: `${kept.join('\n')}\n` }), COMPACTION_IS_THE_USERS, label);
+  }
+});
+
+test('a Write of a MEMORY.md that adds a line or drops one or two of twenty goes through, and so does another MEMORY.md', async () => {
+  await using index = await memoryIndex(20);
+  const { folder, filePath, lines } = index;
+  for (const [label, kept] of [
+    ['a line added above the rest', ['- [New](new.md) — new', ...lines]],
+    ['one stale entry dropped', lines.slice(1)],
+    ['two of twenty dropped (a tenth)', lines.slice(2)],
+  ] as const) {
+    assert.equal(await refusal('Write', { file_path: filePath, content: `${kept.join('\n')}\n` }), undefined, label);
+  }
+  await using single = await memoryIndex(1);
+  assert.equal(await refusal('Write', { file_path: single.filePath, content: '# Memory index\n' }), undefined, 'the only entry of a one-entry index dropped');
+  const elsewhere = join(folder.path, 'catalog', 'agent', 'MEMORY.md');
+  await mkdir(join(folder.path, 'catalog', 'agent'), { recursive: true });
+  await writeFile(elsewhere, `${lines.join('\n')}\n`);
+  assert.equal(await refusal('Write', { file_path: elsewhere, content: '# Memory\n' }), undefined, 'a MEMORY.md outside an auto-memory folder');
+  const missing = join(folder.path, '.claude', 'projects', '-Users-x-new', 'memory', 'MEMORY.md');
+  assert.equal(await refusal('Write', { file_path: missing, content: '- [A](a.md) — a\n' }), undefined, 'a new index');
+});
+
+// A tracking record never points into one session's folder. Measured on the
+// 1967 Write and Edit calls of the 59 corpus sessions
+// (hooks-6c-scratch/measure.mts): the guard refuses 7, all real: the forensics'
+// 4 (69df537a:9037 writes a HANDOFF into its scratchpad; 7bb55ec4:4890 and
+// 6b29866e:955 put a scratchpad log or repro path into a plan; b6b06c50:9584
+// names a live task output in a HANDOFF), a plan that sends a later session to
+// a dead session's task outputs (9a40fd6b:9608), and 2 briefs in
+// ~/.claude/plans that place a throwaway workspace in the scratchpad
+// (259dc838:2260 and 4245), which ~/.claude/scratch holds instead.
+const RECORD_OUTLIVES_SESSION =
+  'A tracking record must outlive the session: move the file to ~/.claude/scratch/ or ~/.claude/plans/ and point there.';
+const SCRATCHPAD = '/private/tmp/claude-501/-Users-ezzabuzaid-Desktop-experiments-mutex/7bb55ec4-a068-4516-a90b-a25762fde657/scratchpad';
+
+test('a Write or Edit of a plan, STATUS, HANDOFF or memory that names a path in a session folder is refused', async () => {
+  for (const [label, tool, input] of [
+    ['a plan edit naming a scratchpad log', 'Edit', { file_path: '/Users/ezzabuzaid/.claude/plans/retrieval-text-search-api.md', old_string: 'gate:', new_string: `gate: log ${SCRATCHPAD}/gate.log` }],
+    ['a HANDOFF naming a task output', 'Write', { file_path: '/Users/ezzabuzaid/.agent-backlog/handoff/x/HANDOFF.md', content: 'Its output: `/private/tmp/claude-501/-Users-ezzabuzaid-Desktop-mo-meddit/b6b06c50-b547-4c9d-956f-85507d3d836a/tasks/bqmatpyve.output`' }],
+    ['a STATUS file', 'Write', { file_path: '/Users/x/repo/STATUS-step-4.md', content: `Repro in ${SCRATCHPAD}/repro.mjs` }],
+    ['a memory', 'Edit', { file_path: '/Users/ezzabuzaid/.claude/projects/-Users-x/memory/steps.md', old_string: 'a', new_string: `Patches are in \`${SCRATCHPAD}/steps/\`.` }],
+    ['a /tmp path without /private', 'Write', { file_path: '/Users/ezzabuzaid/.claude/plans/p.md', content: `See ${SCRATCHPAD.replace('/private', '')}/x.md` }],
+    ['a HANDOFF written into the scratchpad', 'Write', { file_path: `${SCRATCHPAD}/HANDOFF-deepagents-e7-2.md`, content: '# Handoff\nResume at step 3.' }],
+  ] as const) {
+    assert.equal(await refusal(tool, input), RECORD_OUTLIVES_SESSION, label);
+  }
+});
+
+test('a record that points to ~/.claude/scratch or only mentions /tmp/claude-501, and any other file, goes through', async () => {
+  for (const [label, tool, input] of [
+    ['a plan naming ~/.claude/scratch', 'Write', { file_path: '/Users/ezzabuzaid/.claude/plans/p.md', content: 'Logs: ~/.claude/scratch/housekeeping-workspace/gate.log' }],
+    ['a memory that mentions the folder, not a file', 'Edit', { file_path: '/Users/ezzabuzaid/.claude/projects/-Users-x/memory/delete-exact-paths-only.md', old_string: 'a', new_string: '~/.claude/projects, /tmp/claude-501 and the scratchpads hold every session\'s files.' }],
+    ['a memory naming a glob over session folders', 'Edit', { file_path: '/Users/ezzabuzaid/.claude/projects/-Users-x/memory/scratchpad-is-ephemeral.md', old_string: 'a', new_string: 'A restart cleared all `/private/tmp/claude-501/-Users-ezzabuzaid-Desktop-mo-meddit/*/scratchpad` folders.' }],
+    ['a source file naming a scratchpad path', 'Write', { file_path: '/Users/x/repo/src/probe.ts', content: `const out = '${SCRATCHPAD}/out.json';` }],
+    ['a scratch note in the scratchpad', 'Write', { file_path: `${SCRATCHPAD}/notes.md`, content: `See ${SCRATCHPAD}/x.md` }],
+    ['a read of a plan', 'Read', { file_path: '/Users/ezzabuzaid/.claude/plans/p.md' }],
+    ['a plan edit with no new text', 'Edit', { file_path: '/Users/ezzabuzaid/.claude/plans/p.md', old_string: SCRATCHPAD }],
+  ] as const) {
+    assert.equal(await refusal(tool, input), undefined, label);
+  }
 });
