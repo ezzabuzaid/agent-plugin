@@ -111,6 +111,7 @@ After each run, a macOS notification gives the `name`, `done`, `failed (exit N)`
 - **The Mac sleeps.** A run starts only while the Mac is awake and the user is logged in. When the Mac sleeps through one or more times, the automation runs one time after the Mac wakes. The script does not wake the Mac.
 - **A run failed with no clear reason.** Read `run.log` (one line when a run starts and one when it ends, with the session), `state.json` (the last exit code and session) and the session itself with `claude --resume <session>` in the `cwd`.
 - **`sync` installs nothing** when one automation is wrong, also for the correct ones. Read its message, fix the file, run `sync` again.
+- **A run ends as `timed out` although its reply came.** A Stop hook of the user's settings is still running: `claude -p` does not exit while a hook runs, also an `asyncRewake` one. In the session's transcript, the `stop_hook_summary` gives each hook's `durationMs`. A hook that waits for a person must return at once when `CLAUDE_CODE_ENTRYPOINT` is `sdk-cli`, the value in a `claude -p` session.
 - **The jobs run the bundle of the last `sync`.** A plugin update does not reach them until `sync` runs again.
 - **Billing.** An `ANTHROPIC_API_KEY` or `claude --bare` makes a run use API credit. The script removes the key from each run. Do not add `--bare` to a prompt or a wrapper.
 

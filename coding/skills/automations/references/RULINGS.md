@@ -36,6 +36,8 @@ Each rule in [SKILL.md](../SKILL.md) and each choice in [scripts/automations.ts]
 
 **No `ProcessType: Background`.** launchd limits the resources of a Background job, which would slow the builds and tests that a run starts. The job has no `ProcessType`, as the context-compiler job has none.
 
+**A hook that waits holds the run.** The first real run from the plugin (session `14a4eccc`, 2026-11-25) replied "ok" in 3 s, then ended `timed out` at its `PT5M`: the Stop hook `notification-router/dist/main.js wait` (`asyncRewake`, `timeout: 86400`) ran for 273 s, and `claude -p` does not exit while a hook runs. A Stop hook sees `CLAUDE_CODE_ENTRYPOINT=sdk-cli` in a `claude -p` session and `cli` in an interactive one (probed). Ezz: _"does the router needs fixing? if so you do it"_; the router's `wait` now returns at once in print mode, and the same run ended `done` in 9 s. The runner does not work around such hooks: each hook knows whether it means anything in a session with no person.
+
 **A failure is the exit code or `is_error`, never `subtype`.** A captured reply of claude 2.1.325 to an unknown model had exit 1, `is_error: true` and `subtype: "success"`.
 
 ## What the user sees
