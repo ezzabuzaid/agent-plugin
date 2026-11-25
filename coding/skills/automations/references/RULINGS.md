@@ -42,7 +42,15 @@ Each rule in [SKILL.md](../SKILL.md) and each choice in [scripts/automations.ts]
 
 **A notification after every run.** Ezz chose "Notify every run": the first line of the reply, and a click that shows the session. terminal-notifier runs the click command with `/bin/sh`. The command is `cmux workspace create`, because Ezz's terminal is cmux (`experiments-mutex/terminal-is-cmux.md`) and cmux calls `new-workspace` a legacy alias. A click opened the resumed session of a scheduled run, with its history.
 
+**terminal-notifier and cmux are extras, not requirements.** Neither ships with macOS, and the skill ships in a plugin for any Mac (session `14a4eccc`, 2026-11-25: Ezz chose "Optional extras, native fallback"). When terminal-notifier is missing, the run notifies through `osascript`, which takes the title, subtitle and message as `on run argv` words, so no text needs escaping. The click command goes in only when cmux is installed, because a click cannot be tried ahead of time.
+
 ## Where the skill lives
+
+**In the coding plugin, as `coding:automations`.** _"I want it to be part of this plugin"_, then _"re think the skill and it is deps. this plugin should be self contained and portable"_ (session `14a4eccc`, 2026-11-25). Before, the skill lived in `agent-plugin/skills/` and loaded through the symlink `~/.claude/skills/automations`.
+
+**The packages stay, in a committed bundle.** Ezz: _"cannot you use npm pcakges, why?"_, then _"bundle man"_, through an esbuild script in the package (not Nx, which agent-plugin does not use). A plugin installs from git, and `node_modules` is not in git, so `build.ts` bundles `automations.ts` and its packages into `scripts/dist/automations.mjs`. yaml, plist and @xmldom/xmldom are CommonJS and require Node built-ins: without the `createRequire` banner, the bundle failed with `Dynamic require of "process" is not supported`. A test rebuilds the bundle and fails when it differs from the committed one.
+
+**launchd runs a copy that keeps its path.** A plugin keeps each version in its own folder (`~/.claude/plugins/cache/ezzabuzaid/coding/<version>/`), so a job that ran the plugin's file would keep running the version that installed it. `sync` copies the bundle to `~/.claude/automations/runner.mjs` and the jobs run that copy. `readAll` reads only folders, so the file is never taken for an automation.
 
 **One skill folder, with its script inside.** _"use proper folder structure for this skills and the structure the skill itself to how I like to create skills"_. The script and its test moved from `tools/automations/` into `scripts/`, as `write-test` keeps `mutate.mjs` and its test, and the rules went into this file, as `lib-creator` and `write-test` keep theirs.
 

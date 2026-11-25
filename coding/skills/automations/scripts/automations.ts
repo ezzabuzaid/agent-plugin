@@ -15,13 +15,17 @@ import { RRuleTemporal } from 'rrule-temporal';
 import { parse as parseYaml } from 'yaml';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { readdir, readFile } from 'node:fs/promises';
+import { access, readdir, readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { parseArgs } from 'node:util';
 
 const HOME = homedir();
 const AUTOMATIONS = join(HOME, '.claude/automations');
+// launchd jobs run this copy of the bundle: a plugin keeps each version in its own folder, so a job that
+// ran the plugin's file would keep the version that installed it.
+const RUNNER = join(AUTOMATIONS, 'runner.mjs');
+const BUNDLE = import.meta.filename.endsWith('.ts') ? join(import.meta.dirname, 'dist/automations.mjs') : import.meta.filename;
 const LABEL_PREFIX = 'com.ezzabuzaid.automations.';
 // The native installer's link; auto-update moves it to each new version. The `claude` on PATH can be a
 // terminal's shim in a temporary folder.
@@ -381,16 +385,38 @@ class Runner {
     const subtitle = outcome.kind === 'failed' ? `failed (exit ${outcome.exitCode})` : outcome.kind;
     const message =
       outcome.kind === 'timed out' ? `stopped after ${timeout}` : (outcome.result.trim().split('\n')[0] ?? '');
-    const args = ['-title', name, '-subtitle', subtitle, '-message', message || '(no reply)', '-group', LABEL_PREFIX + id];
-    if (outcome.sessionId !== undefined) {
-      const resume = `claude --resume ${outcome.sessionId}`;
-      args.push('-execute', `${CMUX} workspace create --name ${quote(name)} --cwd ${quote(cwd)} --command ${quote(resume)}`);
-    }
+    const text = message || '(no reply)';
     try {
-      const notifier = spawn('terminal-notifier', args, { stdio: 'ignore' });
-      await once(notifier, 'close');
+      const args = ['-title', name, '-subtitle', subtitle, '-message', text, '-group', LABEL_PREFIX + id];
+      // A click cannot be tried ahead of time, so the click command is added only when cmux is installed.
+      if (outcome.sessionId !== undefined && (await Runner.#installed(CMUX))) {
+        const resume = `claude --resume ${outcome.sessionId}`;
+        args.push('-execute', `${CMUX} workspace create --name ${quote(name)} --cwd ${quote(cwd)} --command ${quote(resume)}`);
+      }
+      try {
+        await Runner.#tool('terminal-notifier', args);
+      } catch (error) {
+        if (!isErrno(error, 'ENOENT')) throw error;
+        // macOS ships osascript; its notification has no click command.
+        const show = 'display notification (item 3 of argv) with title (item 1 of argv) subtitle (item 2 of argv)';
+        await Runner.#tool('osascript', ['-e', 'on run argv', '-e', show, '-e', 'end run', name, subtitle, text]);
+      }
     } catch (error) {
       this.#log(`no notification: ${messageOf(error)}`);
+    }
+  }
+
+  static async #tool(file: string, args: string[]): Promise<void> {
+    await once(spawn(file, args, { stdio: 'ignore' }), 'close');
+  }
+
+  static async #installed(path: string): Promise<boolean> {
+    try {
+      await access(path);
+      return true;
+    } catch (error) {
+      if (isErrno(error, 'ENOENT')) return false;
+      throw error;
     }
   }
 
@@ -427,6 +453,7 @@ class Sync {
       return 1;
     }
     const active = automations.filter((automation) => automation.status === 'active');
+    if (active.length > 0) await atomicWrite(RUNNER, await readFile(BUNDLE), { clock: globalThis });
     for (const automation of active) {
       const service = await this.#launchd.install(this.#job(automation));
       console.log(`installed ${service.label}`);
@@ -446,7 +473,7 @@ class Sync {
     if (!isAbsolutePath(log) || !isAbsolutePath(node)) throw new Error(`${log} or ${node} is not absolute`);
     return {
       Label: LABEL_PREFIX + automation.id,
-      ProgramArguments: [node, import.meta.filename, 'run', automation.id, '--if-due'],
+      ProgramArguments: [node, RUNNER, 'run', automation.id, '--if-due'],
       EnvironmentVariables: {
         HOME,
         // node first: the hooks of the user's settings run a bare `node`.

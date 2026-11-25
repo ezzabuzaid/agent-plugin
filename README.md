@@ -18,7 +18,7 @@ codex plugin marketplace add ezzabuzaid/agent-plugin
 codex plugin add coding@ezzabuzaid
 ```
 
-The skills work in both. The output style is Claude Code only.
+The skills work in both, except automations, which runs `claude -p` under launchd on macOS. The output style is Claude Code only.
 
 ## Plugins
 
@@ -42,7 +42,8 @@ the **node-native** skill, which reports what the current Node LTS already does 
 codebase, each claim proved by a probe, the **lib-creator** skill, which creates a library
 package from the decision that it should exist to the last consumer that moves onto it, and the
 **update-docs** skill and its three docs agents, which keep each library project's docs current
-from evidence. See
+from evidence, and the **automations** skill, which runs Claude Code prompts headless on a schedule on
+a Mac, through launchd. See
 [coding/README.md](./coding/README.md).
 
 ## Selecting the style

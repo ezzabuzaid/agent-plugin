@@ -6,8 +6,12 @@ import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import { TemporaryFiles } from '@zukhruf/fs';
+import { build } from 'esbuild';
+
+import { options } from './build.ts';
 
 const CLI = new URL('./automations.ts', import.meta.url).pathname;
+const BUNDLE = new URL('./dist/automations.mjs', import.meta.url).pathname;
 
 // The runner finds `claude` at $HOME/.local/bin and the other tools on PATH, as under launchd.
 function cli(home: string, args: string[], extraEnv: Record<string, string> = {}) {
@@ -468,6 +472,33 @@ test('the notification of a run names it, gives the first line of the reply, and
   ]);
 });
 
+test('with no terminal-notifier, the notification of a run comes from the osascript of macOS', () => {
+  using home = new TemporaryFiles().directorySync('automations-');
+  writeAutomation(
+    home.path,
+    'digest',
+    `---\nname: Ezz's "digest"\nschedule: |\n  DTSTART;TZID=UTC:20261117T090000\n  RRULE:FREQ=WEEKLY\ncwd: ${home.path}\nstatus: active\n---\nwrite the digest\n`,
+  );
+  writeFakeClaude(home.path, { ...OK_REPLY, result: 'The digest is in digest.md.\n\nDetails follow.' });
+  writeExecutable(
+    join(home.path, '.local/bin/osascript'),
+    `#!/usr/bin/env node
+require('node:fs').appendFileSync(process.env.HOME + '/notifications.jsonl', JSON.stringify(process.argv.slice(2)) + '\\n');
+`,
+  );
+
+  const result = cli(home.path, ['run', 'digest']);
+
+  assert.equal(result.status, 0);
+  const [argv = []] = notifications(home.path);
+  // osascript takes the script lines after -e and gives the words after them to `on run argv`.
+  const script = argv.flatMap((word, index) => (argv[index - 1] === '-e' ? ['-e', word] : []));
+  const values = argv.slice(argv.lastIndexOf('-e') + 2);
+  assert.deepEqual(values, [`Ezz's "digest"`, 'done', 'The digest is in digest.md.']);
+  // osacompile checks the script the way osascript reads it, with no notification shown.
+  assert.equal(spawnSync('/usr/bin/osacompile', ['-o', join(home.path, 'notify.scpt'), ...script]).status, 0);
+});
+
 test('the Mac is held awake while claude runs', () => {
   using home = new TemporaryFiles().directorySync('automations-');
   writeAutomation(
@@ -572,6 +603,10 @@ test('sync installs a launchd job for each active automation, launchd runs it th
     assert.deepEqual(job(half).StartCalendarInterval, [{ Minute: 0 }, { Minute: 30 }]);
     assert.deepEqual(job(minutely).StartCalendarInterval, {});
     assert.deepEqual(job(zoned).StartCalendarInterval, [{ Minute: zonedStart.withTimeZone(zone).minute }]);
+    // A plugin keeps each version in its own folder: the job runs a copy of the bundle that the next sync replaces.
+    const runner = join(home.path, '.claude/automations/runner.mjs');
+    assert.equal(job(due).ProgramArguments[1], runner);
+    assert.equal(readFileSync(runner, 'utf8'), readFileSync(BUNDLE, 'utf8'));
     // The hooks of the user's settings run a bare `node`: the job finds the node that installed it first.
     assert.equal(job(due).EnvironmentVariables.PATH.split(':')[0], dirname(process.execPath));
     assert.equal(listed(due).installed, true);
@@ -624,4 +659,27 @@ test('sync installs a launchd job for each active automation, launchd runs it th
   } finally {
     for (const id of [due, half, minutely, zoned]) spawnSync('launchctl', ['bootout', target(id)]);
   }
+});
+
+test('the committed bundle is what build.ts makes of the source', async () => {
+  const { outputFiles } = await build({ ...options, write: false, logLevel: 'silent' });
+
+  assert.equal(outputFiles[0]?.text, readFileSync(BUNDLE, 'utf8'), 'dist/automations.mjs is stale: run npm run build');
+});
+
+test('the bundle runs alone, with no node_modules beside it, as the plugin installs it', () => {
+  using home = new TemporaryFiles().directorySync('automations-');
+  const alone = join(home.path, 'plugin/automations.mjs');
+  mkdirSync(dirname(alone));
+  writeFileSync(alone, readFileSync(BUNDLE));
+  writeAutomation(
+    home.path,
+    'digest',
+    `---\nname: Digest\nschedule: |\n  DTSTART;TZID=UTC:20261117T090000\n  RRULE:FREQ=WEEKLY\ncwd: ${home.path}\nstatus: paused\n---\nwrite the digest\n`,
+  );
+
+  const result = spawnSync(process.execPath, [alone, 'list', '--json'], { cwd: dirname(alone), encoding: 'utf8', env: { HOME: home.path, PATH: '/usr/bin:/bin' } });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).automations[0].status, 'paused');
 });

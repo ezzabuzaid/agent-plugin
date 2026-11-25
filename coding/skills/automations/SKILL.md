@@ -9,7 +9,9 @@ An automation is a prompt that Claude Code runs with no person present, on this 
 
 ## Script
 
-`scripts/automations.ts` does the work: `node scripts/automations.ts <command>`, with `scripts/` relative to this skill's directory. Its header comment holds its full contract, and `scripts/automations.test.ts` proves it (`npm test` in `scripts/`).
+`node ${CLAUDE_SKILL_DIR}/scripts/dist/automations.mjs <command>` does the work. It is `scripts/automations.ts` with its packages bundled in, so it runs with no install. `sync` copies it to `~/.claude/automations/runner.mjs`, and the launchd jobs run that copy. The header comment of `scripts/automations.ts` holds the full contract, and `scripts/automations.test.ts` proves it.
+
+To change the script, edit `scripts/automations.ts`, then run `npm run build` and `npm test` in `scripts/`, and commit `dist/automations.mjs` with the change. A test fails while the bundle does not match the source. After the change ships, run `sync` once so the jobs run the new bundle.
 
 | Command             | Does                                                                                                                                                                                  |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -102,13 +104,14 @@ After a run that is not an error, the script runs `while` with `/bin/sh -c` in t
 
 ## What the user sees
 
-After each run, a macOS notification gives the `name`, `done`, `failed (exit N)` or `timed out`, and the first line of the reply. A click on it opens a cmux workspace in the `cwd` with `claude --resume <session>`. Each run is a saved session, so `claude --resume` in the `cwd` also finds it.
+After each run, a macOS notification gives the `name`, `done`, `failed (exit N)` or `timed out`, and the first line of the reply. It comes from `terminal-notifier` when that is on the PATH, and else from the `osascript` of macOS. With `terminal-notifier` and cmux both installed, a click on it opens a cmux workspace in the `cwd` with `claude --resume <session>`. Each run is a saved session, so `claude --resume` in the `cwd` also finds it.
 
 ## Traps
 
 - **The Mac sleeps.** A run starts only while the Mac is awake and the user is logged in. When the Mac sleeps through one or more times, the automation runs one time after the Mac wakes. The script does not wake the Mac.
 - **A run failed with no clear reason.** Read `run.log` (one line when a run starts and one when it ends, with the session), `state.json` (the last exit code and session) and the session itself with `claude --resume <session>` in the `cwd`.
 - **`sync` installs nothing** when one automation is wrong, also for the correct ones. Read its message, fix the file, run `sync` again.
+- **The jobs run the bundle of the last `sync`.** A plugin update does not reach them until `sync` runs again.
 - **Billing.** An `ANTHROPIC_API_KEY` or `claude --bare` makes a run use API credit. The script removes the key from each run. Do not add `--bare` to a prompt or a wrapper.
 
 ## Done when

@@ -95,6 +95,20 @@ stamps prove is its own, so peer sessions in the same checkout keep their edits.
 opts in with `.claude/update-docs.json`, which names its docs guide, its map file and the paths
 no run may claim. `/coding:update-docs all` runs one lead subagent per due project.
 
+## automations skill
+
+[`skills/automations`](./skills/automations/SKILL.md) makes, changes, pauses, runs and lists
+Claude Code prompts that run headless on a schedule on a Mac, through launchd and `claude -p`
+on the usage of the Claude plan, with no open session. An automation is a folder under
+`~/.claude/automations/` with an RFC 5545 schedule. The script ships as
+[`scripts/dist/automations.mjs`](./skills/automations/scripts/dist/automations.mjs), the
+source and its packages bundled by `npm run build`, so it runs from the plugin with no install;
+a test fails while the bundle does not match the source. `sync` copies the bundle to
+`~/.claude/automations/runner.mjs`, which the launchd jobs run, so a plugin update reaches
+them at the next `sync`. macOS and Claude Code only.
+
+The script has its own tests: `npm test` in `skills/automations/scripts`.
+
 ## Install
 
 ```

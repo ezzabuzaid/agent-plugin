@@ -3,20 +3,20 @@
   "private": true,
   "type": "module",
   "bin": {
-    "automations": "./automations.ts"
+    "automations": "./dist/automations.mjs"
   },
   "scripts": {
+    "build": "node build.ts",
     "test": "node --test --no-warnings automations.test.ts",
     "typecheck": "tsc -p ."
   },
-  "dependencies": {
-    "@zukhruf/fs": "^0.8.22",
-    "@zukhruf/launchd": "^0.8.22",
-    "rrule-temporal": "^2.2.9",
-    "yaml": "^2.9.1"
-  },
   "devDependencies": {
     "@types/node": "^26.6.6",
-    "typescript": "^7.0.2"
+    "@zukhruf/fs": "^0.8.22",
+    "@zukhruf/launchd": "^0.8.22",
+    "esbuild": "^0.28.2",
+    "rrule-temporal": "^2.2.9",
+    "typescript": "^7.0.2",
+    "yaml": "^2.9.1"
   }
 }
