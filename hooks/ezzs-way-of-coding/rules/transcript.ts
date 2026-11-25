@@ -12,6 +12,17 @@ export type TranscriptEntry = {
     role?: string;
     content?: unknown;
   };
+  // What a tool returned, beside its tool_result: AskUserQuestion writes its
+  // questions and the user's answers here.
+  toolUseResult?: unknown;
+  // A message the user sent while the turn ran is a `queued_command` attachment.
+  attachment?: {
+    type?: string;
+    prompt?: unknown;
+    origin?: {
+      kind?: string;
+    };
+  };
 };
 
 /**

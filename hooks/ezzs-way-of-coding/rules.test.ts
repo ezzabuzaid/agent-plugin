@@ -1351,7 +1351,7 @@ test('stop sends a prose ask to AskUserQuestion even when the same turn already 
 });
 
 test('a subagent stop and a stop that a stop hook already continued never get the Stop rules', async () => {
-  const sweepDue = [{ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: {} }] } }];
+  const sweepDue = [{ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'git push origin main' } }] } }];
   const ask = 'Two questions for you:\n1. A?\n2. B?';
   for (const input of [
     { hook_event_name: 'SubagentStop', last_assistant_message: ask },
@@ -1365,34 +1365,92 @@ const toolCall = (name: string, input: object = {}) => ({
   type: 'assistant',
   message: { role: 'assistant', content: [{ type: 'tool_use', id: `toolu_${name}`, name, input }] },
 });
+const bash = (command: string, options: object = {}) => toolCall('Bash', { command, ...options });
+const said = (text: string) => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
 const sweep = toolCall('Skill', { skill: 'housekeeping', args: 'Before the done report.' });
 // Claude Code writes this entry each time a turn stops.
 const stopped = { type: 'system', subtype: 'stop_hook_summary', hookCount: 6, hookInfos: [] };
-const request = { type: 'user', message: { role: 'user', content: 'Fix the reaper.' } };
-const reply = { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Fixed.' }] } };
-const BEFORE_DONE = '[stop-feedback:housekeeping-due]\nBefore this turn ends, run the housekeeping skill in before-done mode.';
+// A prompt the user typed: Claude Code records its origin as human.
+const userSays = (content: string) => ({ type: 'user', origin: { kind: 'human' }, message: { role: 'user', content } });
+// A message the user sent while the turn ran (Claude Code 2.1.332's transcript shape).
+const queued = (prompt: string, kind = 'human') => ({
+  type: 'attachment',
+  attachment: { type: 'queued_command', prompt, commandMode: 'prompt', origin: { kind }, humanTurn: true },
+});
+// The answer to an AskUserQuestion: the tool_result and the toolUseResult Claude Code writes beside it.
+const dialogAnswer = (question: string, labels: string[], answer: string) => ({
+  type: 'user',
+  message: {
+    role: 'user',
+    content: [
+      {
+        type: 'tool_result',
+        tool_use_id: 'toolu_AskUserQuestion',
+        content: `Your questions have been answered: "${question}"="${answer}". You can now continue with these answers in mind.`,
+      },
+    ],
+  },
+  toolUseResult: {
+    questions: [{ question, header: 'Push', options: labels.map((label) => ({ label, description: '' })), multiSelect: false }],
+    answers: { [question]: answer },
+  },
+});
+const request = userSays('Fix the reaper.');
+const reply = said('Fixed.');
+const commit = bash('git commit --only -m "fix: the reaper" src/reaper.ts');
+const BEFORE_DONE =
+  '[stop-feedback:housekeeping-due]\nBefore this turn ends, call the housekeeping skill in before-done mode (a sweep from memory does not count).';
 
-test('stop asks for a housekeeping sweep once the agent worked after the last sweep was stopped on', async () => {
+// housekeeping-due fires on a real change since the last sweep: a commit or a
+// push, a change of the background task set (Agent, background Bash, Monitor,
+// TaskStop), or a close claim in the final message. Edits and reads alone do
+// not. Measured on the 2520 organic stops of 59 sessions (forensics
+// 2026-11-26, guardrail-scratch/segments.jsonl): the old "any tool since the
+// last sweep" trigger fired at 2297 (91 %); this trigger fires at 1327
+// (52.7 %): Agent 708, background Bash 413, git 310, close claim 126, TaskStop
+// 62, Monitor 22, a change from an earlier turn not yet swept 113.
+test('stop asks for a housekeeping sweep after a commit, a push, a task-set change or a close claim', async () => {
   for (const [label, entries] of [
-    ['no sweep yet', [request, toolCall('Bash'), reply]],
-    ['sweep, stop, more work', [request, toolCall('Bash'), sweep, reply, stopped, request, toolCall('Edit'), reply]],
+    ['a commit', [request, commit, reply]],
+    ['a push', [request, bash('git -C ~/Desktop/x push origin main'), reply]],
+    ['a background command', [request, bash('npm test', { run_in_background: true }), reply]],
+    ['a subagent launch', [request, toolCall('Agent', { prompt: 'Probe.' }), reply]],
+    ['a stopped task', [request, toolCall('TaskStop', { task_id: 'b1' }), reply]],
+    ['an armed watch', [request, toolCall('Monitor', { command: 'gh run watch' }), reply]],
+    ['sweep, stop, then a commit', [request, commit, sweep, reply, stopped, request, commit, reply]],
   ] as const) {
     assert.ok((await stopContext({}, [...entries])).includes(BEFORE_DONE), label);
   }
+  for (const claim of ['Safe to close.', 'Nothing new.', 'Nothing of mine is running.', 'All done.']) {
+    assert.ok((await stopContext({}, [request, said(claim)])).includes(BEFORE_DONE), claim);
+  }
 });
 
-test('stop stays quiet on housekeeping while no work followed the last sweep that was stopped on', async () => {
+test('stop stays quiet on housekeeping after edits, reads and messages alone', async () => {
   for (const [label, entries] of [
     ['no tool call at all', [request, reply]],
-    ['sweep in the current turn', [request, toolCall('Bash'), sweep, toolCall('Edit'), reply]],
-    ['an older sweep was stopped on, the last one ran this turn', [sweep, stopped, toolCall('Bash'), sweep, toolCall('Edit'), reply]],
-    ['a plugin-prefixed sweep in the current turn', [request, toolCall('Bash'), toolCall('Skill', { skill: 'ezzabuzaid:housekeeping' }), reply]],
-    ['sweep, stop, no tool call since', [request, toolCall('Bash'), sweep, reply, stopped, request, reply]],
+    ['edits', [request, toolCall('Edit', { file_path: '/x/a.ts' }), toolCall('Write', { file_path: '/x/b.ts' }), reply]],
+    ['reads', [request, bash('git status --short && git log --oneline -3'), toolCall('Read', { file_path: '/x/a.ts' }), reply]],
+    ['a message to a peer', [request, toolCall('SendMessage', { to: 'a1', message: 'Go on.' }), reply]],
+    ['a commit swept in the same turn', [request, commit, sweep, commit, reply]],
+    ['a plugin-prefixed sweep after the commit', [request, commit, toolCall('Skill', { skill: 'ezzabuzaid:housekeeping' }), reply]],
+    ['a commit, a sweep, a stop, then only edits', [request, commit, sweep, reply, stopped, request, toolCall('Edit'), reply]],
+    ['a close claim in the turn of the sweep', [request, commit, sweep, said('Safe to close.')]],
   ] as const) {
     assert.doesNotMatch(await stopContext({}, [...entries]), /housekeeping-due/, label);
   }
-  // Another skill is work, not a sweep.
-  assert.ok((await stopContext({}, [request, toolCall('Skill', { skill: 'write-test' }), reply])).includes(BEFORE_DONE));
+});
+
+test('only a housekeeping Skill call answers a housekeeping fire; an inline sweep or another skill does not', async () => {
+  const fired = [request, commit, reply, stopped];
+  for (const [label, entries] of [
+    ['an inline sweep from memory', [...fired, userSays('Go on with the docs.'), said('**Swept:** Nothing new. Records are current.')]],
+    ['another skill', [...fired, userSays('Go on with the docs.'), toolCall('Skill', { skill: 'write-test' }), reply]],
+    ['a stop with no tool call', [...fired, userSays('Go on with the docs.'), reply]],
+  ] as const) {
+    assert.ok((await stopContext({}, [...entries])).includes(BEFORE_DONE), label);
+  }
+  assert.doesNotMatch(await stopContext({}, [...fired, userSays('Go on with the docs.'), sweep, reply]), /housekeeping-due/);
 });
 
 test('stop asks for an idle housekeeping round while any background work still runs', async () => {
@@ -1405,13 +1463,17 @@ test('stop asks for an idle housekeeping round while any background work still r
   ] as const) {
     const context = await stopContext({ background_tasks: [task] }, [request, toolCall('Agent'), reply]);
     assert.ok(
-      context.includes(`[stop-feedback:housekeeping-due]\nBackground work is still running: ${named}. Before this turn ends, run the housekeeping skill in idle mode`),
+      context.includes(
+        `[stop-feedback:housekeeping-due]\nBackground work is still running: ${named}. Before this turn ends, call the housekeeping skill in idle mode (a sweep from memory does not count)`,
+      ),
       context,
     );
     assert.doesNotMatch(context, /before-done mode/, named);
     // Running work is no reason to stop: the reminder sends the agent on to the work that does not wait on it.
     assert.match(context, /then start every queued item that does not depend on that work/, named);
-    assert.doesNotMatch(context, /keep waiting/, named);
+    assert.match(context, /A test run, CI run, push or deploy never holds the queue: start every item it does not block\./, named);
+    assert.match(context, /End the turn with what remains: what runs and who receives it, and each queued item with what it waits on\./, named);
+    assert.doesNotMatch(context, /keep waiting|End the turn only when every remaining item waits on it/, named);
   }
   // A /clear keeps a subagent running; the reminder names every task, so none is reported as gone.
   const both = await stopContext(
@@ -1424,12 +1486,12 @@ test('stop asks for an idle housekeeping round while any background work still r
     [request, toolCall('Agent'), reply],
   );
   assert.ok(both.includes('running: subagent a791e34a38c02e610 (deepagents #3369 tests pass db.pool()); shell b1 (race proof).'), both);
-  assert.ok((await stopContext({ background_tasks: [] }, [request, toolCall('Bash'), reply])).includes(BEFORE_DONE));
+  assert.ok((await stopContext({ background_tasks: [] }, [request, commit, reply])).includes(BEFORE_DONE));
 });
 
 test('a headless run gets neither Stop rule: it has no AskUserQuestion and no person to sweep for', async () => {
   const ask = 'Two questions for you:\n1. A?\n2. B?';
-  const worked = [request, toolCall('Bash'), reply];
+  const worked = [request, commit, reply];
   // hook.ts copies Claude Code's CLAUDE_CODE_ENTRYPOINT into the input: `claude -p` and the SDKs.
   for (const entrypoint of ['sdk-cli', 'sdk-ts', 'sdk-py']) {
     const context = await stopContext({ claude_code_entrypoint: entrypoint, last_assistant_message: ask }, worked);
@@ -1446,9 +1508,120 @@ test('a headless run gets neither Stop rule: it has no AskUserQuestion and no pe
 test('stop stays quiet on housekeeping in a Codex session and without a transcript', async () => {
   const codex = [
     { type: 'turn_context', payload: { turn_id: 'turn-1' } },
-    toolCall('shell'),
+    toolCall('shell', { command: 'git commit -m x' }),
     reply,
   ];
   assert.doesNotMatch(await stopContext({}, codex), /housekeeping-due/);
   assert.doesNotMatch(await stopContext({ last_assistant_message: 'Done.' }), /housekeeping-due/);
+});
+
+// K2: a turn that only answers the user's question ends on the answer. Both
+// Stop rules would fire here: a commit earlier in the session is not swept,
+// and the answer ends in a prose offer.
+const unswept = [request, commit, reply, stopped];
+const answer = 'Six items are open: #5401 to #5406.\n\nWant me to start on #5401?';
+
+test('neither Stop rule fires after a turn that only answers a question from the user', async () => {
+  for (const [label, entries] of [
+    ['a typed question', [userSays('how many items open?'), bash('agent-backlog list --json'), said(answer)]],
+    ['a question with no question mark', [userSays('which of them is the oldest'), said(answer)]],
+    ['a question sent while the turn ran', [userSays('Fix the reaper.'), bash('git status'), queued('wait, how many items are open?'), said(answer)]],
+    ['a question typed into the dialog', [userSays('Fix the reaper.'), toolCall('AskUserQuestion'), dialogAnswer('Push main now?', ['Push', 'Hold'], 'what does the push release?'), said(answer)]],
+  ] as const) {
+    const context = await stopContext({}, [...unswept, ...entries]);
+    assert.doesNotMatch(context, /housekeeping-due|ask-in-the-tool/, label);
+  }
+});
+
+test('the Stop rules still fire after a question when the turn wrote, or the question asks for the wrap-up', async () => {
+  for (const [label, turn] of [
+    ['an edit', [userSays('how many items open?'), toolCall('Edit', { file_path: '/x/a.ts' }), said(answer)]],
+    ['a commit', [userSays('how many items open?'), commit, said(answer)]],
+    ['a backlog write', [userSays('how many items open?'), bash('agent-backlog add "x" --repo mutex'), said(answer)]],
+    ['a subagent launch', [userSays('how many items open?'), toolCall('Agent', { prompt: 'Count.' }), said(answer)]],
+    ['a background command', [userSays('how many items open?'), bash('npm test', { run_in_background: true }), said(answer)]],
+    ['a Bash write into memory', [userSays('how many items open?'), bash("printf '%s' x >> ~/.claude/projects/p/memory/MEMORY.md"), said(answer)]],
+    ['a Bash write into a plan', [userSays('how many items open?'), bash("sed -i '' 's/a/b/' ~/.claude/plans/x.md"), said(answer)]],
+    ['a statement, not a question', [userSays('Count the open items.'), said(answer)]],
+    ['a peer asks, not the user', [userSays('Fix the reaper.'), queued('can you release the lock on mutex?', 'peer'), said(answer)]],
+    // The tool_result quotes each question, so only the typed words are read; a picked label is an answer even when it ends in a question mark.
+    ['a dialog answer that picks an option', [userSays('Fix the reaper.'), toolCall('AskUserQuestion'), dialogAnswer('Push main now?', ['Push when green?', 'Hold'], 'Push when green?'), said(answer)]],
+  ] as const) {
+    const context = await stopContext({}, [...unswept, ...turn]);
+    assert.match(context, ASK_IN_THE_TOOL, label);
+    assert.ok(context.includes(BEFORE_DONE), label);
+  }
+  for (const wrapUp of [
+    "what's left?",
+    'what remains?',
+    'anything remaining?',
+    'can I close this session?',
+    'you finished everything? are you sure?',
+    'double check it, is it all pushed?',
+    'what are you waiting for?',
+  ]) {
+    const context = await stopContext({}, [...unswept, userSays(wrapUp), bash('git status'), said(answer)]);
+    assert.ok(context.includes(BEFORE_DONE), wrapUp);
+    assert.match(context, ASK_IN_THE_TOOL, wrapUp);
+  }
+});
+
+// K5: "Safe to close" is the housekeeping skill's verdict phrase (89 of 89
+// final messages that wrote it were close claims, forensics 2026-11-26), and
+// the claim must quote the close check that ran in the same turn.
+const CLOSE_CHECK =
+  "[stop-feedback:close-check-before-safe-to-close]\nYou wrote 'Safe to close' without running the housekeeping skill's scripts/close-check.mjs in this turn. Run it, and quote its output.";
+
+test('stop sends a Safe to close claim back unless the close check ran in the same turn', async () => {
+  for (const [label, entries] of [
+    ['no close check', [request, sweep, said('Nothing new.\n\nSafe to close.')]],
+    ['the close check ran in an earlier turn', [request, bash('node ~/agent-plugin/skills/housekeeping/scripts/close-check.mjs'), reply, stopped, userSays('Close?'), sweep, said('Safe to close.')]],
+  ] as const) {
+    assert.ok((await stopContext({}, [...entries])).includes(CLOSE_CHECK), label);
+  }
+  assert.doesNotMatch(
+    await stopContext({}, [request, sweep, bash('node ~/agent-plugin/skills/housekeeping/scripts/close-check.mjs --session x'), said('Safe to close.')]),
+    /close-check-before-safe-to-close/,
+  );
+  // Only the verdict phrase: other done words are often descriptions ("Reader B finished").
+  for (const message of ['Nothing of mine is running.', 'Reader B finished.', 'All done.', 'The skill writes "Safe to close" as its verdict.']) {
+    assert.doesNotMatch(await stopContext({}, [request, sweep, said(message)]), /close-check-before-safe-to-close/, message);
+  }
+});
+
+test('stop sends the asks it used to miss to AskUserQuestion: your go, waits on you, asks in the chat, a slash command to type', async () => {
+  for (const message of [
+    '**Yours, when you choose**\n- **mac-mini back** (#5048).',
+    'The deploy needs your go when they are committed.',
+    'The writer question waits on your direction.',
+    '**Still waits on you:** a yes to the zukhruf push for #5682.',
+    '#5463 waits on you.',
+    'The questions are above.',
+    'To resume, type `/housekeeping` when you are back.',
+    'The next step is your review of the paper.',
+  ]) {
+    assert.match(await stopContext({ last_assistant_message: message }), ASK_IN_THE_TOOL, message);
+  }
+});
+
+test('stop stays quiet on a report that only mentions the user\'s go or a wait that is not on him', async () => {
+  for (const message of [
+    '- **Waits on you:** nothing.',
+    '**Waits on you:** none.',
+    'Your go is recorded on #5723. The spelling step pushes once its fixes pass the gates.',
+    'Your go was already given on #5645, so the push runs when green.',
+    'Per your direction, the push waits for CI.',
+    'No decision waits on you.',
+    'I pushed it without your go-ahead to the staging branch only.',
+  ]) {
+    assert.doesNotMatch(await stopContext({ last_assistant_message: message }), /ask-in-the-tool/, message);
+  }
+});
+
+test('ask-in-the-tool says to explain in the chat and ask briefly in the dialog', async () => {
+  const context = await stopContext({ last_assistant_message: 'Pushing main is your call.' });
+  assert.match(context, /Explain in the chat in plain words, then ask in AskUserQuestion with a one-line question and short labels, your pick first, 2-4 options each\./);
+  assert.match(context, /A task for him becomes a question: 'Do X, then pick Done'\./);
+  assert.match(context, /A `!` command is the last line of the chat, with no dialog after it\./);
+  assert.doesNotMatch(context, /explanation inside the question|an open dialog hides the chat/);
 });
