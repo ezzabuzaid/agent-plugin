@@ -369,6 +369,7 @@ export const stopRules: ReminderRule[] = [
     id: 'ask-in-the-tool',
     target: 'stop-feedback',
     events: ['Stop'],
+    continuedStops: 'once',
     when: async (input) => {
       if (runsHeadless(input)) return false;
       const raw = typeof input.last_assistant_message === 'string' ? input.last_assistant_message : '';
@@ -394,6 +395,7 @@ export const stopRules: ReminderRule[] = [
     id: 'close-check-before-safe-to-close',
     target: 'stop-feedback',
     events: ['Stop'],
+    continuedStops: 'once',
     when: async (input) =>
       !runsHeadless(input) &&
       /\bSafe to close\b/i.test(await finalAssistantText(input)) &&

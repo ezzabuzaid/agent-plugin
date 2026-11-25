@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@deepagents/experimental": "4.3.0"
+    "@deepagents/experimental": "7.38.1"
   },
   "scripts": {
     "test": "node --test --no-warnings rules.test.ts",
@@ -13,5 +13,11 @@
     "@types/node": "^26.6.6",
     "@zukhruf/fs": "^0.8.22",
     "typescript": "^7.0.2"
+  },
+  "allowScripts": {
+    "ssh2": false,
+    "cpu-features": false,
+    "@mongodb-js/zstd": false,
+    "node-liblzma": false
   }
 }

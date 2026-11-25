@@ -1352,17 +1352,6 @@ test('stop sends a prose ask to AskUserQuestion even when the same turn already 
   assert.match(context, ASK_IN_THE_TOOL);
 });
 
-test('a subagent stop and a stop that a stop hook already continued never get the Stop rules', async () => {
-  const sweepDue = [{ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'git push origin main' } }] } }];
-  const ask = 'Two questions for you:\n1. A?\n2. B?';
-  for (const input of [
-    { hook_event_name: 'SubagentStop', last_assistant_message: ask },
-    { stop_hook_active: true, last_assistant_message: ask },
-  ]) {
-    assert.doesNotMatch(await stopContext(input, sweepDue), /ask-in-the-tool|housekeeping-due/, JSON.stringify(input));
-  }
-});
-
 const toolCall = (name: string, input: object = {}) => ({
   type: 'assistant',
   message: { role: 'assistant', content: [{ type: 'tool_use', id: `toolu_${name}`, name, input }] },
@@ -1591,6 +1580,56 @@ test('stop sends a Safe to close claim back unless the close check ran in the sa
   for (const message of ['Nothing of mine is running.', 'Reader B finished.', 'All done.', 'The skill writes "Safe to close" as its verdict.']) {
     assert.doesNotMatch(await stopContext({}, [request, sweep, said(message)]), /close-check-before-safe-to-close/, message);
   }
+});
+
+// A stop that a stop hook already continued (stop_hook_active) gets a Stop rule
+// again only when the rule opts in with continuedStops: 'once', and only while
+// the transcript holds none of the rule's own feedback since the last human
+// turn. Claude Code writes that feedback as a hook_additional_context
+// attachment whose content starts with the rule's marker line.
+const hookFeedback = (...content: string[]) => ({
+  type: 'attachment',
+  attachment: { type: 'hook_additional_context', content },
+});
+const PROSE_ASK = 'Two questions for you:\n1. A?\n2. B?';
+const pushed = bash('git push origin main');
+
+test('a subagent stop and a continued stop never get a Stop rule that is not opted in', async () => {
+  for (const input of [
+    { hook_event_name: 'SubagentStop', last_assistant_message: PROSE_ASK },
+    { stop_hook_active: true, last_assistant_message: PROSE_ASK },
+  ]) {
+    assert.doesNotMatch(await stopContext(input, [request, pushed, said(PROSE_ASK)]), /housekeeping-due/, JSON.stringify(input));
+  }
+  assert.doesNotMatch(
+    await stopContext({ hook_event_name: 'SubagentStop', last_assistant_message: PROSE_ASK }, [request, pushed, said(PROSE_ASK)]),
+    /ask-in-the-tool/,
+  );
+});
+
+test('a continued stop sends a Safe to close claim back once per human turn', async () => {
+  const earlierTurn = [userSays('Close?'), said('Safe to close.'), hookFeedback(CLOSE_CHECK), said('Ran it.')];
+  assert.ok(
+    (await stopContext({ stop_hook_active: true }, [...earlierTurn, userSays('Close now?'), sweep, said('Safe to close.')])).includes(CLOSE_CHECK),
+    'no feedback of its own since the last human turn',
+  );
+  assert.doesNotMatch(
+    await stopContext({ stop_hook_active: true }, [userSays('Close?'), sweep, said('Safe to close.'), hookFeedback(CLOSE_CHECK), said('Safe to close.')]),
+    /close-check-before-safe-to-close/,
+  );
+});
+
+test('a continued stop sends a prose ask to AskUserQuestion once per human turn', async () => {
+  const askFeedback = `[stop-feedback:ask-in-the-tool]\nYour final message asks the user something.`;
+  const earlierTurn = [userSays('Plan it.'), said(PROSE_ASK), hookFeedback(askFeedback), said('Asked in the dialog.')];
+  assert.match(
+    await stopContext({ stop_hook_active: true, last_assistant_message: PROSE_ASK }, [...earlierTurn, userSays('Go on.'), said(PROSE_ASK)]),
+    ASK_IN_THE_TOOL,
+  );
+  assert.doesNotMatch(
+    await stopContext({ stop_hook_active: true, last_assistant_message: PROSE_ASK }, [userSays('Go on.'), said(PROSE_ASK), hookFeedback(askFeedback), said(PROSE_ASK)]),
+    /ask-in-the-tool/,
+  );
 });
 
 test('stop sends the asks it used to miss to AskUserQuestion: your go, waits on you, asks in the chat, a slash command to type', async () => {
