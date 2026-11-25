@@ -4,8 +4,10 @@
 // of its `git commit` and `git push`. gh and agent-backlog are the outer seams: the script reaches them only as
 // executables on PATH, and a real gh would read GitHub's live runs and a real agent-backlog the user's own backlog.
 // So each test puts a stand-in executable on PATH that answers only the exact call the contract names and fails on
-// any other. The child gets PATH (the stand-ins, git, node) and HOME (an empty folder, so no user git config or
-// hook runs) as its input; the test process's own env is not changed.
+// any other. The child gets the runner's env with every input the script and git read replaced: PATH (the
+// stand-ins, git, node), HOME (an empty folder, so no user git config or hook runs), no GIT_* variable and no
+// CLAUDE_CODE_SESSION_ID. The rest passes through, so the script runs with the Node flags of the test process (a
+// mutation prover's load hook among them). The test process's own env is not changed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, chmodSync } from 'node:fs';
@@ -25,7 +27,8 @@ function sandbox() {
   mkdirSync(bin);
   mkdirSync(home);
   symlinkSync('/usr/bin/git', join(bin, 'git'));
-  const env = { PATH: bin, HOME: home, GIT_CONFIG_NOSYSTEM: '1' };
+  const inherited = Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_') && name !== 'CLAUDE_CODE_SESSION_ID');
+  const env = { ...Object.fromEntries(inherited), PATH: bin, HOME: home, GIT_CONFIG_NOSYSTEM: '1' };
   const run = (cwd, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const runBoth = (cwd, ...args) => {
     const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, env, encoding: 'utf8' });
@@ -116,6 +119,46 @@ test('a missing gh is an open item, not silence', () => {
   assert.equal(r.status, 1);
 });
 
+test("a push range line in the output of a command that is not git push lists no push", () => {
+  using s = sandbox();
+  const c = s.commit('a.txt');
+  const pushed = s.push();
+
+  const r = s.check(s.transcript([
+    [`git commit -m x`, c.result],
+    [`cd ${s.work}; grep -h 'git push' other-session.jsonl; node -e 'git push'\ncat > notes.md <<'EOF'\ngit push origin main\nEOF`, pushed],
+  ]));
+
+  assert.match(r.stdout, /Pushes\n  none\n/);
+  assert.equal(lastLine(r.stdout), 'Nothing open.');
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test("a subagent's git push is listed with its CI", () => {
+  using s = sandbox();
+  const c = s.commit('a.txt');
+  const pushed = s.push();
+  s.standIn('gh', { [ghKey(c.sha)]: JSON.stringify([{ name: 'CI', status: 'completed', conclusion: 'success', url: 'https://ci/1' }]) });
+
+  const r = s.check(s.transcript([['ls', 'README.md']], [[`git -C ${s.work} push origin main 2>&1 | tail -3`, pushed]]));
+
+  assert.match(r.stdout, new RegExp(`Pushes\\n  ${s.work} main ${c.sha.slice(0, 12)}\\n    CI: completed success`));
+  assert.equal(lastLine(r.stdout), 'Nothing open.');
+});
+
+test('a push from a repo path that no longer exists is open as repo path not found, not gh not found', () => {
+  using s = sandbox();
+  const c = s.commit('a.txt');
+  const pushed = s.push();
+  const gone = join(s.root, 'gone');
+
+  const r = s.check(s.transcript([[`cd ${gone} && git push origin main`, pushed]]));
+
+  assert.match(r.stdout, new RegExp(`${gone} main ${c.sha.slice(0, 7)}\\S*\\n    OPEN repo path not found: ${gone}\\n`));
+  assert.doesNotMatch(r.stdout, /gh not found/);
+  assert.equal(lastLine(r.stdout), 'Open: 1');
+});
+
 test("the session's unpushed commit is open and a peer's unpushed commit is not listed", () => {
   using s = sandbox();
   const mine = s.commit('mine.txt');
@@ -139,23 +182,80 @@ test("a subagent's unpushed commit counts as the session's", () => {
   assert.equal(r.status, 1);
 });
 
-test("the session's ready backlog items are open; other ready items and its blocked items are not", () => {
+const backlogCard = (id) => `┌  agent-backlog\n│\n◇  #${id} · defect · internal ─────╮\n│  item ${id}  │\n`;
+const readyItem = (id, readiness = 'ready') => ({ id, title: `item ${id}`, repositoryName: 'work', readiness });
+
+test("the session's ready items with a condition are open; other ready items and its blocked items are not", () => {
   using s = sandbox();
-  const item = (id, readiness) => ({ id, title: `item ${id}`, repositoryName: 'work', readiness });
-  s.standIn('agent-backlog', { 'ready --all-repos --json': JSON.stringify([item(41, 'ready'), item(42, 'ready'), item(43, 'blocked'), item(99, 'ready')]) });
+  s.standIn('agent-backlog', { 'ready --all-repos --json': JSON.stringify([readyItem(41), readyItem(43, 'blocked'), readyItem(99)]) });
 
   const r = s.check(s.transcript([
-    ['agent-backlog add "item 41" --kind defect --work-type internal', '┌  agent-backlog\n│\n◇  #41 · defect · internal ─────╮\n│  item 41  │\n'],
-    ['agent-backlog update 42 --description "more"', ''],
+    ['agent-backlog add "item 41" --kind defect --work-type internal --until "a third consumer"', backlogCard(41)],
     ['agent-backlog wait 43 --after 41', ''],
   ]));
 
   assert.match(r.stdout, /OPEN #41 item 41 \(work\)/);
-  assert.match(r.stdout, /OPEN #42 item 42 \(work\)/);
   assert.doesNotMatch(r.stdout, /#43|#99/);
-  assert.equal(lastLine(r.stdout), 'Open: 2');
+  assert.equal(lastLine(r.stdout), 'Open: 1');
   assert.equal(r.status, 1);
 });
+
+test('a ready item the session filed with no condition is a follow-up, not open and not counted', () => {
+  using s = sandbox();
+  s.standIn('agent-backlog', { 'ready --all-repos --json': JSON.stringify([readyItem(41)]) });
+
+  const r = s.check(s.transcript([['cd /tmp && agent-backlog add "item 41" --kind defect --work-type internal 2>&1 | tail -5', backlogCard(41)]]));
+
+  assert.match(r.stdout, /Filed \(follow-ups, not open\)\n  #41 item 41 \(work\)\n/);
+  assert.doesNotMatch(r.stdout, /OPEN/);
+  assert.equal(lastLine(r.stdout), 'Nothing open.');
+  assert.equal(r.status, 0);
+});
+
+test('an item filed with no condition and then given one with wait is open once ready', () => {
+  using s = sandbox();
+  s.standIn('agent-backlog', { 'ready --all-repos --json': JSON.stringify([readyItem(41)]) });
+
+  const r = s.check(s.transcript([
+    ['agent-backlog add "item 41" --kind defect --work-type internal', backlogCard(41)],
+    ['agent-backlog wait 41 --after 40', backlogCard(41)],
+  ]));
+
+  assert.match(r.stdout, /OPEN #41 item 41 \(work\)/);
+  assert.equal(lastLine(r.stdout), 'Open: 1');
+});
+
+test('an add guarded by a dedup list in the same call files its item', () => {
+  using s = sandbox();
+  s.standIn('agent-backlog', { 'ready --all-repos --json': JSON.stringify([readyItem(41)]) });
+  const listRow = '│  #3621  Turn 66 memory rules into claude-hook checks (agent-plugin)\n';
+
+  const r = s.check(s.transcript([[
+    "agent-backlog list --all-repos --search \"item\" 2>&1 | grep -E '^│  #' | head -3; cd /tmp && agent-backlog add \"item 41\" --kind defect --work-type internal",
+    `${listRow}${backlogCard(41)}`,
+  ]]));
+
+  assert.match(r.stdout, /Filed \(follow-ups, not open\)\n  #41 item 41 \(work\)\n/);
+  assert.doesNotMatch(r.stdout, /#3621/);
+});
+
+// Item headers in a call's output add no item unless the call itself filed or changed the item.
+function assertNoItemFrom(command) {
+  using s = sandbox();
+  s.standIn('agent-backlog', {});
+
+  const r = s.check(s.transcript([[command, `${backlogCard(41)}${backlogCard(42)}`]]));
+
+  assert.match(r.stdout, /Ready items\n  none\nFiled \(follow-ups, not open\)\n  none\n/);
+  assert.equal(lastLine(r.stdout), 'Nothing open.');
+  assert.equal(r.status, 0, r.stderr);
+}
+
+test('item headers in agent-backlog list output add no item', () => assertNoItemFrom('agent-backlog list --all-repos --search memory'));
+test('item headers in agent-backlog show output add no item', () => assertNoItemFrom('agent-backlog show 41'));
+test('a show beside an add counts no id from the result', () => assertNoItemFrom('agent-backlog show 42; agent-backlog add "item 41" --kind defect --work-type internal'));
+test('add --help beside a list adds no item', () => assertNoItemFrom('agent-backlog add --help 2>&1 | head; agent-backlog list --all-repos'));
+test("item headers in a non-backlog command's output add no item", () => assertNoItemFrom("grep -h 'agent-backlog add' other-session.jsonl"));
 
 test('a transcript that does not exist is a read error, exit 2', () => {
   using s = sandbox();

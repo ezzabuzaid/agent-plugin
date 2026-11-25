@@ -51,18 +51,146 @@ export function bashCalls(files) {
   return calls;
 }
 
-const unquote = (s) => s.replace(/^(['"])(.*)\1$/, '$2');
-const expand = (p, cwd) => resolve(cwd ?? process.cwd(), p.startsWith('~/') ? join(homedir(), p.slice(2)) : p);
-const PATH_ARG = String.raw`("[^"]+"|'[^']+'|\S+)`;
+// Where `text` next occurs at or after `from`, or the end of the line when it does not (an unclosed quote runs to the end).
+const indexOrEnd = (line, text, from) => {
+  const at = line.indexOf(text, from);
+  return at < 0 ? line.length : at;
+};
 
-// The directory a git subcommand ran in: its `git -C <path>`, else the last `cd <path>` before it, else the call's cwd.
+const expand = (p, cwd) => (p === '~' ? homedir() : resolve(cwd ?? process.cwd(), p.startsWith('~/') ? join(homedir(), p.slice(2)) : p));
+
+// The simple commands of a shell command line, in the order bash runs them. Each is its words, quotes removed, with
+// redirections dropped, plus `link`: the operator before it (';' for a newline, '&&', '||', '|', '|&', '&'), null for
+// the first. Heredoc bodies, comments, and quoted, $( ) and backtick text are never commands, so `grep 'git push'`,
+// `node -e '…git push…'` and `cat <<EOF … git push … EOF` run no git.
+export function simpleCommands(line) {
+  const commands = [];
+  const heredocs = [];
+  let words = [];
+  let word = null;
+  let link = null;
+  let target = null; // null, 'file' (the next word is a redirection target) or a heredoc kind ('<<' or '<<-')
+  let i = 0;
+  const endWord = () => {
+    if (word === null) return;
+    if (target === null) words.push(word);
+    else if (target !== 'file') heredocs.push({ delimiter: word, tabs: target === '<<-' });
+    target = null;
+    word = null;
+  };
+  const endCommand = (next) => {
+    endWord();
+    if (words.length) commands.push({ words, link });
+    words = [];
+    link = next;
+  };
+  while (i < line.length) {
+    const c = line[i];
+    if (c === '\n') {
+      endCommand(';');
+      i++;
+      for (const { delimiter, tabs } of heredocs.splice(0)) {
+        while (i < line.length) {
+          const end = indexOrEnd(line, '\n', i);
+          const body = line.slice(i, end);
+          i = end + 1;
+          if ((tabs ? body.replace(/^\t+/, '') : body) === delimiter) break;
+        }
+      }
+      continue;
+    }
+    if (c === ' ' || c === '\t') { endWord(); i++; continue; }
+    if (c === '#' && word === null) { while (i < line.length && line[i] !== '\n') i++; continue; }
+    if (c === '\\') {
+      if (line[i + 1] !== '\n') word = (word ?? '') + (line[i + 1] ?? '');
+      i += 2;
+      continue;
+    }
+    if (c === "'") {
+      const end = indexOrEnd(line, "'", i + 1);
+      word = (word ?? '') + line.slice(i + 1, end);
+      i = end + 1;
+      continue;
+    }
+    if (c === '"') {
+      let text = '';
+      for (i++; i < line.length && line[i] !== '"'; i++) {
+        if (line[i] === '\\' && '"\\$`\n'.includes(line[i + 1] ?? '')) { if (line[i + 1] !== '\n') text += line[i + 1]; i++; }
+        else text += line[i];
+      }
+      word = (word ?? '') + text;
+      i++;
+      continue;
+    }
+    if (c === '$' && line[i + 1] === '(') {
+      let depth = 0;
+      let j = i + 1;
+      for (; j < line.length; j++) {
+        if (line[j] === '(') depth++;
+        else if (line[j] === ')' && --depth === 0) break;
+      }
+      word = (word ?? '') + line.slice(i, j + 1);
+      i = j + 1;
+      continue;
+    }
+    if (c === '`') {
+      const end = indexOrEnd(line, '`', i + 1);
+      word = (word ?? '') + line.slice(i, end + 1);
+      i = end + 1;
+      continue;
+    }
+    const redirect = line.slice(i).match(/^(?:&>>?|<<<|<<-|<<|>>|[<>]&[0-9-]|>\||<>|<|>)/);
+    if (redirect) {
+      if (word !== null && /^\d+$/.test(word)) word = null; // the fd of `2>`
+      else endWord();
+      const op = redirect[0];
+      target = /^[<>]&[0-9-]$/.test(op) ? null : op === '<<' || op === '<<-' ? op : 'file';
+      i += op.length;
+      continue;
+    }
+    const operator = line.slice(i).match(/^(?:&&|\|\||\|&|;;|[|;&()])/);
+    if (operator) {
+      const op = operator[0];
+      endCommand(op === '(' || op === ')' || op === ';;' ? ';' : op);
+      i += op.length;
+      continue;
+    }
+    word = (word ?? '') + c;
+    i++;
+  }
+  endCommand(null);
+  return commands;
+}
+
+const LEADING = new Set(['if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{', '}', 'time', 'fi', 'done', 'command', 'nohup', 'env']);
+
+// A simple command's words from the program on: reserved words, `env`-like wrappers and `NAME=value` dropped.
+export function commandWords(words) {
+  let k = 0;
+  while (k < words.length && (LEADING.has(words[k]) || /^[A-Za-z_]\w*=/.test(words[k]))) k++;
+  return words.slice(k);
+}
+
+// The directory a git subcommand ran in, or null when no simple command of the line runs `git <subcommand>`:
+// its `git -C <path>`, else the last `cd <path>` before it, else the call's cwd.
 export function gitDirectory(command, subcommand, cwd) {
-  const at = command.search(new RegExp(String.raw`\bgit\b(\s+-C\s+${PATH_ARG})?\s+${subcommand}\b`));
-  if (at < 0) return null;
-  const dashC = command.slice(at).match(new RegExp(String.raw`^git\s+-C\s+${PATH_ARG}`));
-  if (dashC) return expand(unquote(dashC[1]), cwd);
-  const cds = [...command.slice(0, at).matchAll(new RegExp(String.raw`(?:^|[;&|(]\s*)cd\s+${PATH_ARG}`, 'g'))];
-  return cds.length ? expand(unquote(cds.at(-1)[1]), cwd) : cwd;
+  let dir = cwd;
+  for (const { words } of simpleCommands(command)) {
+    const [name, ...args] = commandWords(words);
+    if (name === 'cd') {
+      if (args[0] !== '-') dir = expand(args[0] ?? '~', dir);
+      continue;
+    }
+    if (name === undefined || basename(name) !== 'git') continue;
+    let at = dir;
+    let k = 0;
+    for (; k < args.length && args[k].startsWith('-'); k++) {
+      if (args[k] === '-C') at = expand(args[++k] ?? '.', at);
+      else if (args[k] === '-c') k++;
+    }
+    if (args[k] === subcommand) return at;
+  }
+  return null;
 }
 
 // The top of the repo that holds dir, or null when dir is no repo (or is gone).
