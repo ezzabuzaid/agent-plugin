@@ -15,10 +15,10 @@ To change the script, edit `scripts/automations.ts`, then run `npm run build` an
 
 | Command             | Does                                                                                                                                                                                  |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sync`              | Checks every automation. When one is wrong, prints each id with the reason, installs nothing and exits 1. Else installs a launchd job for each active automation and removes the job of each paused or deleted one. |
+| `sync`              | Checks every automation. When one is wrong, prints each id with the reason, installs nothing and exits 1. Else installs a launchd job for each active automation with a time left and removes the job of each paused, finished or deleted one. |
 | `run <id>`          | Runs the automation now, also when it is paused.                                                                                                                                      |
 | `run <id> --if-due` | What the launchd job runs: runs only when a time of the schedule came after the last run.                                                                                             |
-| `list [--json]`     | Each automation: status, timeout, next run, last run, last exit code, and whether its job is installed.                                                                               |
+| `list [--json]`     | Each automation: status (`active`, `paused`, or `finished` when its schedule has no time left), timeout, next run, last run, last exit code, and whether its job is installed.                                                                               |
 
 ## 1. Write the automation
 
@@ -101,6 +101,7 @@ After a run that is not an error, the script runs `while` with `/bin/sh -c` in t
 - **Run now:** `run <id>`.
 - **Pause:** set `status: paused`, then `sync`.
 - **Delete:** move the folder to the Trash, then `sync`.
+- **Finished:** an automation whose schedule has no time left, such as a `COUNT=1` that ran, shows as `finished`, and `sync` removes its job. Its file stays as written. A new time in `schedule` and a `sync` install it again.
 
 ## What the user sees
 

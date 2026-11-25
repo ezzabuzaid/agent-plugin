@@ -10,6 +10,8 @@ Each rule in [SKILL.md](../SKILL.md) and each choice in [scripts/automations.ts]
 
 **`claude -p` uses the plan, not API credit.** Ezz's premise was _"claude -p incur usage credit cost and not sub credit"_. The Help Center says the opposite: "Update June 15, 2026: We've paused the previously-announced changes to Claude Agent SDK usage. [...] `claude -p` [...] still draw[s] from your subscription limits" (support.claude.com, article 15036540). A probe agent under launchd, with only `HOME` and `PATH` in its environment, showed `apiKeySource: "none"`: the claude.ai login of the Max plan.
 
+**A finished schedule loses its job.** push-policy-check (`COUNT=1`) ran on 2026-11-21, and its job still started the runner every hour for nothing. Ezz chose "sync removes its job" (session `14a4eccc`, 2026-11-25, #5642) over a run that writes `status: paused` into the file. An automation keeps its job while its schedule has a next time or a time that is due: a time the Mac slept through has no next time, but its run still has to catch up.
+
 **The run waits for the Mac; it does not wake it.** Ezz answered "No, run on wake". launchd starts a `StartCalendarInterval` job one time after a wake for all the times that the Mac slept through (launchd.plist(5), lines 372-375). A `StartInterval` time in a sleep is lost (lines 357-362), so the script uses only calendar intervals.
 
 ## The schedule

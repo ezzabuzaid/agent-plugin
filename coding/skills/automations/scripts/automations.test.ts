@@ -661,6 +661,38 @@ test('sync installs a launchd job for each active automation, launchd runs it th
   }
 });
 
+test('sync keeps the job of a once-only automation whose time passed until it has run, then removes it, and list shows it finished', () => {
+  using home = new TemporaryFiles().directorySync('automations-');
+  const id = `t${process.pid}x${Date.now().toString(36)}-once`;
+  const target = `gui/${process.getuid?.()}/com.ezzabuzaid.automations.${id}`;
+  const jobFile = join(home.path, 'Library/LaunchAgents', `com.ezzabuzaid.automations.${id}.plist`);
+  const listed = () => JSON.parse(cli(home.path, ['list', '--json']).stdout).automations[0];
+  writeAutomation(
+    home.path,
+    id,
+    `---\nname: Once\nschedule: |\n  DTSTART;TZID=UTC:${icsTime(minutesAgo(120))}\n  RRULE:FREQ=DAILY;COUNT=1\ncwd: ${home.path}\nstatus: active\n---\nhello\n`,
+  );
+  writeFakeClaude(home.path, OK_REPLY);
+  writeFakeNotifier(home.path);
+  try {
+    // The Mac slept through the only time: the job stays for the run that catches up.
+    const due = cli(home.path, ['sync']);
+
+    assert.equal(due.status, 0, due.stderr);
+    assert.equal(existsSync(jobFile), true);
+    assert.equal(listed().status, 'active');
+
+    assert.equal(cli(home.path, ['run', id]).status, 0);
+    const spent = cli(home.path, ['sync']);
+
+    assert.equal(spent.status, 0, spent.stderr);
+    assert.equal(existsSync(jobFile), false);
+    assert.deepEqual((({ status, installed }) => ({ status, installed }))(listed()), { status: 'finished', installed: false });
+  } finally {
+    spawnSync('launchctl', ['bootout', target]);
+  }
+});
+
 test('the committed bundle is what build.ts makes of the source', async () => {
   const { outputFiles } = await build({ ...options, write: false, logLevel: 'silent' });
 

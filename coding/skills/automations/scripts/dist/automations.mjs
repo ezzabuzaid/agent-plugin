@@ -24976,13 +24976,15 @@ var Sync = class {
       console.error("Nothing was installed. Fix these automations, then run sync again.");
       return 1;
     }
-    const active = automations.filter((automation) => automation.status === "active");
-    if (active.length > 0) await atomicWrite(RUNNER, await readFile2(BUNDLE), { clock: globalThis });
-    for (const automation of active) {
+    const now = Temporal.Now.instant();
+    const scheduled = [];
+    for (const automation of automations) if (await hasTimeLeft(automation, now)) scheduled.push(automation);
+    if (scheduled.length > 0) await atomicWrite(RUNNER, await readFile2(BUNDLE), { clock: globalThis });
+    for (const automation of scheduled) {
       const service = await this.#launchd.install(this.#job(automation));
       console.log(`installed ${service.label}`);
     }
-    const keep = new Set(active.map((automation) => LABEL_PREFIX + automation.id));
+    const keep = new Set(scheduled.map((automation) => LABEL_PREFIX + automation.id));
     for (const service of await this.#launchd.installed()) {
       if (!service.label.startsWith(LABEL_PREFIX) || keep.has(service.label)) continue;
       await service.uninstall({ signal: AbortSignal.timeout(3e4) });
@@ -25008,6 +25010,12 @@ var Sync = class {
     };
   }
 };
+async function hasTimeLeft(automation, now) {
+  if (automation.status !== "active") return false;
+  if (automation.schedule.next(now) !== null) return true;
+  const state = await StateFile.read(automation.folder);
+  return automation.schedule.isDue(state === void 0 ? void 0 : Temporal.Instant.from(state.lastRunAt), now);
+}
 async function list({ json }) {
   const { automations, errors } = await Automation.readAll();
   const launchd = Launchd.agents({ clock: globalThis });
@@ -25019,7 +25027,7 @@ async function list({ json }) {
       return {
         id: automation.id,
         name: automation.name,
-        status: automation.status,
+        status: automation.status === "active" && !await hasTimeLeft(automation, now) ? "finished" : automation.status,
         timeout: automation.timeout,
         next: automation.status === "active" ? automation.schedule.next(now)?.toString() ?? null : null,
         lastRunAt: state?.lastRunAt ?? null,
