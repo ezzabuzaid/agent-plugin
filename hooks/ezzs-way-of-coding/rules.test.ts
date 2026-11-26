@@ -1397,11 +1397,13 @@ const BEFORE_DONE =
 // background task set (Agent, background Bash, Monitor, TaskStop) alone do not:
 // the agent that starts work is doing what idle mode asks. Measured on the 2520
 // organic stops of 59 sessions (forensics 2026-11-26,
-// guardrail-scratch/segments.jsonl): the old "any tool since the last sweep"
-// trigger fired at 2297 (91 %); step 6b's trigger, which also counted a
-// task-set change, at 1327 (52.7 %); this trigger fires at 493 (19.6 %): git
-// 354, close claim 126, a change from an earlier turn not yet swept 37
-// (hooks-6c-scratch/k1-6c-set.mjs).
+// guardrail-scratch/segments.jsonl), on the agents' real behavior there (they
+// rarely called the skill, so a due rule stayed due): the old "any tool since
+// the last sweep" trigger fired at 2297 (91 %), this trigger at 1882 (75 %)
+// (blind judge, judge-result.md). Counting only the stops where a trigger
+// happens, as if each fire were answered by a housekeeping Skill call, it fires
+// at 493 (19.6 %): git 354, close claim 126, a change not yet swept 37
+// (hooks-6c-scratch/k1-6c-set.mjs). The 19.6 % is not comparable with the 91 %.
 test('stop asks for a housekeeping sweep after a commit, a push or a close claim', async () => {
   for (const [label, entries] of [
     ['a commit', [request, commit, reply]],
