@@ -155,6 +155,20 @@ test('all runs green and nothing unpushed prints Nothing open., exit 0', () => {
   assert.equal(r.status, 0, r.stderr);
 });
 
+// #5823: gh run list --commit <short sha> matches no run (deepagents 77101148, 2026-11-26), so a head that
+// rev-parse cannot resolve would read as "no runs" while its CI stays unread.
+test('a pushed head that rev-parse cannot resolve is open, and gh is not asked with the short sha', () => {
+  using s = sandbox();
+  s.standIn('gh', { [ghKey('deadbee')]: '[]' });
+
+  const r = s.check(s.transcript([['git push origin main', 'To remote.git\n   1234567..deadbee  main -> main\n']]));
+
+  assert.match(r.stdout, /  OPEN cannot resolve deadbee to a commit in .+: CI not read\n/);
+  assert.doesNotMatch(r.stdout, /no runs/);
+  assert.equal(lastLine(r.stdout), 'Open: 1');
+  assert.equal(r.status, 1, r.stderr);
+});
+
 test('a missing gh is an open item, not silence', () => {
   using s = sandbox();
   const c = s.commit('a.txt');

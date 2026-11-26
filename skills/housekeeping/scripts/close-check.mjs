@@ -21,7 +21,9 @@
 //                For each pushed head, the runs of `gh run list --commit <sha> --json name,status,conclusion,url` in
 //                that repo. A run that is not completed + success is open. A head with no run yet is printed, not
 //                open. A repo directory that no longer exists is open as "repo path not found: <path>", and gh is not
-//                called. "gh not found" (gh is not on PATH) and gh's own error are open: CI was not read.
+//                called. A head that `git rev-parse` cannot resolve to a commit is open as "cannot resolve <sha> to a
+//                commit in <repo>: CI not read", and gh is not called: a short sha matches no run (#5823). "gh not
+//                found" (gh is not on PATH) and gh's own error are open: CI was not read.
 //   Unpushed     for each repo and branch where the session ran `git commit` (shas from `[<branch> <sha>]` in the
 //                result), after `git fetch origin <branch>`, the session's own commits that
 //                `origin/<branch>..<branch>` lists. Other sessions' commits in a shared checkout are not listed.
@@ -119,9 +121,13 @@ function main() {
   const pushes = pushedHeads(calls);
   if (pushes.length === 0) say('none');
   for (const push of pushes) {
-    say(`${push.repo} ${push.ref} ${push.sha.slice(0, 12)}`);
+    say(`${push.repo} ${push.ref} ${push.unresolved ?? push.sha.slice(0, 12)}`);
     if (!existsSync(push.repo)) {
       say(`  repo path not found: ${push.repo}`, true);
+      continue;
+    }
+    if (push.unresolved) {
+      say(`  cannot resolve ${push.unresolved} to a commit in ${push.repo}: CI not read`, true);
       continue;
     }
     let runs;
@@ -458,9 +464,10 @@ function pushedHeads(calls) {
     if (!dir) continue;
     const repo = repoRoot(dir) ?? dir;
     for (const m of call.result.matchAll(/^\s*[+ ]?\s*([0-9a-f]{7,40})\.\.\.?([0-9a-f]{7,40})\s+(\S+)\s+->\s+(\S+)/gm)) {
-      let sha = m[2];
-      try { sha = git(repo, ['rev-parse', `${m[2]}^{commit}`]).trim(); } catch { /* keep the short sha: gh takes it too */ }
-      heads.set(`${repo}\0${sha}`, { repo, sha, ref: m[4] });
+      // An unresolved head keeps only its short sha: gh run list --commit <short sha> matches no run (#5823).
+      let head;
+      try { head = { repo, ref: m[4], sha: git(repo, ['rev-parse', `${m[2]}^{commit}`]).trim() }; } catch { head = { repo, ref: m[4], unresolved: m[2] }; }
+      heads.set(`${repo}\0${head.sha ?? head.unresolved}`, head);
     }
   }
   return [...heads.values()];
