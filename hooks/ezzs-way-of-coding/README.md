@@ -40,6 +40,16 @@ npm test
 npm run typecheck
 ```
 
+Every session on the machine runs `hook.ts`, so one broken rule file must not
+turn off the others. `rules/index.ts` loads each rule module with its own
+`import()`. When a module throws while it loads, stderr gets one line that
+names the module and the error, that module gives no rules, and the rules of
+the other modules stay on. When `rules/index.ts` itself cannot load, `hook.ts`
+writes one line to stderr and exits 0 with no output. A module that another
+module imports (for example `verification.ts`, which `stop.ts` imports) also
+turns off the modules that import it. Keep the order of the guards in
+`rules/index.ts`: the first guard that refuses a call gives the reason.
+
 Node strips the types when it runs `hook.ts` and the tests, and checks none of them. `npm run typecheck` is the only type check: run it with `npm test` after each change.
 
 The AGENTS.md/CLAUDE.md explorer CLI lives at `../../tools/explore-agents-md/`

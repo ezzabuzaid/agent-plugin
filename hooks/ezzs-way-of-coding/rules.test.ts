@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -1938,4 +1939,94 @@ test('a record that points to ~/.claude/scratch or only mentions /tmp/claude-501
   ] as const) {
     assert.equal(await refusal(tool, input), undefined, label);
   }
+});
+
+// #5777: each rule module loads on its own, so one module that throws while it
+// loads turns off only its own rules. These run hook.ts as Claude Code does, a
+// child process with the input on stdin, and break a module in the child's
+// memory with a loader hook; the files on disk stay as they are.
+const BREAK_ONE_MODULE = `data:text/javascript,${encodeURIComponent(`
+import { registerHooks } from 'node:module';
+registerHooks({
+  load(url, context, nextLoad) {
+    const target = process.env.BREAK;
+    if (target && url.endsWith('/rules/' + target)) {
+      return { format: 'module', shortCircuit: true, source: 'throw new Error("broken on purpose: ' + target + '");' };
+    }
+    return nextLoad(url, context);
+  },
+});
+`)}`;
+
+async function runHook(input: object, broken?: string) {
+  const child = execFile(process.execPath, ['--import', BREAK_ONE_MODULE, join(import.meta.dirname, 'hook.ts')], {
+    env: { ...process.env, BREAK: broken ?? '' },
+  });
+  child.stdin?.end(JSON.stringify(input));
+  const [stdout, stderr, code] = await Promise.all([text(child.stdout), text(child.stderr), new Promise((resolve) => child.on('close', resolve))]);
+  return { stdout, stderr, code };
+}
+
+async function text(stream: NodeJS.ReadableStream | null) {
+  let all = '';
+  for await (const chunk of stream ?? []) all += chunk;
+  return all;
+}
+
+const LONG_QUESTION = {
+  hook_event_name: 'PreToolUse',
+  tool_name: 'AskUserQuestion',
+  tool_input: {
+    questions: [
+      { question: 'x'.repeat(200), header: 'h', multiSelect: false, options: [{ label: 'a', description: 'b' }, { label: 'c', description: 'd' }] },
+    ],
+  },
+};
+const LONG_QUESTION_DENIED = JSON.stringify({
+  hookSpecificOutput: {
+    hookEventName: 'PreToolUse',
+    permissionDecision: 'deny',
+    permissionDecisionReason:
+      'The dialog only asks: put the explanation in the chat, in plain words, then ask a one-line question with short labels (your pick first). Limits: a question of 150 characters, an option description of 100.',
+  },
+});
+const SAFE_TO_CLOSE_SENT_BACK = JSON.stringify({ hookSpecificOutput: { hookEventName: 'Stop', additionalContext: CLOSE_CHECK } });
+
+async function safeToCloseStop(broken?: string) {
+  await using folder = await new TemporaryFiles().directory('ezzs-way-of-coding-broken-');
+  const transcriptPath = join(folder.path, 'transcript.jsonl');
+  await writeFile(transcriptPath, `${[request, sweep, said('Safe to close.')].map((entry) => JSON.stringify(entry)).join('\n')}\n`);
+  return await runHook({ hook_event_name: 'Stop', transcript_path: transcriptPath }, broken);
+}
+
+test('with dialog.ts broken, a Safe to close claim with no close check is still sent back, and stderr names dialog.ts', async () => {
+  const { stdout, stderr, code } = await safeToCloseStop('dialog.ts');
+
+  assert.equal(code, 0);
+  assert.equal(stdout.trim(), SAFE_TO_CLOSE_SENT_BACK);
+  assert.match(stderr, /rules\/dialog\.ts failed to load.*broken on purpose: dialog\.ts/);
+});
+
+test('with stop.ts broken, a 200-character AskUserQuestion is still denied', async () => {
+  const { stdout, stderr, code } = await runHook(LONG_QUESTION, 'stop.ts');
+
+  assert.equal(code, 0);
+  assert.equal(stdout.trim(), LONG_QUESTION_DENIED);
+  assert.match(stderr, /rules\/stop\.ts failed to load/);
+});
+
+test('with no module broken, the hook gives the same output for both inputs and writes nothing to stderr', async () => {
+  const stop = await safeToCloseStop();
+  const question = await runHook(LONG_QUESTION);
+
+  assert.deepEqual(stop, { stdout: `${SAFE_TO_CLOSE_SENT_BACK}\n`, stderr: '', code: 0 });
+  assert.deepEqual(question, { stdout: `${LONG_QUESTION_DENIED}\n`, stderr: '', code: 0 });
+});
+
+test('with rules/index.ts broken, the hook exits 0 with no output and names index.ts on stderr', async () => {
+  const { stdout, stderr, code } = await runHook(LONG_QUESTION, 'index.ts');
+
+  assert.equal(code, 0);
+  assert.equal(stdout, '');
+  assert.match(stderr, /rules\/index\.ts failed to load, every rule is off: broken on purpose: index\.ts/);
 });
