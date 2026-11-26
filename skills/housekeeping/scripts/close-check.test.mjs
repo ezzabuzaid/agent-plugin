@@ -274,6 +274,25 @@ test('a ready item the session filed with no condition is a CHECK line to mark, 
   assert.equal(r.status, 0);
 });
 
+// #5834: an add whose JSON result a pipeline stage reshaped, as jq -r '"#\(.id) \(.title)"' or jq -r .id does.
+test('an add whose result a pipeline reshaped to a "#<id> <title>" line files its item', () => {
+  using s = sandbox();
+  s.standIn('agent-backlog', { 'ready --all-repos --json': JSON.stringify([readyItem(41)]) });
+
+  const r = s.check(s.transcript([['agent-backlog add "item 41" --kind defect --work-type internal --json | jq -r \'"#\\(.id) \\(.title)"\'', '#41 item 41\n']]));
+
+  assert.match(r.stdout, /Filed \(yours: do it now, or say why it waits\)\n  CHECK #41 item 41 \(work\)\n/);
+});
+
+test('an add whose result a pipeline reshaped to a bare id line files its item', () => {
+  using s = sandbox();
+  s.standIn('agent-backlog', { 'ready --all-repos --json': JSON.stringify([readyItem(41)]) });
+
+  const r = s.check(s.transcript([['agent-backlog add "item 41" --kind defect --work-type internal --json | jq -r .id', '41\n']]));
+
+  assert.match(r.stdout, /Filed \(yours: do it now, or say why it waits\)\n  CHECK #41 item 41 \(work\)\n/);
+});
+
 test('an item filed with no condition and then given one with wait is open once ready', () => {
   using s = sandbox();
   s.standIn('agent-backlog', { 'ready --all-repos --json': JSON.stringify([readyItem(41)]) });

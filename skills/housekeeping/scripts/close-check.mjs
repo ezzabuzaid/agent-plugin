@@ -39,7 +39,9 @@
 //                shows why it waits. A filed item is not a reason by itself (the replay of 448389f7: #5629 was filed
 //                instead of a two-word fix).
 //                The session's items: the id operand of `agent-backlog update|wait <id>`, and each `#<id> · ` card
-//                header or JSON top-level "id" in the result of a call that runs `agent-backlog add|update|wait|met`
+//                header or JSON top-level "id" (and, when the call runs no list, ready, decisions or explore, each
+//                line that starts with `#<id>` or is only `<id>`, as a jq stage prints it; #5834) in the result
+//                of a call that runs `agent-backlog add|update|wait|met`
 //                (no --help), runs no `agent-backlog show`, and runs no other command but cd, echo, other agent-backlog
 //                reads and pipeline stages. The output of list, show, ready, decisions and any other command never
 //                adds an id: list, ready and decisions print rows (`#<id>  <title>`), never a card header, so a dedup
@@ -474,6 +476,8 @@ function pushedHeads(calls) {
 }
 
 const BACKLOG_WRITES = new Set(['add', 'update', 'wait', 'met']);
+// Reads that print item rows (`#<id>  <title>`), which a reshaped add id must not be confused with.
+const ROW_READS = new Set(['list', 'ready', 'decisions', 'explore']);
 const CONDITIONS = ['--after', '--published', '--clean', '--until'];
 const QUIET = new Set(['cd', 'echo']);
 const hasCondition = (words) => words.some((w) => CONDITIONS.some((c) => w === c || w.startsWith(`${c}=`)));
@@ -501,7 +505,11 @@ function backlogItems(calls) {
     const adds = writes.filter(({ words }) => words[1] === 'add').map(({ words }) => words);
     const met = writes.some(({ words }) => words[1] === 'met');
     if (adds.length === 0 && !met) continue;
-    const found = [...call.result.matchAll(/#(\d+) · |^ {2}"id": (\d+)/gm)].map((m) => Number(m[1] ?? m[2]));
+    // With no list read in the call, a line that a pipeline stage reshaped is the add's own id (#5834):
+    // `#<id> <title>` from jq -r '"#\(.id) \(.title)"', or a bare `<id>` from jq -r .id.
+    const readsRows = backlog.some(({ words }) => ROW_READS.has(words[1]));
+    const ids = readsRows ? /#(\d+) · |^ {2}"id": (\d+)/gm : /#(\d+) · |^ {2}"id": (\d+)|^#(\d+)\b|^(\d+)$/gm;
+    const found = [...call.result.matchAll(ids)].map((m) => Number(m[1] ?? m[2] ?? m[3] ?? m[4]));
     const filed = [...new Set(found)].filter((id) => !operands.has(id));
     // One id per add, in order; when the counts differ, an id has a condition if any add of the call has one.
     filed.forEach((id, n) => note(id, met || (filed.length === adds.length ? hasCondition(adds[n]) : adds.some(hasCondition))));
