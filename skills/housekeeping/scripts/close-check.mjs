@@ -72,6 +72,12 @@
 //                with a reason. A path inside another listed path is not listed again. One line per folder two levels
 //                under the first of ~/.claude/scratch, /tmp, /private/tmp, /var/folders, ~ or / that holds the path
 //                (one level for a path one level deep), with the paths under it.
+//   Left by test runs
+//                for each repo where the session ran a test command (as above), each untracked folder that
+//                `git ls-files --others --directory --exclude-standard` lists (empty folders too, which git status
+//                hides) and that was born at or after the session's first call: CHECK, clean it up or keep it with
+//                a reason. A test runner is a child process, so no tool call names what it leaves (#5833). The system
+//                temp folder is not read: other processes made about 190 folders there in 3 hours (2026-11-26).
 //   Plans        for each ~/.claude/plans/*.md the session wrote or edited, as it is on disk: each numbered step
 //                (`<n>. ` at the start of a line) CHECK, each ticked box `- [x]` CHECK, each empty box `- [ ]` OPEN.
 //                A plan that is gone is printed without a mark.
@@ -92,7 +98,7 @@
 // Commands it runs: git (rev-parse, fetch, rev-list, log, show), gh, agent-backlog. Fetch is its only write.
 import { parseArgs } from 'node:util';
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { UsageError, transcriptFiles, toolCalls, bashCalls, entries, entryText, simpleCommands, commandWords, commandsIn, gitDirectory, repoRoot, sessionCommits, git, firstLine, expand } from './lib/session.mjs';
@@ -197,6 +203,11 @@ function main() {
   const created = createdOutsideRepos(tools, calls);
   none(created);
   for (const line of created) say(line, 'check');
+
+  console.log('Left by test runs');
+  const left = leftByTestRuns(tools, calls);
+  none(left);
+  for (const line of left) say(line.text, line.mark);
 
   console.log('Plans');
   const plans = planLines(tools);
@@ -344,6 +355,37 @@ function untestedPackages(tools, calls) {
       : { text: `${pkg}: no test ran after the last edit (${relative(pkg, file)})`, mark: 'open' });
   }
   return lines;
+}
+
+function leftByTestRuns(tools, calls) {
+  const start = Math.min(...[...tools, ...calls].map((call) => call.at).filter(Number.isFinite));
+  const repos = new Set();
+  for (const call of calls) {
+    for (const { words, dir } of commandsIn(call.command, call.cwd)) {
+      const repo = isTestCommand(words) && dir ? repoRoot(dir) : null;
+      if (repo) repos.add(repo);
+    }
+  }
+  const lines = [];
+  for (const repo of [...repos].sort()) {
+    let untracked;
+    try { untracked = git(repo, ['ls-files', '--others', '--directory', '--exclude-standard']).split('\n'); } catch { continue; }
+    const born = untracked.filter((path) => path.endsWith('/') && bornSince(join(repo, path), start));
+    if (born.length === 0) continue;
+    lines.push({ text: repo, mark: false });
+    for (const path of born) lines.push({ text: `  ${path}`, mark: 'check' });
+  }
+  return lines;
+}
+
+// Birth time where the file system keeps one (APFS, ext4 with statx), else the change time.
+function bornSince(path, start) {
+  try {
+    const { birthtimeMs, ctimeMs } = statSync(path);
+    return (birthtimeMs > 0 ? birthtimeMs : ctimeMs) >= start;
+  } catch {
+    return false;
+  }
 }
 
 // Under ~/.claude only scratch is clean-up; the rest (plans, memory, settings) are records.

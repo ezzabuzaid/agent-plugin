@@ -434,6 +434,37 @@ function assertRunClosesEdit(command) {
 test('a test run that names the package as an nx project closes its edit', () => assertRunClosesEdit('npx nx run @x/p:test --skip-nx-cache'));
 test('nx affected with the test target closes the edit of every package in its repo', () => assertRunClosesEdit('npx nx affected -t lint test --base=HEAD~1'));
 
+// #5833: a test run is a child process, so the folders it leaves are in no tool call; an empty one is not in
+// git status either (agent-plugin skills/scripts-scratch, 2026-11-26).
+test('an untracked folder born after the session started, in a repo where the session ran a test, is listed to mark', () => {
+  using s = sandbox();
+  mkdirSync(join(s.work, 'scratch-left'));
+
+  const r = s.check(s.session([{ bash: 'node --test', result: 'ok' }]));
+
+  assert.equal(section(r.stdout, 'Left by test runs'), `  ${s.work}\n    CHECK scratch-left/`);
+  assert.equal(lastLine(r.stdout), 'Nothing open. To mark: 1');
+});
+
+test('an untracked folder born before the session started is not listed', () => {
+  using s = sandbox();
+  mkdirSync(join(s.work, 'older'));
+
+  // The session's first call comes about ten years after the folder was born.
+  const r = s.check(s.session([{ at: 315_360_000 }, { bash: 'node --test', result: 'ok' }]));
+
+  assert.equal(section(r.stdout, 'Left by test runs'), '  none');
+});
+
+test('an untracked folder in a repo where the session ran no test is not listed', () => {
+  using s = sandbox();
+  mkdirSync(join(s.work, 'scratch-left'));
+
+  const r = s.check(s.session([{ bash: 'ls', result: 'README.md' }]));
+
+  assert.equal(section(r.stdout, 'Left by test runs'), '  none');
+});
+
 test('what the session created outside its repos and outside ~/.claude is listed to mark, one line per folder two levels down', () => {
   using s = sandbox();
   const round = join(s.home, '.claude', 'scratch', 'round');
