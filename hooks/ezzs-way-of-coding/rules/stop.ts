@@ -132,6 +132,21 @@ const HOLDS = /\b(?:stays|remains) (?:all )?yours\b|\byours to read\b/i;
 // migration after deploy … are yours") leaves it an ask.
 const CONDITION_FIRST = /^[\s>*_#\-\d.)]*(?:after|once|until|later|when (?!you\b))\b/i;
 const CONDITION_AFTER = /\byours\b[^.!?;]*?\b(?:later|after|once|until|waits? (?:on|for) (?!your?\b)|when (?!you\b))/i;
+// A relative clause that describes a noun: "the agent drop decisions that are
+// yours", "the only decision that is yours (the push rule) is asked in the
+// chat" (#5788: c2896527:4143, fd967b74:1074, e760f78f:6697). After a
+// conjunction, "that" points at a task ("…, and that is yours"); it starts no
+// relative clause.
+const RELATIVE_CLAUSE =
+  /\b(?!(?:and|or|but|so|then|now|yet|because|since)\b)\w+\s+(?:that|which)(?:'s|’s|\s+(?:is|are|stays|remains))\s+(?:all\s+)?yours\b/i;
+// A heading over a task list: the line ends in a colon ("**Next, two things
+// that are yours:**", "**Cleanup that's yours, through Mole:**").
+const HEADING = /\byours\b[^.!?]*:[*_\s]*$/i;
+
+// A sentence that names what is yours only to describe a noun, not to hand it over.
+function describesWhatIsYours(sentence: string): boolean {
+  return RELATIVE_CLAUSE.test(sentence) && !HEADING.test(sentence);
+}
 
 // A sentence that hands the user a task now, not a status line about one.
 function handsOverATask(text: string): boolean {
@@ -142,7 +157,8 @@ function handsOverATask(text: string): boolean {
         YOURS.test(sentence) &&
         !HOLDS.test(sentence) &&
         !CONDITION_FIRST.test(sentence) &&
-        !CONDITION_AFTER.test(sentence),
+        !CONDITION_AFTER.test(sentence) &&
+        !describesWhatIsYours(sentence),
     );
 }
 

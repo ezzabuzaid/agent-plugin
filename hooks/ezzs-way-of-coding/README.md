@@ -99,7 +99,9 @@ of them waits on you" or "no item waits on you" is a report. A "yours" line is
 a report too when it names a later or conditional ask ("**Yours, later:**",
 "the push is yours once CI is green", "When they pass, … the push is yours")
 or what the user holds without asking for it now ("stays yours", "is yours to
-read"); "that one is yours" and "the next step is yours" still fire. A `!`
+read"), or when a relative clause only describes a noun ("drop decisions that
+are yours"); "that one is yours", "the next step is yours" and a heading over a
+task list ("**Next, two things that are yours:**") still fire. A `!`
 command is the last chat line, with no dialog after it.
 `housekeeping-due` reads a Claude Code transcript: since the last `housekeeping`
 Skill call, it fires on a commit, a push or a close claim in the final message

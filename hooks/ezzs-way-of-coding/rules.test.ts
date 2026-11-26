@@ -1752,8 +1752,25 @@ test('stop stays quiet on a status line that names a later ask or what the user 
   }
 });
 
+// #5788: a "yours" in a relative clause describes a noun ("decisions that are
+// yours"); it hands over no task. Real final messages the rule fired on:
+// c2896527:4143, fd967b74:1074, e760f78f:6697.
+test('stop stays quiet on a sentence that only describes what is yours', async () => {
+  for (const message of [
+    'It still loses on one case (case 2), where you have a table of open decisions. In that case the new text let the agent drop decisions that are yours. One run skipped #4455 because it was "filed today".',
+    'Nothing new. The only decision that is yours (the push rule) is asked in the chat, as you wanted.',
+    "Housekeeping (idle): the one decision that's yours, whether a shared agent hook may refuse `npm link`, depends on what the guard explorer finds.",
+  ]) {
+    assert.doesNotMatch(await stopContext({ last_assistant_message: message }), /ask-in-the-tool/, message);
+  }
+});
+
 test('stop still sends a task handed over now to AskUserQuestion', async () => {
   for (const message of [
+    // A heading over a task list is a label, not a description (881553d1:5780).
+    '**Next, two things that are yours:**\n- **A production tag** for this fix: v3.2.1.',
+    // "that" after a conjunction points at a task; it starts no relative clause.
+    'Step 3 is the push, and that is yours.',
     'That one is yours.',
     'The push is yours.',
     'The next step is yours.',
