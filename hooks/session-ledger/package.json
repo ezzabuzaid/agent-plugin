@@ -1,0 +1,11 @@
+{
+  "name": "session-ledger-hook",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --no-warnings ledger.test.ts"
+  },
+  "devDependencies": {
+    "@zukhruf/fs": "^0.8.144"
+  }
+}
