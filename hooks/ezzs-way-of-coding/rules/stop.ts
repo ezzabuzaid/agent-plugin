@@ -104,8 +104,6 @@ const MULTI_QUESTION_PATTERNS = [
   /(^|[.!?;:]\s+)(\*\*)?reply (with|like|\*\*|["“'`])/im,
   // Parking on the user: "Still waiting on you at the mini:", "blocked on you".
   new RegExp(String.raw`(?<!\b(?:nothing|no one|nobody|not|${NONE_OF})\s(?:is\s)?)\b(waiting|blocked) (on|for) you\b`, 'i'),
-  // A task handed to the user: "**Cleanup that's yours, through Mole:**", "the next step is yours".
-  /(?<!\b(?:nothing|none)\s)\b(that's|that is|those are|these are|is|are|stays|remains) (all )?yours\b/i,
   // The asks the patterns above missed (forensics 2026-11-26, K4: 126 more hits
   // on 4570 final messages, an independent judge found 16 of 20 real). A
   // heading that a negation answers ("Waits on you: nothing") and a go already
@@ -121,6 +119,33 @@ const MULTI_QUESTION_PATTERNS = [
   /\bnext step is (yours|your)\b/i,
 ];
 
+// A task handed to the user: "**Cleanup that's yours, through Mole:**", "the push is yours".
+const YOURS = /(?<!\b(?:nothing|none)\s)\b(that's|that is|those are|these are|is|are|stays|remains) (all )?yours\b/i;
+// What the user holds, said without asking for it now: "That command stays
+// yours to run", "the root cause above is yours to read" (#5758: 7e65b385:4959,
+// c2896527:6304).
+const HOLDS = /\b(?:stays|remains) (?:all )?yours\b|\byours to read\b/i;
+// A later or conditional ask: the sentence opens with its condition ("When they
+// pass, … the push is yours", "After that, …"), or one follows the "yours"
+// ("**Yours, later:**", "yours once CI is green", "yours after the deploy").
+// A later word before the clause that is not its condition ("running the
+// migration after deploy … are yours") leaves it an ask.
+const CONDITION_FIRST = /^[\s>*_#\-\d.)]*(?:after|once|until|later|when (?!you\b))\b/i;
+const CONDITION_AFTER = /\byours\b[^.!?;]*?\b(?:later|after|once|until|waits? (?:on|for) (?!your?\b)|when (?!you\b))/i;
+
+// A sentence that hands the user a task now, not a status line about one.
+function handsOverATask(text: string): boolean {
+  return text
+    .split(/(?<=[.!?])\s+|\n/)
+    .some(
+      (sentence) =>
+        YOURS.test(sentence) &&
+        !HOLDS.test(sentence) &&
+        !CONDITION_FIRST.test(sentence) &&
+        !CONDITION_AFTER.test(sentence),
+    );
+}
+
 // A slash command handed to the user to type: "type `/housekeeping`". The
 // prose filter drops code spans, so this one reads the raw final message.
 const SLASH_COMMAND_TO_TYPE = /\btype `\/[\w:-]+/i;
@@ -130,7 +155,7 @@ const OFFER_LEAD_PATTERN =
 
 function asksInProse(text: string, raw: string): boolean {
   if (SLASH_COMMAND_TO_TYPE.test(raw)) return true;
-  if (MULTI_QUESTION_PATTERNS.some((re) => re.test(text))) return true;
+  if (MULTI_QUESTION_PATTERNS.some((re) => re.test(text)) || handsOverATask(text)) return true;
   // Offer-framing must coexist with a question mark in the SAME paragraph (otherwise an
   // "if you want me to … " mid-prose with a `?` later in an unrelated sentence would
   // fire). But scanning ANY paragraph — not just the last one — is required: real turns

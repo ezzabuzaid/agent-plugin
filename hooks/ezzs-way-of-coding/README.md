@@ -95,8 +95,12 @@ question and short labels (the user, 2026-11-24).
 him a task or waits on him in prose, also after an earlier AskUserQuestion,
 including an answer format ("Reply **"A"** or **"B"**") and phrasings such as
 "yours, when you choose", "your go" or "type `/x`"; a negation such as "none
-of them waits on you" or "no item waits on you" is a report. A `!` command is
-the last chat line, with no dialog after it.
+of them waits on you" or "no item waits on you" is a report. A "yours" line is
+a report too when it names a later or conditional ask ("**Yours, later:**",
+"the push is yours once CI is green", "When they pass, … the push is yours")
+or what the user holds without asking for it now ("stays yours", "is yours to
+read"); "that one is yours" and "the next step is yours" still fire. A `!`
+command is the last chat line, with no dialog after it.
 `housekeeping-due` reads a Claude Code transcript: since the last `housekeeping`
 Skill call, it fires on a commit, a push or a close claim in the final message
 ("Safe to close", "Nothing new", "nothing running", "all done"); edits, reads,
@@ -132,8 +136,10 @@ Three PreToolUse guards refuse a call before it runs:
 `dialog-only-asks` refuses an AskUserQuestion whose question is over 150
 characters or whose option description is over 100;
 `memory-compaction-is-the-users` refuses an Agent brief that asks to shrink a
-`MEMORY.md` under a size, and a Write that drops more than max(1, 10%) of a
-`MEMORY.md`'s index lines (an Edit is not checked yet: agent-plugin #5756);
+`MEMORY.md` under a size, and a Write or Edit that drops more than max(1, 10%)
+of a `MEMORY.md`'s index lines, comparing the index on disk with the file the
+call leaves (an Edit's `old_string` → `new_string`, or every match under
+`replace_all`), line by line;
 `tracking-record-outside-the-scratchpad` refuses a plan, memory, HANDOFF or
 STATUS record written into a session's folder, or whose text sends a later
 reader to a file there: a task output (`…/tasks/…`), or a path that words such

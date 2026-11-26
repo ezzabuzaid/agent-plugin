@@ -1735,6 +1735,38 @@ test('stop stays quiet on a report that only mentions the user\'s go or a wait t
   }
 });
 
+// #5758: a "yours" line that names a later or conditional ask, or what the
+// user holds without asking for it now, is a status line. The first three are
+// real final messages the rule fired on (7e65b385:4959; c2896527:6304; the
+// Remaining line of c2896527:4143), the fourth is a49f8e8d:5222.
+test('stop stays quiet on a status line that names a later ask or what the user holds', async () => {
+  for (const message of [
+    "I'm verifying `37ee3898` on dev, as you chose. Its deploy is still running.\n\nOnce dev answers with that version and the writer holds the warehouse and connects without stopping, I'll give you the v3.1.0 tag command for `37ee3898`.\n\nThat command stays yours to run, because the repo's git guardrail hook blocks me from creating tags.",
+    '**Remaining:** the root cause from the 5 whys above is yours to read: "done" is checked by the worker, from the worker\'s memory, against past failures, not against the duties this work created, recorded as they appear. I propose no fix until you agree with it.',
+    '- **Waits on deepagents-ca\'s "clear":** the nx gate for the reminder package.\n- **Yours, later:** one approval for the memory cleanup.',
+    "When they pass, I'll commit locally, and the push is yours.",
+    'The push is yours once CI is green.',
+    'The tag is yours after the deploy lands.',
+  ]) {
+    assert.doesNotMatch(await stopContext({ last_assistant_message: message }), /ask-in-the-tool/, message);
+  }
+});
+
+test('stop still sends a task handed over now to AskUserQuestion', async () => {
+  for (const message of [
+    'That one is yours.',
+    'The push is yours.',
+    'The next step is yours.',
+    'Not pushed; pushes are yours.',
+    'The tag itself is yours to cut.',
+    // A later word before the clause that is not a condition on it.
+    'Pushing it, running the migration after deploy (#5533) and the plugin upload (#5506) are yours.',
+    'The release is ready. Your go?',
+  ]) {
+    assert.match(await stopContext({ last_assistant_message: message }), ASK_IN_THE_TOOL, message);
+  }
+});
+
 test('ask-in-the-tool says to explain in the chat and ask briefly in the dialog', async () => {
   const context = await stopContext({ last_assistant_message: 'Pushing main is your call.' });
   assert.match(context, /Explain in the chat in plain words, then ask in AskUserQuestion with a one-line question and short labels, your pick first, 2-4 options each\./);
@@ -1891,6 +1923,33 @@ test('a Write of a MEMORY.md that adds a line or drops one or two of twenty goes
   assert.equal(await refusal('Write', { file_path: missing, content: '- [A](a.md) — a\n' }), undefined, 'a new index');
 });
 
+// #5756: an Edit is judged by the index it leaves on disk, as a Write is.
+test('an Edit of a MEMORY.md that drops more than one index line and more than a tenth of them is refused', async () => {
+  await using index = await memoryIndex(20);
+  const { filePath, lines } = index;
+  for (const [label, edit] of [
+    ['17 of 20 lines merged into one', { old_string: lines.slice(3).join('\n'), new_string: '- [Merged](merged.md) — all of it' }],
+    ['3 of 20 lines removed', { old_string: `${lines.slice(0, 3).join('\n')}\n`, new_string: '' }],
+    ['every hook cut with replace_all', { old_string: ' matters', new_string: '', replace_all: true }],
+  ] as const) {
+    assert.equal(await refusal('Edit', { file_path: filePath, ...edit }), COMPACTION_IS_THE_USERS, label);
+  }
+});
+
+test('an Edit of a MEMORY.md that changes, removes or adds one index line goes through', async () => {
+  await using index = await memoryIndex(20);
+  const { filePath, lines } = index;
+  for (const [label, edit] of [
+    ['a description changed in place', { old_string: lines[4], new_string: '- [Memory 4](memory-4.md) — a new hook' }],
+    ['one line removed', { old_string: `${lines[7]}\n`, new_string: '' }],
+    ['one line added', { old_string: lines[9], new_string: `${lines[9]}\n- [New](new.md) — new` }],
+    ['two of twenty removed (a tenth)', { old_string: `${lines[0]}\n${lines[1]}\n`, new_string: '' }],
+    ['an old_string that is not in the file', { old_string: '- [Gone](gone.md) — gone', new_string: '' }],
+  ] as const) {
+    assert.equal(await refusal('Edit', { file_path: filePath, ...edit }), undefined, label);
+  }
+});
+
 // A tracking record never points into one session's folder. Measured on the
 // 1973 Write and Edit calls of the 59 corpus sessions
 // (hooks-6d-scratch/dump9.mts): the guard refuses 5: 69df537a:9037 writes a
@@ -1939,6 +1998,17 @@ test('a record that points to ~/.claude/scratch or only mentions /tmp/claude-501
   ] as const) {
     assert.equal(await refusal(tool, input), undefined, label);
   }
+});
+
+// #5782: a pointer word counts only within the 80 characters before the path,
+// on the same line.
+test('a pointer word 79 characters before a scratchpad path is refused; 81 characters before, or on the line before, goes through', async () => {
+  const plan = '/Users/ezzabuzaid/.claude/plans/p.md';
+  const pointerAt = (distance: number) => `see ${'x'.repeat(distance - 5)} ${SCRATCHPAD}/out.txt`;
+  assert.equal(pointerAt(79).indexOf(SCRATCHPAD), 79);
+  assert.equal(await refusal('Write', { file_path: plan, content: pointerAt(79) }), RECORD_OUTLIVES_SESSION, '79 characters before');
+  assert.equal(await refusal('Write', { file_path: plan, content: pointerAt(81) }), undefined, '81 characters before');
+  assert.equal(await refusal('Write', { file_path: plan, content: `see\n${SCRATCHPAD}/out.txt` }), undefined, 'on the line before');
 });
 
 // #5777: each rule module loads on its own, so one module that throws while it
