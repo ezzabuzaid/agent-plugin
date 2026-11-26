@@ -431,12 +431,14 @@ function claimsSafeToClose(text: string): boolean {
     .some((sentence) => AFFIRMED_SAFE_TO_CLOSE.test(sentence) && !CONDITION_OPENER.test(sentence));
 }
 
-const CLOSE_CHECK_SCRIPT = 'close-check.mjs';
+// The housekeeping skill's duty list: "Safe to close" needs both scripts in the same turn.
+const CLOSE_OUT_SCRIPTS = ['close-check.mjs', 'records-check.mjs'];
 
-async function closeCheckRanThisTurn(input: ClaudeHookInput): Promise<boolean> {
+async function closeOutScriptsRanThisTurn(input: ClaudeHookInput): Promise<boolean> {
   if (!input.transcript_path) return false;
   const { blocks } = await currentTurn(input.transcript_path);
-  return blocks.some((block) => bashCommand(block).includes(CLOSE_CHECK_SCRIPT));
+  const commands = blocks.map(bashCommand);
+  return CLOSE_OUT_SCRIPTS.every((script) => commands.some((command) => command.includes(script)));
 }
 
 // Each running task by kind, id and description, so the agent cannot report
@@ -501,8 +503,8 @@ export const stopRules: ReminderRule[] = [
     when: async (input) =>
       !runsHeadless(input) &&
       claimsSafeToClose(await finalAssistantText(input)) &&
-      !(await closeCheckRanThisTurn(input)),
+      !(await closeOutScriptsRanThisTurn(input)),
     message:
-      "You wrote 'Safe to close' without running the housekeeping skill's scripts/close-check.mjs in this turn. Run it, and quote its output.",
+      "You wrote 'Safe to close' without running the housekeeping skill's scripts/close-check.mjs and scripts/records-check.mjs in this turn. Run both, mark every line they print (done with its evidence, or open with its item or reason), and give the Duty list.",
   },
 ];

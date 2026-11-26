@@ -25,30 +25,51 @@ export function transcriptFiles(transcriptOption) {
 
 const resultText = (r) => (Array.isArray(r.content) ? r.content.map((x) => x.text ?? '').join('') : String(r.content ?? ''));
 
-// Every Bash call with its result text and working directory, in transcript order.
-export function bashCalls(files) {
+// Every tool call with its input, result text, the result's structured detail (toolUseResult), working directory,
+// time (ms since the epoch, NaN when the entry has none) and whether it is in the main transcript, in transcript order.
+export function toolCalls(files) {
   const calls = [];
-  for (const file of files) {
+  files.forEach((file, index) => {
     const pending = new Map();
-    for (const line of readFileSync(file, 'utf8').split('\n')) {
-      if (!line.trim()) continue;
-      let entry;
-      try { entry = JSON.parse(line); } catch { continue; }
+    for (const entry of entries(file)) {
       const content = entry.message?.content;
       if (!Array.isArray(content)) continue;
       if (entry.type === 'assistant') {
-        for (const b of content) if (b.type === 'tool_use' && b.name === 'Bash' && typeof b.input?.command === 'string') {
-          pending.set(b.id, { command: b.input.command, cwd: entry.cwd });
+        for (const b of content) if (b.type === 'tool_use') {
+          pending.set(b.id, { name: b.name, input: b.input ?? {}, cwd: entry.cwd, at: Date.parse(entry.timestamp), main: index === 0 });
         }
       } else if (entry.type === 'user') {
         for (const r of content) if (r.type === 'tool_result' && pending.has(r.tool_use_id)) {
           const call = pending.get(r.tool_use_id);
-          calls.push({ ...call, cwd: call.cwd ?? entry.cwd, result: resultText(r) });
+          calls.push({ ...call, cwd: call.cwd ?? entry.cwd, result: resultText(r), detail: entry.toolUseResult });
         }
       }
     }
-  }
+  });
   return calls;
+}
+
+// Every Bash call with its result text and working directory, in transcript order.
+export function bashCalls(files) {
+  return toolCalls(files)
+    .filter((call) => call.name === 'Bash' && typeof call.input.command === 'string')
+    .map(({ input, cwd, at, main, result }) => ({ command: input.command, cwd, at, main, result }));
+}
+
+// The parsed JSONL entries of one transcript; a line that is not JSON is skipped.
+export function* entries(file) {
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    try { yield JSON.parse(line); } catch { /* a torn last line */ }
+  }
+}
+
+// The text of a user or assistant entry: a string content, or its text blocks; null when it has a block of another kind.
+export function entryText(entry) {
+  const content = entry.message?.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content) || !content.every((b) => b.type === 'text')) return null;
+  return content.map((b) => b.text).join('');
 }
 
 // Where `text` next occurs at or after `from`, or the end of the line when it does not (an unclosed quote runs to the end).
@@ -57,7 +78,7 @@ const indexOrEnd = (line, text, from) => {
   return at < 0 ? line.length : at;
 };
 
-const expand = (p, cwd) => (p === '~' ? homedir() : resolve(cwd ?? process.cwd(), p.startsWith('~/') ? join(homedir(), p.slice(2)) : p));
+export const expand = (p, cwd) => (p === '~' ? homedir() : resolve(cwd ?? process.cwd(), p.startsWith('~/') ? join(homedir(), p.slice(2)) : p));
 
 // The simple commands of a shell command line, in the order bash runs them. Each is its words, quotes removed, with
 // redirections dropped, plus `link`: the operator before it (';' for a newline, '&&', '||', '|', '|&', '&'), null for
@@ -171,16 +192,23 @@ export function commandWords(words) {
   return words.slice(k);
 }
 
+// The simple commands of a line (words from the program on, see commandWords), each with the directory it runs in:
+// the call's cwd, changed by each `cd <path>` before it (`cd -` is not followed).
+export function commandsIn(command, cwd) {
+  let dir = cwd;
+  const commands = [];
+  for (const { words, link } of simpleCommands(command)) {
+    const program = commandWords(words);
+    if (program[0] === 'cd' && program[1] !== '-') dir = expand(program[1] ?? '~', dir);
+    commands.push({ words: program, link, dir });
+  }
+  return commands;
+}
+
 // The directory a git subcommand ran in, or null when no simple command of the line runs `git <subcommand>`:
 // its `git -C <path>`, else the last `cd <path>` before it, else the call's cwd.
 export function gitDirectory(command, subcommand, cwd) {
-  let dir = cwd;
-  for (const { words } of simpleCommands(command)) {
-    const [name, ...args] = commandWords(words);
-    if (name === 'cd') {
-      if (args[0] !== '-') dir = expand(args[0] ?? '~', dir);
-      continue;
-    }
+  for (const { words: [name, ...args], dir } of commandsIn(command, cwd)) {
     if (name === undefined || basename(name) !== 'git') continue;
     let at = dir;
     let k = 0;

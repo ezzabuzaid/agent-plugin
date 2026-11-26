@@ -1612,19 +1612,23 @@ test('the Stop rules still fire after a question when the turn wrote, or the que
 
 // K5: "Safe to close" is the housekeeping skill's verdict phrase (89 of 89
 // final messages that wrote it were close claims, forensics 2026-11-26), and
-// the claim must quote the close check that ran in the same turn.
+// both scripts of the duty list (close-check and records-check) must run in the same turn.
 const CLOSE_CHECK =
-  "[stop-feedback:close-check-before-safe-to-close]\nYou wrote 'Safe to close' without running the housekeeping skill's scripts/close-check.mjs in this turn. Run it, and quote its output.";
+  "[stop-feedback:close-check-before-safe-to-close]\nYou wrote 'Safe to close' without running the housekeeping skill's scripts/close-check.mjs and scripts/records-check.mjs in this turn. Run both, mark every line they print (done with its evidence, or open with its item or reason), and give the Duty list.";
+const closeCheck = bash('node ~/agent-plugin/skills/housekeeping/scripts/close-check.mjs --session x');
+const recordsCheck = bash('node ~/agent-plugin/skills/housekeeping/scripts/records-check.mjs');
 
-test('stop sends a Safe to close claim back unless the close check ran in the same turn', async () => {
+test('stop sends a Safe to close claim back unless both duty-list scripts ran in the same turn', async () => {
   for (const [label, entries] of [
-    ['no close check', [request, sweep, said('Nothing new.\n\nSafe to close.')]],
-    ['the close check ran in an earlier turn', [request, bash('node ~/agent-plugin/skills/housekeeping/scripts/close-check.mjs'), reply, stopped, userSays('Close?'), sweep, said('Safe to close.')]],
+    ['no script', [request, sweep, said('Nothing new.\n\nSafe to close.')]],
+    ['both scripts ran in an earlier turn', [request, closeCheck, recordsCheck, reply, stopped, userSays('Close?'), sweep, said('Safe to close.')]],
+    ['only close-check ran', [request, sweep, closeCheck, said('Safe to close.')]],
+    ['only records-check ran', [request, sweep, recordsCheck, said('Safe to close.')]],
   ] as const) {
     assert.ok((await stopContext({}, [...entries])).includes(CLOSE_CHECK), label);
   }
   assert.doesNotMatch(
-    await stopContext({}, [request, sweep, bash('node ~/agent-plugin/skills/housekeeping/scripts/close-check.mjs --session x'), said('Safe to close.')]),
+    await stopContext({}, [request, sweep, closeCheck, recordsCheck, said('Safe to close.')]),
     /close-check-before-safe-to-close/,
   );
   // Only the verdict phrase: other done words are often descriptions ("Reader B finished").

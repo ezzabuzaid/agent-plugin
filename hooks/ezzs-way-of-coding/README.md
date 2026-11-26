@@ -116,9 +116,14 @@ arguments. With
 `background_tasks` running it asks for the skill's idle mode and names each
 task by kind, id and description; otherwise its before-done mode.
 `close-check-before-safe-to-close` sends a final message that claims "Safe to
-close" back unless the same turn ran the housekeeping skill's
-`scripts/close-check.mjs`; a negated verdict ("Not safe to close yet: …") or a
-condition ("Once both pass, the session is safe to close") claims nothing.
+close" back unless the same turn ran both scripts of the housekeeping skill's
+duty list, `scripts/close-check.mjs` and `scripts/records-check.mjs`, and asks
+for every line they print to be marked; a negated verdict ("Not safe to close
+yet: …") or a condition ("Once both pass, the session is safe to close") claims
+nothing. It fires only on "Safe to close": a blind judge of all 73 other
+done-claim sentences in the transcripts ("everything is done", a "Done"
+heading, "all done") found at most 17 of 22 real claims, below the 9 of 10 a
+Stop rule needs.
 Neither `housekeeping-due` nor `ask-in-the-tool` fires after a turn that only
 answered a question from the user (a typed, queued or dialog-typed question, no
 write or `SendMessage` in the turn, and no `!` command handed to the user in
