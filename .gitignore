@@ -3,3 +3,4 @@ node_modules
 coding/.claude-plugin/types/
 coding/tsconfig.json
 __pycache__
+skills/memory-curator/memory/.cache/
