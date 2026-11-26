@@ -109,6 +109,23 @@ them at the next `sync`. macOS and Claude Code only.
 
 The script has its own tests: `npm test` in `skills/automations/scripts`.
 
+## rollover skill and mod
+
+A rollover gives a session a fresh context and keeps the session: its process, subagents and
+shells stay, and only the messages go. The mod [`mods/hooks/rollover.ts`](./mods/hooks/rollover.ts)
+watches the context use the status line shows. At the end of a main-loop turn at 93% or more
+(the `rolloverPercent` option), it asks the agent, in Ezz's own words, for a continuation at
+`~/.claude/continuations/<session id>.md`. When the turn that the ask started ends and the file
+exists, it runs `/clear` and submits one prompt that resumes from the file. With no file it asks
+once more, then stops with a toast and never clears. It skips subagent turns, interrupted turns
+and `claude -p` runs. [`skills/rollover`](./skills/rollover/SKILL.md) says what a continuation
+holds, how the fresh context resumes, and how a typed "give me a handoff" works. Claude Code
+only: no settings hook can run `/clear`, so this is a plugin hooks module (a mod).
+
+The mod has its own tests: `claude plugin test coding/mods` from the repo root. Run it on
+`coding/mods`, not `coding`: the runner loads every `*.test.ts` under the folder, and the Node
+tests of the skills do not load there.
+
 ## Install
 
 ```
@@ -120,7 +137,10 @@ Run `/reload-plugins` (or restart) to load it.
 
 ### Codex
 
-Codex reads the same `.claude-plugin` manifests:
+Codex reads [`.codex-plugin/plugin.json`](./.codex-plugin/plugin.json) first, which names no
+hooks, so it never sees the rollover mod (Codex warns on a hooks file that holds `modules`).
+Keep its `version` equal to the one in `.claude-plugin/plugin.json`. Otherwise Codex reads the
+same `.claude-plugin` manifests:
 
 ```
 codex plugin marketplace add ezzabuzaid/agent-plugin
@@ -129,7 +149,7 @@ codex plugin add coding@ezzabuzaid
 
 Update with `codex plugin marketplace upgrade ezzabuzaid`. All the skills load. Codex plugins
 can't ship agents, so write-test starts a general subagent with each agent's file as its
-brief. The output style is Claude Code only; Codex ignores it.
+brief. The output style and the rollover mod are Claude Code only; Codex ignores them.
 
 ## Selecting the style
 

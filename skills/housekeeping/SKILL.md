@@ -1,6 +1,6 @@
 ---
 name: housekeeping
-description: Session housekeeping. Asks the user, in one AskUserQuestion round, every decision, permission or manual step that only the user can give for the rest of the work, and acts on the answers; brings every record the session's work made stale up to date (repo docs, memory, backlog items, plan status); files each problem noticed into agent-backlog; stops and deletes what the session started; checks every push's CI and every claim before "done"; finishes or hands off the session's own work; and ends with what remains and whether the session is safe to close. Use when a Stop reminder says housekeeping is due (call this skill; a sweep from memory does not count); when the user asks "what are you waiting for?", "what are you waiting on?", "do you need anything from me?", "what's left?", "what remains?", "what now?", "use ask user question for any input you need", "take the time to update anything", "file any problems", "clean up", "wrap up", "give me a handoff", "I need to close this session", "anything remaining?" or "can I close this session?"; while waiting on subagents, CI, a deploy, a peer session or a long shell command; and before reporting a task as done.
+description: Session housekeeping. Asks the user, in one AskUserQuestion round, every decision, permission or manual step that only the user can give for the rest of the work, and acts on the answers; brings every record the session's work made stale up to date (repo docs, memory, backlog items, plan status); files each problem noticed into agent-backlog; stops and deletes what the session started; checks every push's CI and every claim before "done"; finishes the session's own work; and ends with what remains and whether the session is safe to close. Use when a Stop reminder says housekeeping is due (call this skill; a sweep from memory does not count); when the user asks "what are you waiting for?", "what are you waiting on?", "do you need anything from me?", "what's left?", "what remains?", "what now?", "use ask user question for any input you need", "take the time to update anything", "file any problems", "clean up", "wrap up", "I need to close this session", "anything remaining?" or "can I close this session?"; while waiting on subagents, CI, a deploy, a peer session or a long shell command; and before reporting a task as done.
 ---
 
 # Housekeeping
@@ -10,7 +10,7 @@ This skill brings the session to one of two states:
 - **Finished:** the work is done and proven, every record matches it, and nothing waits on the user.
 - **Parked:** work that will wake the session runs (a subagent, a workflow, a background shell, a watch the user can see), each remaining item waits on it as checked now, and the user has answered everything the rest of the work needs.
 
-A turn never ends to wait on the user: AskUserQuestion returns his answer inside the turn. The chat explains; the dialog only asks. The evidence for each rule (the user's words, the incidents, the numbers) is in [references/RULINGS.md](references/RULINGS.md).
+A turn never ends to wait on the user: AskUserQuestion returns his answer inside the turn. The chat explains; the dialog only asks. A handoff, or a rollover to a fresh context, is the `coding:rollover` skill's job. The evidence for each rule (the user's words, the incidents, the numbers) is in [references/RULINGS.md](references/RULINGS.md).
 
 ## Scripts
 
@@ -30,8 +30,7 @@ Every mode has the same jobs. The mode sets their order.
 | Asked | The user asks what you wait for, what you need or what remains | Ask first, act on the answers, then continue the work. |
 | Idle | Background work runs | Ask, then the jobs that do not touch what the running work uses, then start every item it does not block. A test run, CI run, push, deploy or a peer's optional result never holds the queue. |
 | Before done | You are about to report a task as done | Every job, for this task, before you write the report. |
-| Handoff, keep working | The user asks for a handoff but not to stop | Write the record and the prompt, then go on with the work; refresh the record as the state changes. |
-| Close-out | The user closes the session or leaves | Every job, then hand off. |
+| Close-out | The user closes the session or leaves | Every job. |
 
 When the turn answered a question from the user, the sweep adds nothing after the answer: no dialog and no report. The answer is the last thing he sees.
 
@@ -41,11 +40,10 @@ Each job is an outcome. Reach it the shortest way.
 
 - **Ask:** every decision, permission or manual step that only the user can give for the rest of the work, from the session's first message to now, is in one AskUserQuestion round (at most 4 questions per call, more calls in the same round). You act on the answers in the same turn.
 - **Look back:** you know what you changed, committed, pushed, filed, started and promised (in your messages and in your own dialogs), the corrections the user gave, and the problems you saw in passing. Your diff holds no leftovers.
-- **Update:** each record that names what you changed matches the code as it is now: repo docs, AGENTS.md, memory, backlog items, conditions this session settled, and the plan's STATUS. `records-check.mjs` output backs the claim.
+- **Update:** each record that names what you changed matches the code as it is now: repo docs, AGENTS.md, memory, backlog items, conditions this session settled, and the plan's STATUS. The item that tracks the work says what is done (with commits), what is in progress and where, and the exact next step with its check. `records-check.mjs` output backs the claim.
 - **File:** each problem you did not fix is an agent-backlog item that a new agent can act on without this transcript, in the repo that owns the fix, with no duplicate. A problem in the user's own hooks and skills goes to agent-plugin; a third-party tool's problem is mentioned once.
 - **Clean up:** nothing you started and no longer need still runs or takes space: processes, watches, disk, containers, volumes, and the rows and accounts your checks created.
 - **Finish:** `close-check.mjs` output shows every push's runs read, each running run with one bounded watch as its receiver, each ready item of yours started, and your commits pushed where the repo's settings allow. Each claim in the report was proven after your last edit; each Verification line and each user request has its evidence; each skill the user invoked has its closing report.
-- **Hand off:** the item that tracks the work says what is done (with commits), what is in progress and where, and the exact next step with its check.
 
 ## Gotchas
 
