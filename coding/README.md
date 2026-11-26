@@ -139,7 +139,7 @@ Run `/reload-plugins` (or restart) to load it.
 
 Codex reads [`.codex-plugin/plugin.json`](./.codex-plugin/plugin.json) first, which names no
 hooks, so it never sees the rollover mod (Codex warns on a hooks file that holds `modules`).
-Keep its `version` equal to the one in `.claude-plugin/plugin.json`. Otherwise Codex reads the
+Keep its `version` equal to the one in `.claude-plugin/plugin.json`: `codex plugin list` shows it, though an upgrade refreshes the files whatever it says. Otherwise Codex reads the
 same `.claude-plugin` manifests:
 
 ```
