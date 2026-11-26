@@ -328,4 +328,8 @@ function ledgerInstalledAt() {
 const INSTALL = fileURLToPath(new URL('../../../../hooks/session-ledger/install.sh', import.meta.url));
 export const NO_LEDGER = `session ledger not installed (no ~/.claude/ledger/installed-at, or hook.session-ledger-commit.command or hook.session-ledger-ref.command not in git's global config): the commits and pushes of this session were not read; install it: sh ${INSTALL}`;
 const iso = (ms) => (Number.isNaN(ms) ? 'at no known time' : new Date(ms).toISOString());
-export const uncoveredLine = ({ id, started }, installedAt) => `${id} began ${iso(started)}, before the session ledger was installed (${iso(installedAt)}): its commits and pushes before then were not read`;
+// The line names the step it owes: with no ledger lines to list them, the agent lists those commits itself.
+export const uncoveredLine = ({ id, started }, installedAt) => {
+  const since = Number.isNaN(started) ? '' : ` --since=${iso(started)}`;
+  return `${id} began ${iso(started)}, before the session ledger was installed (${iso(installedAt)}): its commits and pushes before then were not read; list them with git log${since} in each repo it worked in, check each is pushed and its CI read, and review each (SKILL.md Finish)`;
+};

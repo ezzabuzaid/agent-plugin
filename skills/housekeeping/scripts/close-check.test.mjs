@@ -265,7 +265,7 @@ test('a chain id that began before installed-at is open with its start and insta
 
   const r = s.check(s.session([{ derivedFrom: 'old' }, { at: 60 }, { say: 'continuing' }], [], 'new'));
 
-  assert.equal(section(r.stdout, 'Pushes'), '  OPEN old began 2026-11-26T10:00:00.000Z, before the session ledger was installed (2026-11-26T10:00:30.000Z): its commits and pushes before then were not read\n  none');
+  assert.equal(section(r.stdout, 'Pushes'), '  OPEN old began 2026-11-26T10:00:00.000Z, before the session ledger was installed (2026-11-26T10:00:30.000Z): its commits and pushes before then were not read; list them with git log --since=2026-11-26T10:00:00.000Z in each repo it worked in, check each is pushed and its CI read, and review each (SKILL.md Finish)\n  none');
   assert.equal(lastLine(r.stdout), 'Open: 1');
 });
 

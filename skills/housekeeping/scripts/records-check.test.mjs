@@ -344,7 +344,7 @@ test('a session that began before the ledger was installed is printed and counts
   const r = s.check('--transcript', s.transcript('ls', 'README.md', '2026-11-26T08:00:00.000Z'));
 
   assert.ok(r.stdout.includes(`${join(s.work, 'docs/guide.md')}:1`), r.stdout);
-  assert.ok(r.stdout.includes('session began 2026-11-26T08:00:00.000Z, before the session ledger was installed (2026-11-26T09:00:00.000Z): its commits and pushes before then were not read\n'), r.stdout);
+  assert.ok(r.stdout.includes('session began 2026-11-26T08:00:00.000Z, before the session ledger was installed (2026-11-26T09:00:00.000Z): its commits and pushes before then were not read; list them with git log --since=2026-11-26T08:00:00.000Z in each repo it worked in, check each is pushed and its CI read, and review each (SKILL.md Finish)\n'), r.stdout);
   assert.equal(lastLine(r.stdout), 'Stale mentions: 2');
   assert.equal(r.status, 1, r.stderr);
 });

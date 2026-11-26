@@ -41,7 +41,9 @@
 //                and the install command (`sh <agent-plugin>/hooks/session-ledger/install.sh`); there is no other
 //                source of them. Else each chain id whose transcript's first dated entry is older than installed-at
 //                (or that has none) is open: "<id> began <start>, before the session ledger was installed
-//                (<installed-at>): its commits and pushes before then were not read". Any other id with no ledger
+//                (<installed-at>): its commits and pushes before then were not read; list them with git log
+//                --since=<start> in each repo it worked in, check each is pushed and its CI read, and review each
+//                (SKILL.md Finish)" (no --since when there is no start). Any other id with no ledger
 //                file made no commit and no push. An id whose transcript is not found is open under Session only.
 //   Unpushed     for each repo (that still exists) and branch of the ledger's `kind: "commit"` lines (`ref`
 //                refs/heads/<branch>; a commit on a detached HEAD has no branch), after `git fetch origin <branch>`,
