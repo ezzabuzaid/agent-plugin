@@ -1,12 +1,12 @@
 // Session ledger: git's own record of each commit and each tracking-ref update
 // of a Claude Code session, appended to ~/.claude/ledger/<session>.jsonl.
-// git 2.54 runs it as a config hook (hook.<name>.command + hook.<name>.event):
+// hook.sh starts it, only with a session id, outside the system temp folder,
+// and for reference-transaction only in state "committed" with a line under
+// refs/remotes/:
 //   node ledger.ts post-commit
-//   node ledger.ts reference-transaction committed   (stdin: "<old> <new> <ref>" lines)
-// The registration in README.md starts node only with a session id and, for
-// reference-transaction, only in state "committed", whose exit git ignores
-// (githooks(5)), as it ignores post-commit's. The ledger still exits 0 on any
-// error, so it never blocks git.
+//   node ledger.ts reference-transaction   (stdin: "<old> <new> <ref>" lines)
+// git ignores the exit of both hooks (githooks(5)); the ledger still exits 0 on
+// any error, so it never blocks git.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -67,14 +67,13 @@ function facts(session: string, event: string | undefined): Fact[] {
 }
 
 try {
-	const session = process.env.CLAUDE_CODE_SESSION_ID;
-	if (session) {
-		const lines = facts(session, process.argv[2]);
-		if (lines.length > 0) {
-			const dir = join(homedir(), '.claude', 'ledger');
-			mkdirSync(dir, { recursive: true });
-			appendFileSync(join(dir, `${session}.jsonl`), lines.map((fact) => JSON.stringify(fact) + '\n').join(''));
-		}
+	// hook.sh starts node only when the session id is set.
+	const session = process.env.CLAUDE_CODE_SESSION_ID as string;
+	const lines = facts(session, process.argv[2]);
+	if (lines.length > 0) {
+		const dir = join(homedir(), '.claude', 'ledger');
+		mkdirSync(dir, { recursive: true });
+		appendFileSync(join(dir, `${session}.jsonl`), lines.map((fact) => JSON.stringify(fact) + '\n').join(''));
 	}
 } catch (error) {
 	process.stderr.write(`ledger: ${error instanceof Error ? error.message : String(error)}\n`);
