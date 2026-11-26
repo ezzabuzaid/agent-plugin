@@ -265,8 +265,8 @@ export const firstLine = (error) => String(error.stderr || error.message).trim()
 // The commits and pushes of the session (a sessionChain result), from the session ledger that git's own hooks write
 // when they happen (agent-plugin hooks/session-ledger/README.md): `~/.claude/ledger/<id>.jsonl`, one JSON line per fact.
 // Commits are the `kind: "commit"` lines ({ repo, sha, ref }, ref null on a detached HEAD); pushes are the `kind: "ref"`
-// lines with `by: "push"` ({ repo, branch of refs/remotes/<remote>/<branch>, sha: new }), each once per repo and sha,
-// in ledger order.
+// lines with `by: "push"` ({ repo, remote and branch of refs/remotes/<remote>/<branch>, sha: new }), each once per repo
+// and sha, in ledger order.
 // Coverage comes from the ledger's own record. The ledger records every commit and push of a session that began after
 // `~/.claude/ledger/installed-at` (one ISO 8601 UTC line, written by its install.sh), while both of its hooks stay
 // registered. Without that line (or with one that is no time), or without either hook, nothing says what was recorded:
@@ -293,7 +293,7 @@ export function sessionLedger({ ids, missing, started }) {
   const once = (list, key) => [...new Map(list.map((fact) => [key(fact), fact])).values()];
   const commits = once(lines.filter((l) => l.kind === 'commit').map(({ repo, sha, ref }) => ({ repo, sha, ref })), (c) => `${c.repo}\0${c.sha}`);
   const pushes = once(
-    lines.filter((l) => l.kind === 'ref' && l.by === 'push').map(({ repo, ref, new: sha }) => ({ repo, branch: ref.split('/').slice(3).join('/'), sha })),
+    lines.filter((l) => l.kind === 'ref' && l.by === 'push').map(({ repo, ref, new: sha }) => ({ repo, remote: ref.split('/')[2], branch: ref.split('/').slice(3).join('/'), sha })),
     (p) => `${p.repo}\0${p.sha}`,
   );
   const uncovered = ids.filter((id) => !missing.includes(id) && !(started.get(id) >= installedAt)).map((id) => ({ id, started: started.get(id) }));

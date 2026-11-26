@@ -30,7 +30,9 @@
 //                For each pushed head, the runs of `gh run list --commit <sha> --json name,status,conclusion,url` in
 //                that repo. A run that is not completed + success is open. A head with no run yet is printed, not
 //                open. A repo directory that no longer exists is open as "repo path not found: <path>", and gh is not
-//                called. "gh not found" (gh is not on PATH) and gh's own error are open: CI was not read.
+//                called. "gh not found" (gh is not on PATH) and gh's own error are open: CI was not read, unless the
+//                remote's URL (`git remote get-url <remote>`) is a folder on disk (a path or file://): such a push has
+//                no CI and prints "no CI: <remote> is a local repository (<url>)", not open.
 //                Coverage, from the ledger's own record (lib/session.mjs sessionLedger): the ledger records every
 //                commit and push of a session that began after ~/.claude/ledger/installed-at (one ISO 8601 UTC line
 //                that its install.sh writes), while both hook keys stay registered (git config --global
@@ -179,6 +181,12 @@ function main() {
     try {
       runs = JSON.parse(execFileSync('gh', ['run', 'list', '--commit', push.sha, '--json', 'name,status,conclusion,url'], { cwd: push.repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
     } catch (error) {
+      // gh failed: a remote that is a folder on disk has no CI at all, so that push owes no run.
+      const url = remoteUrl(push);
+      if (url !== null && isLocalPath(url)) {
+        say(`  no CI: ${push.remote} is a local repository (${url})`);
+        continue;
+      }
       say(`could not read CI for ${push.sha.slice(0, 12)}: ${error.code === 'ENOENT' ? 'gh not found' : firstLine(error)}`, true);
       continue;
     }
@@ -285,6 +293,21 @@ const clip = (text) => {
   return line.length > 160 ? `${line.slice(0, 159)}…` : line;
 };
 const inside = (path, dir) => path === dir || path.startsWith(dir.endsWith(sep) ? dir : dir + sep);
+
+// The URL that the push's remote has in its repo now; null when git cannot read it.
+function remoteUrl(push) {
+  try {
+    return git(push.repo, ['remote', 'get-url', push.remote]).trim();
+  } catch {
+    return null;
+  }
+}
+
+// A git URL that names a folder on disk: file://, or a path (git's scp form `host:path` and any `scheme://` are not).
+function isLocalPath(url) {
+  if (url.startsWith('file://') || /^[A-Za-z]:[\\/]/.test(url)) return true;
+  return !url.includes('://') && !/^[^/\\]+:/.test(url);
+}
 
 // The nearest folder at or above `dir`, inside `repo`, with package.json or project.json; null when none.
 function packageOf(dir, repo) {

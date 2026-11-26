@@ -389,7 +389,9 @@ test('a missing gh is an open item, not silence', () => {
   using s = sandbox();
   const c = s.commit('a.txt');
   s.push();
-  s.ledger([s.committed(c.sha), s.pushed(c.sha)]);
+  // The push went to a GitHub remote, so it has CI to read (a remote on disk has none).
+  s.run(s.work, 'remote', 'add', 'github', 'https://github.com/example/work.git');
+  s.ledger([s.committed(c.sha), { ...s.pushed(c.sha), ref: 'refs/remotes/github/main' }]);
   s.reviewed(c.sha);
 
   const r = s.check(s.transcript([['ls', 'README.md']]));
@@ -397,6 +399,20 @@ test('a missing gh is an open item, not silence', () => {
   assert.match(r.stdout, new RegExp(`OPEN could not read CI for ${c.sha.slice(0, 12)}: gh not found`));
   assert.equal(lastLine(r.stdout), 'Open: 1');
   assert.equal(r.status, 1);
+});
+
+test('a push to a remote that is a folder on disk has no CI: printed as no CI, not open, when gh cannot read it', () => {
+  using s = sandbox();
+  const c = s.commit('a.txt');
+  s.push();
+  s.ledger([s.committed(c.sha), s.pushed(c.sha)]);
+  s.reviewed(c.sha);
+
+  const r = s.check(s.transcript([['ls', 'README.md']]));
+
+  assert.match(r.stdout, new RegExp(`main ${c.sha.slice(0, 12)}\\n    no CI: origin is a local repository \\(${join(s.root, 'remote.git')}\\)\\n`));
+  assert.doesNotMatch(r.stdout, /could not read CI/);
+  assert.equal(lastLine(r.stdout), 'Nothing open.');
 });
 
 test('a push from a repo path that no longer exists is open as repo path not found, not gh not found', () => {
