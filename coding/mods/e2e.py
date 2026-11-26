@@ -6,9 +6,9 @@ real engine instead: a terminal session (in a pseudo-terminal, with the user's o
 and hooks) loads this checkout's coding plugin with a low `rolloverPercent`, gets pushed past
 it, and must write a continuation, /clear, and resume from it in a new conversation.
 
-    python3 -I coding/mods/e2e.py <empty work folder> [--percent 12]
+    python3 -I coding/mods/e2e.py <empty work folder> [--percent 12] [--wait 420]
 
-It spends the plan's quota (about 10 model requests). It prints one JSON verdict and exits 0
+It spends the plan's quota (about 10 model requests) and ends within about 10 minutes. It prints one JSON verdict and exits 0
 only when every check holds. The child session and its pseudo-terminal are stopped at the end;
 the transcripts stay under ~/.claude/projects/ as evidence. Python, because Node has no
 pseudo-terminal of its own.
@@ -23,6 +23,7 @@ HOME = os.path.expanduser('~')
 parser = argparse.ArgumentParser()
 parser.add_argument('work')
 parser.add_argument('--percent', type=int, default=12)
+parser.add_argument('--wait', type=int, default=420, help='seconds to wait for the rollover')
 parser.add_argument('--claude', default=f'{HOME}/.local/bin/claude')
 args = parser.parse_args()
 work = os.path.abspath(args.work)
@@ -121,13 +122,13 @@ try:
         os.write(fd, b'\r')
         pump(6)
     type_line('Say hi in one word.')
-    wait_for(lambda: transcripts() and turn_ends(transcripts()[-1]) >= 1, 180)
+    wait_for(lambda: transcripts() and turn_ends(transcripts()[-1]) >= 1, 120)
     old = transcripts()[-1]
     old_id = os.path.basename(old)[:-len('.jsonl')]
     continuation = f'{HOME}/.claude/continuations/{old_id}.md'
     reads = ', '.join(f'{p} (whole, in 2000-line pages)' for p in BIG_FILES)
     type_line(f'Use the Read tool to read {reads}. Then reply with only the word done.')
-    rolled = wait_for(lambda: any(t != old and turn_ends(t) >= 1 for t in transcripts()), 900)
+    rolled = wait_for(lambda: any(t != old and turn_ends(t) >= 1 for t in transcripts()), args.wait)
     new = next((t for t in reversed(transcripts()) if t != old), None)
     new_id = os.path.basename(new)[:-len('.jsonl')] if new else None
     verdict = {
