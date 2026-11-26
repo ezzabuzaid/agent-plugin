@@ -1,11 +1,16 @@
 // Black-box tests of records-check.mjs: each test runs the script as a child process, as the skill runs it.
 //
-// Seams. git is real: each test makes a throwaway repo and commits a real delete or rename; the transcript holds the
-// real output of that `git commit`. The project memory is a folder under HOME, which the child gets as its input (an
-// empty folder per test, so no user git config, hook or memory is read); the test writes the memory file there the
-// way Claude Code does. agent-backlog is the outer seam: a real one reads the user's own backlog, so each test puts a
-// stand-in executable on PATH that answers only `list --all-repos --status open --json` and fails on any other call.
-// The test process's own env is not changed.
+// Seams. git is real: each test makes a throwaway repo and commits a real delete or rename. The session ledger is a
+// record that git's hooks (agent-plugin hooks/session-ledger) write and the script only reads, so a test of the
+// session's commits writes the ledger line of each commit into ~/.claude/ledger/session.jsonl under HOME, in the shape
+// that README gives; the transcript (session.jsonl) gives only the session id. The project memory is a folder under
+// HOME, which the child gets as its input (an empty folder per test, so no user git config, hook or memory is read;
+// the ledger is installed there as its install.sh leaves it: HOME's git config holds the two hook keys and
+// ~/.claude/ledger/installed-at a time before the transcript's entries, unless the test is about a missing install);
+// the test writes the memory file there the way Claude Code does.
+// agent-backlog is the outer seam: a real one reads the user's own backlog, so each test puts a stand-in executable
+// on PATH that answers only `list --all-repos --status open --json` and fails on any other call. The test process's
+// own env is not changed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, chmodSync, realpathSync } from 'node:fs';
@@ -20,19 +25,25 @@ const script = join(here, 'records-check.mjs');
 // realpath: macOS links /var to /private/var.
 const tempRoot = realpathSync(tmpdir());
 
-function sandbox({ backlog = [] } = {}) {
+function sandbox({ backlog = [], installed = true } = {}) {
   const root = mkdtempSync(join(tempRoot, 'housekeeping-records-check-'));
   const bin = join(root, 'bin');
   const home = join(root, 'home');
   mkdirSync(bin);
   mkdirSync(home);
   symlinkSync('/usr/bin/git', join(bin, 'git'));
+  if (installed) {
+    // The keys install.sh registers; the tests' git runs without CLAUDE_CODE_SESSION_ID, so each hook ends at once.
+    writeFileSync(join(home, '.gitconfig'), '[hook "session-ledger-commit"]\n\tevent = post-commit\n\tcommand = : ledger\n[hook "session-ledger-ref"]\n\tevent = reference-transaction\n\tcommand = : ledger\n');
+    mkdirSync(join(home, '.claude', 'ledger'), { recursive: true });
+    writeFileSync(join(home, '.claude', 'ledger', 'installed-at'), '2026-11-26T09:00:00Z\n');
+  }
   const standIn = join(bin, 'agent-backlog');
   writeFileSync(standIn, `#!${process.execPath}\nif (process.argv.slice(2).join(' ') !== 'list --all-repos --status open --json') { console.error('unexpected call'); process.exit(1); }\nprocess.stdout.write(${JSON.stringify(JSON.stringify(backlog))});\n`);
   chmodSync(standIn, 0o755);
   // NODE_OPTIONS and WRITE_TEST_MUTANT pass through, so a write-test mutation run reaches the child.
   const passed = Object.entries(process.env).filter(([name]) => name === 'NODE_OPTIONS' || name === 'WRITE_TEST_MUTANT');
-  const env = { ...Object.fromEntries(passed), PATH: bin, HOME: home, GIT_CONFIG_NOSYSTEM: '1' };
+  const env = { ...Object.fromEntries(passed), PATH: bin, HOME: home, XDG_CONFIG_HOME: join(home, '.config'), GIT_CONFIG_NOSYSTEM: '1' };
   const work = join(root, 'work');
   const git = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: work, env, encoding: 'utf8' });
   mkdirSync(join(work, 'src'), { recursive: true });
@@ -51,29 +62,39 @@ function sandbox({ backlog = [] } = {}) {
     writeFileSync(join(dir, name), text);
     return join(dir, name);
   };
-  const transcript = (command, result) => {
+  // A transcript of one Bash call; `timestamp` is when the session began.
+  const transcript = (command, result, timestamp = '2026-11-26T10:00:00.000Z') => {
     const file = join(root, 'session.jsonl');
     writeFileSync(file, [
-      { type: 'assistant', cwd: work, message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command } }] } },
-      { type: 'user', cwd: work, message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: [{ type: 'text', text: result }] }] } },
+      { type: 'assistant', cwd: work, timestamp, message: { content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command } }] } },
+      { type: 'user', cwd: work, timestamp, message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: [{ type: 'text', text: result }] }] } },
     ].map((e) => JSON.stringify(e)).join('\n'));
     return file;
   };
+  // The ledger line of each commit, as the session-ledger post-commit hook appends it.
+  const ledger = (...shas) => {
+    mkdirSync(join(home, '.claude', 'ledger'), { recursive: true });
+    const at = '2026-11-26T10:00:00.000Z';
+    writeFileSync(join(home, '.claude', 'ledger', 'session.jsonl'), shas.map((sha) => `${JSON.stringify({ session: 'session', kind: 'commit', repo: work, sha, ref: 'refs/heads/main', at })}\n`).join(''));
+  };
+  const head = () => git('rev-parse', 'HEAD').trim();
   const check = (...args) => spawnSync(process.execPath, [script, ...args], { env, encoding: 'utf8' });
-  return { work, git, write, memory, transcript, check, [Symbol.dispose]: () => rmSync(root, { recursive: true, force: true }) };
+  return { work, git, write, memory, transcript, ledger, head, check, [Symbol.dispose]: () => rmSync(root, { recursive: true, force: true }) };
 }
 
 const lastLine = (out) => out.trimEnd().split('\n').at(-1);
 
-test('a deleted path still named in a doc and in a memory is listed, exit 1', () => {
+// A commit known only from the ledger: its output went to a log file, so the transcript shows no `[main <sha>]`.
+test('a path deleted by a commit that only the ledger knows, still named in a doc and in a memory, is listed, exit 1', () => {
   using s = sandbox();
   s.write('docs/guide.md', '# Guide\n\nThe entry is `src/old-name.ts`.\n');
   const note = s.memory('note.md', 'See [it](src/old-name.ts) for the entry.\n');
   s.git('add', 'docs/guide.md');
   s.git('rm', '-q', 'src/old-name.ts');
-  const committed = s.git('commit', '-m', 'remove old-name');
+  s.git('commit', '-q', '-m', 'remove old-name');
+  s.ledger(s.head());
 
-  const r = s.check('--transcript', s.transcript('git commit -m "remove old-name"', committed));
+  const r = s.check('--transcript', s.transcript('git commit -m "remove old-name" > $L/commit.log 2>&1', ''));
 
   assert.match(r.stdout, /: src\/old-name\.ts\n/);
   assert.ok(r.stdout.includes(`${join(s.work, 'docs/guide.md')}:3`), r.stdout);
@@ -88,9 +109,10 @@ test('a basename-only or longer-path match is not listed', () => {
   s.memory('note.md', 'the old-name.ts file\n');
   s.git('add', 'docs/guide.md');
   s.git('rm', '-q', 'src/old-name.ts');
-  const committed = s.git('commit', '-m', 'remove old-name');
+  s.git('commit', '-q', '-m', 'remove old-name');
+  s.ledger(s.head());
 
-  const r = s.check('--transcript', s.transcript('git commit -m x', committed));
+  const r = s.check('--transcript', s.transcript('ls', 'README.md'));
 
   assert.equal(r.stdout, 'No stale mention.\n');
   assert.equal(r.status, 0, r.stderr);
@@ -125,9 +147,10 @@ test('a removed export still named in a doc, a memory and an open backlog item i
   const note = s.memory('note.md', 'Read the login with warehouseLogin.\n');
   s.write('src/login.ts', 'export const keep = 1;\n');
   s.git('add', 'src/login.ts');
-  const committed = s.git('commit', '-m', 'drop warehouseLogin');
+  s.git('commit', '-q', '-m', 'drop warehouseLogin');
+  s.ledger(s.head());
 
-  const r = s.check('--transcript', s.transcript('git commit -m "drop warehouseLogin"', committed));
+  const r = s.check('--transcript', s.transcript('ls', 'README.md'));
 
   assert.match(r.stdout, /: export warehouseLogin \(src\/login\.ts\)\n/);
   assert.ok(r.stdout.includes(`${join(s.work, 'AGENTS.md')}:3`), r.stdout);
@@ -295,4 +318,33 @@ test('a removed name that only ADRs mention is no stale mention, exit 0', () => 
 
   assert.equal(r.stdout, `${HISTORY}\n  ${join(s.work, 'docs/adr/0001-login.md')}: export warehouseLogin\nNo stale mention.\n`);
   assert.equal(r.status, 0, r.stderr);
+});
+
+test('with the ledger not installed, the unread commits are printed with the install command and count as one', () => {
+  using s = sandbox({ installed: false });
+  s.write('docs/guide.md', 'The entry is `src/old-name.ts`.\n');
+  s.git('add', 'docs/guide.md');
+  s.git('rm', '-q', 'src/old-name.ts');
+  const committed = s.git('commit', '-m', 'remove old-name');
+
+  const r = s.check('--transcript', s.transcript('git commit -m "remove old-name"', committed));
+
+  assert.match(r.stdout, /^session ledger not installed \(no ~\/\.claude\/ledger\/installed-at, or hook\.session-ledger-commit\.command or hook\.session-ledger-ref\.command not in git's global config\): the commits and pushes of this session were not read; install it: sh \/\S+\/hooks\/session-ledger\/install\.sh\nStale mentions: 1\n$/);
+  assert.equal(r.status, 1, r.stderr);
+});
+
+test('a session that began before the ledger was installed is printed and counts as one, beside the commits the ledger has', () => {
+  using s = sandbox();
+  s.write('docs/guide.md', 'The entry is `src/old-name.ts`.\n');
+  s.git('add', 'docs/guide.md');
+  s.git('rm', '-q', 'src/old-name.ts');
+  s.git('commit', '-q', '-m', 'remove old-name');
+  s.ledger(s.head());
+
+  const r = s.check('--transcript', s.transcript('ls', 'README.md', '2026-11-26T08:00:00.000Z'));
+
+  assert.ok(r.stdout.includes(`${join(s.work, 'docs/guide.md')}:1`), r.stdout);
+  assert.ok(r.stdout.includes('session began 2026-11-26T08:00:00.000Z, before the session ledger was installed (2026-11-26T09:00:00.000Z): its commits and pushes before then were not read\n'), r.stdout);
+  assert.equal(lastLine(r.stdout), 'Stale mentions: 2');
+  assert.equal(r.status, 1, r.stderr);
 });

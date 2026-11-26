@@ -5,10 +5,15 @@
 //        node scripts/records-check.mjs --repo <path> --since <rev>
 //
 // Reads
-//   The commits: each `[<branch> <sha>]` in a `git commit` result of the session's transcript
-//   (~/.claude/projects/*/<CLAUDE_CODE_SESSION_ID>.jsonl, or --transcript <path>, plus <id>/subagents/*.jsonl), in the
-//   repo of that call (`git -C <path>`, else its last `cd <path>`, else its working directory); or, with --repo and
-//   --since, every commit of <since>..HEAD in <repo>.
+//   The commits: each `kind: "commit"` line of the session ledger (~/.claude/ledger/<id>.jsonl, which git's own hook
+//   writes at each commit; agent-plugin hooks/session-ledger/README.md) of every id of the session, in its repo (one
+//   that no longer exists is skipped). The session is its id (CLAUDE_CODE_SESSION_ID, or the name of
+//   --transcript <path> without .jsonl) plus every id a `derived-from` entry of its transcripts names, recursively,
+//   as Claude Code writes one after a /clear (lib/session.mjs sessionChain). Coverage comes from the ledger's own
+//   record (lib/session.mjs sessionLedger): without ~/.claude/ledger/installed-at or either of its two hook keys in
+//   git's global config, the commits were not read, and that is printed with the install command and counts as one;
+//   each chain id whose transcript began before installed-at is printed (its commits before then were not read) and
+//   counts as one. Or, with --repo and --since, every commit of <since>..HEAD in <repo>.
 //   The stale paths: `git show --name-status --diff-filter=DR` of each commit; a deleted path and the old side of a
 //   rename.
 //   The stale identifiers: for each JavaScript or TypeScript file a commit changed, the identifiers its parent's
@@ -44,15 +49,16 @@
 // only if the decision changed)`, one line per ADR file, `  <file>: <name>, <name>` (a path, or `<kind> <name>`),
 // and they do not count. Then a last line `No stale mention.` or `Stale mentions: <n>`, where <n> counts the
 // mentions outside ADRs. A failed agent-backlog call is printed and counts as one: the backlog was not read.
+// An unread ledger, and each chain id the ledger does not cover, is printed before the last line and counts as one.
 //
-// Exit codes: 0 no stale mention outside ADRs, 1 a stale mention outside ADRs (or an unread backlog), 2 usage or read
-// error.
+// Exit codes: 0 no stale mention outside ADRs, 1 a stale mention outside ADRs (or an unread backlog or ledger), 2
+// usage or read error.
 import { parseArgs } from 'node:util';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { UsageError, transcriptFiles, bashCalls, repoRoot, sessionCommits, git, firstLine } from './lib/session.mjs';
+import { UsageError, NO_LEDGER, uncoveredLine, sessionChain, sessionLedger, repoRoot, git, firstLine } from './lib/session.mjs';
 
 function main() {
   let options;
@@ -64,14 +70,15 @@ function main() {
   if (Boolean(options.repo) !== Boolean(options.since)) throw new UsageError('--repo and --since go together');
 
   const commitsByRepo = new Map();
+  let ledger;
   if (options.repo) {
     const repo = repoRoot(resolve(options.repo));
     if (!repo) throw new UsageError(`not a git repo: ${options.repo}`);
     commitsByRepo.set(repo, gitOrUsage(repo, ['rev-list', `${options.since}..HEAD`]).split('\n').filter(Boolean));
   } else {
-    for (const commit of sessionCommits(bashCalls(transcriptFiles(options.transcript)))) {
-      const repo = repoRoot(commit.dir);
-      if (repo) commitsByRepo.set(repo, [...(commitsByRepo.get(repo) ?? []), commit.sha]);
+    ledger = sessionLedger(sessionChain(options.transcript));
+    for (const { repo, sha } of ledger?.commits ?? []) {
+      if (existsSync(repo)) commitsByRepo.set(repo, [...(commitsByRepo.get(repo) ?? []), sha]);
     }
   }
 
@@ -122,6 +129,14 @@ function main() {
   }
   if (backlog?.error) {
     console.log(`could not read open backlog items: ${backlog.error}`);
+    count++;
+  }
+  if (ledger === null) {
+    console.log(NO_LEDGER);
+    count++;
+  }
+  for (const gap of ledger?.uncovered ?? []) {
+    console.log(uncoveredLine(gap, ledger.installedAt));
     count++;
   }
   console.log(count === 0 ? 'No stale mention.' : `Stale mentions: ${count}`);

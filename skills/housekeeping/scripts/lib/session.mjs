@@ -1,59 +1,105 @@
-// Reads what this session did from its Claude Code transcripts. Shared by close-check.mjs and records-check.mjs;
-// their header comments hold the contract.
+// Reads what this session did from its Claude Code transcripts and its session ledger. Shared by close-check.mjs and
+// records-check.mjs; their header comments hold the contract.
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { join, dirname, basename, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export class UsageError extends Error {}
 
-// The session's transcript plus its subagents' transcripts (<id>/subagents/*.jsonl beside it).
-export function transcriptFiles(transcriptOption) {
-  let main = transcriptOption;
-  if (!main) {
+// The session: its own id plus every id it was derived from, recursively. After a /clear, Claude Code starts a new
+// transcript whose `derived-from` entry names the old id
+// (`{"type":"derived-from","sessions":[{"type":"claude_code_session","id":"<old id>","via":"clear"}]}`), and the new
+// context gets a new CLAUDE_CODE_SESSION_ID, while subagents started before the clear keep the old one. An id's transcript is `<id>.jsonl` beside the transcript that
+// names it, else under ~/.claude/projects/*/. Returns the ids (the session's own first), each transcript found with its
+// subagents' transcripts (<id>/subagents/*.jsonl), oldest session first, the ids whose transcript is not found, and
+// when each found id began: the time of the first entry of its transcript that has one (NaN when none has).
+export function sessionChain(transcriptOption) {
+  let first = transcriptOption;
+  if (!first) {
     const id = process.env.CLAUDE_CODE_SESSION_ID;
     if (!id) throw new UsageError('no session: CLAUDE_CODE_SESSION_ID is not set and no --transcript was given');
-    const projects = join(homedir(), '.claude', 'projects');
-    main = readdirSync(projects).map((p) => join(projects, p, `${id}.jsonl`)).find((f) => existsSync(f));
-    if (!main) throw new UsageError(`no transcript for session ${id} under ${projects}`);
+    first = projectTranscript(id);
+    if (!first) throw new UsageError(`no transcript for session ${id} under ${join(homedir(), '.claude', 'projects')}`);
   }
-  if (!existsSync(main)) throw new UsageError(`transcript not found: ${main}`);
-  const subDir = join(dirname(main), basename(main, '.jsonl'), 'subagents');
-  const subs = existsSync(subDir) ? readdirSync(subDir).filter((f) => f.endsWith('.jsonl')).map((f) => join(subDir, f)) : [];
-  return [main, ...subs];
+  if (!existsSync(first)) throw new UsageError(`transcript not found: ${first}`);
+  const ids = [];
+  const mains = [];
+  const missing = [];
+  const started = new Map();
+  const queue = [{ id: basename(first, '.jsonl'), file: first }];
+  while (queue.length > 0) {
+    const { id, file } = queue.shift();
+    if (ids.includes(id)) continue;
+    ids.push(id);
+    if (!file) {
+      missing.push(id);
+      continue;
+    }
+    mains.push(file);
+    let start = Number.NaN;
+    for (const entry of entries(file)) {
+      if (Number.isNaN(start) && typeof entry.timestamp === 'string') start = Date.parse(entry.timestamp);
+      if (entry.type !== 'derived-from' || !Array.isArray(entry.sessions)) continue;
+      for (const { type, id: from } of entry.sessions) {
+        if (type !== 'claude_code_session' || typeof from !== 'string') continue;
+        const beside = join(dirname(file), `${from}.jsonl`);
+        queue.push({ id: from, file: existsSync(beside) ? beside : projectTranscript(from) });
+      }
+    }
+    started.set(id, start);
+  }
+  const files = mains.reverse().flatMap((main) => {
+    const subDir = join(dirname(main), basename(main, '.jsonl'), 'subagents');
+    const subs = existsSync(subDir) ? readdirSync(subDir).filter((f) => f.endsWith('.jsonl')).map((f) => join(subDir, f)) : [];
+    return [{ file: main, main: true }, ...subs.map((file) => ({ file, main: false }))];
+  });
+  return { ids, files, missing, started };
 }
 
-const resultText = (r) => (Array.isArray(r.content) ? r.content.map((x) => x.text ?? '').join('') : String(r.content ?? ''));
+// `<id>.jsonl` in a project folder of ~/.claude/projects, or null when none holds it (or there is no such folder).
+function projectTranscript(id) {
+  const projects = join(homedir(), '.claude', 'projects');
+  let folders;
+  try {
+    folders = readdirSync(projects);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+  return folders.map((p) => join(projects, p, `${id}.jsonl`)).find((f) => existsSync(f)) ?? null;
+}
 
-// Every tool call with its input, result text, the result's structured detail (toolUseResult), working directory,
-// time (ms since the epoch, NaN when the entry has none) and whether it is in the main transcript, in transcript order.
+// Every tool call with its input, the result's structured detail (toolUseResult), working directory, time (ms since
+// the epoch, NaN when the entry has none) and whether it is in a main transcript, in transcript order.
 export function toolCalls(files) {
   const calls = [];
-  files.forEach((file, index) => {
+  for (const { file, main } of files) {
     const pending = new Map();
     for (const entry of entries(file)) {
       const content = entry.message?.content;
       if (!Array.isArray(content)) continue;
       if (entry.type === 'assistant') {
         for (const b of content) if (b.type === 'tool_use') {
-          pending.set(b.id, { name: b.name, input: b.input ?? {}, cwd: entry.cwd, at: Date.parse(entry.timestamp), main: index === 0 });
+          pending.set(b.id, { name: b.name, input: b.input ?? {}, cwd: entry.cwd, at: Date.parse(entry.timestamp), main });
         }
       } else if (entry.type === 'user') {
         for (const r of content) if (r.type === 'tool_result' && pending.has(r.tool_use_id)) {
           const call = pending.get(r.tool_use_id);
-          calls.push({ ...call, cwd: call.cwd ?? entry.cwd, result: resultText(r), detail: entry.toolUseResult });
+          calls.push({ ...call, cwd: call.cwd ?? entry.cwd, detail: entry.toolUseResult });
         }
       }
     }
-  });
+  }
   return calls;
 }
 
-// Every Bash call with its result text and working directory, in transcript order.
+// Every Bash call with its working directory and time, in transcript order.
 export function bashCalls(files) {
   return toolCalls(files)
     .filter((call) => call.name === 'Bash' && typeof call.input.command === 'string')
-    .map(({ input, cwd, at, main, result }) => ({ command: input.command, cwd, at, main, result }));
+    .map(({ input, cwd, at }) => ({ command: input.command, cwd, at }));
 }
 
 // The parsed JSONL entries of one transcript; a line that is not JSON is skipped.
@@ -81,39 +127,31 @@ const indexOrEnd = (line, text, from) => {
 export const expand = (p, cwd) => (p === '~' ? homedir() : resolve(cwd ?? process.cwd(), p.startsWith('~/') ? join(homedir(), p.slice(2)) : p));
 
 // The simple commands of a shell command line, in the order bash runs them. Each is its words, quotes removed, with
-// redirections dropped, plus `link`: the operator before it (';' for a newline, '&&', '||', '|', '|&', '&'), null for
-// the first, and `redirects`: the target of each output redirection (`>`, `>>`, `>|`, `&>`, `&>>`), as written.
-// Heredoc bodies, comments, and quoted, $( ) and backtick text are never commands, so `grep 'git push'`,
-// `node -e '…git push…'` and `cat <<EOF … git push … EOF` run no git.
-export function simpleCommands(line) {
+// redirections dropped. Heredoc bodies, comments, and quoted, $( ) and backtick text are never commands, so
+// `grep 'npm test'`, `node -e '…mkdir…'` and `cat <<EOF … mkdir … EOF` run nothing.
+function simpleCommands(line) {
   const commands = [];
   const heredocs = [];
   let words = [];
-  let redirects = [];
   let word = null;
-  let link = null;
   let target = null; // null, 'file' (the next word is a redirection target) or a heredoc kind ('<<' or '<<-')
-  let output = false; // the redirection target is written to
   let i = 0;
   const endWord = () => {
     if (word === null) return;
     if (target === null) words.push(word);
-    else if (target === 'file') { if (output) redirects.push(word); }
-    else heredocs.push({ delimiter: word, tabs: target === '<<-' });
+    else if (target !== 'file') heredocs.push({ delimiter: word, tabs: target === '<<-' });
     target = null;
     word = null;
   };
-  const endCommand = (next) => {
+  const endCommand = () => {
     endWord();
-    if (words.length) commands.push({ words, link, redirects });
+    if (words.length) commands.push(words);
     words = [];
-    redirects = [];
-    link = next;
   };
   while (i < line.length) {
     const c = line[i];
     if (c === '\n') {
-      endCommand(';');
+      endCommand();
       i++;
       for (const { delimiter, tabs } of heredocs.splice(0)) {
         while (i < line.length) {
@@ -171,28 +209,26 @@ export function simpleCommands(line) {
       else endWord();
       const op = redirect[0];
       target = /^[<>]&[0-9-]$/.test(op) ? null : op === '<<' || op === '<<-' ? op : 'file';
-      output = /^(?:>|>>|>\||&>|&>>)$/.test(op);
       i += op.length;
       continue;
     }
     const operator = line.slice(i).match(/^(?:&&|\|\||\|&|;;|[|;&()])/);
     if (operator) {
-      const op = operator[0];
-      endCommand(op === '(' || op === ')' || op === ';;' ? ';' : op);
-      i += op.length;
+      endCommand();
+      i += operator[0].length;
       continue;
     }
     word = (word ?? '') + c;
     i++;
   }
-  endCommand(null);
+  endCommand();
   return commands;
 }
 
 const LEADING = new Set(['if', 'then', 'else', 'elif', 'do', 'while', 'until', '!', '{', '}', 'time', 'fi', 'done', 'command', 'nohup', 'env']);
 
 // A simple command's words from the program on: reserved words, `env`-like wrappers and `NAME=value` dropped.
-export function commandWords(words) {
+function commandWords(words) {
   let k = 0;
   while (k < words.length && (LEADING.has(words[k]) || /^[A-Za-z_]\w*=/.test(words[k]))) k++;
   return words.slice(k);
@@ -203,33 +239,13 @@ export function commandWords(words) {
 export function commandsIn(command, cwd) {
   let dir = cwd;
   const commands = [];
-  for (const { words, link, redirects } of simpleCommands(command)) {
+  for (const words of simpleCommands(command)) {
     const program = commandWords(words);
     if (program[0] === 'cd' && program[1] !== '-') dir = expand(program[1] ?? '~', dir);
-    commands.push({ words: program, link, dir, redirects });
+    commands.push({ words: program, dir });
   }
   return commands;
 }
-
-// The first simple command of the line that runs `git <subcommand>`, or null: the directory git ran in (its
-// `git -C <path>`, else the last `cd <path>` before it, else the call's cwd), the shell's directory there (where a
-// relative redirection target lives) and its output redirection targets.
-export function gitCall(command, subcommand, cwd) {
-  for (const { words: [name, ...args], dir, redirects } of commandsIn(command, cwd)) {
-    if (name === undefined || basename(name) !== 'git') continue;
-    let at = dir;
-    let k = 0;
-    for (; k < args.length && args[k].startsWith('-'); k++) {
-      if (args[k] === '-C') at = expand(args[++k] ?? '.', at);
-      else if (args[k] === '-c') k++;
-    }
-    if (args[k] === subcommand) return { dir: at, shellDir: dir, redirects };
-  }
-  return null;
-}
-
-// The directory a git subcommand ran in, or null when no simple command of the line runs `git <subcommand>`.
-export const gitDirectory = (command, subcommand, cwd) => gitCall(command, subcommand, cwd)?.dir ?? null;
 
 // The top of the repo that holds dir, or null when dir is no repo (or is gone).
 export function repoRoot(dir) {
@@ -240,21 +256,76 @@ export function repoRoot(dir) {
   }
 }
 
-// Commits the session made: `[<branch> <sha>]` (or `[<branch> (root-commit) <sha>]`) in a `git commit` result.
-export function sessionCommits(calls) {
-  const commits = [];
-  for (const call of calls) {
-    const dir = gitDirectory(call.command, 'commit', call.cwd);
-    if (!dir) continue;
-    for (const m of call.result.matchAll(/^\[(\S+)(?: \(root-commit\))? ([0-9a-f]{7,40})\]/gm)) {
-      commits.push({ dir, branch: m[1], sha: m[2] });
-    }
-  }
-  return commits;
-}
-
 export function git(dir, args) {
   return execFileSync('git', ['-C', dir, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
 export const firstLine = (error) => String(error.stderr || error.message).trim().split('\n')[0];
+
+// The commits and pushes of the session (a sessionChain result), from the session ledger that git's own hooks write
+// when they happen (agent-plugin hooks/session-ledger/README.md): `~/.claude/ledger/<id>.jsonl`, one JSON line per fact.
+// Commits are the `kind: "commit"` lines ({ repo, sha, ref }, ref null on a detached HEAD); pushes are the `kind: "ref"`
+// lines with `by: "push"` ({ repo, branch of refs/remotes/<remote>/<branch>, sha: new }), each once per repo and sha,
+// in ledger order.
+// Coverage comes from the ledger's own record. The ledger records every commit and push of a session that began after
+// `~/.claude/ledger/installed-at` (one ISO 8601 UTC line, written by its install.sh), while both of its hooks stay
+// registered. Without that line (or with one that is no time), or without either hook, nothing says what was recorded:
+// null. Else `uncovered` holds each found id of the chain that began before installed-at, or at no known time, as
+// { id, started }: its commits and pushes before installed-at were not read. An id whose transcript is not found is
+// not judged here (the caller already reports it). Any other id with no ledger file made no commit and no push.
+export function sessionLedger({ ids, missing, started }) {
+  const installedAt = ledgerInstalledAt();
+  if (installedAt === null) return null;
+  const lines = [];
+  for (const id of ids) {
+    let text;
+    try {
+      text = readFileSync(join(homedir(), '.claude', 'ledger', `${id}.jsonl`), 'utf8');
+    } catch (error) {
+      if (error.code === 'ENOENT') continue;
+      throw error;
+    }
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      try { lines.push(JSON.parse(line)); } catch { /* a torn last line */ }
+    }
+  }
+  const once = (list, key) => [...new Map(list.map((fact) => [key(fact), fact])).values()];
+  const commits = once(lines.filter((l) => l.kind === 'commit').map(({ repo, sha, ref }) => ({ repo, sha, ref })), (c) => `${c.repo}\0${c.sha}`);
+  const pushes = once(
+    lines.filter((l) => l.kind === 'ref' && l.by === 'push').map(({ repo, ref, new: sha }) => ({ repo, branch: ref.split('/').slice(3).join('/'), sha })),
+    (p) => `${p.repo}\0${p.sha}`,
+  );
+  const uncovered = ids.filter((id) => !missing.includes(id) && !(started.get(id) >= installedAt)).map((id) => ({ id, started: started.get(id) }));
+  return { commits, pushes, uncovered, installedAt };
+}
+
+// installed-at as ms since the epoch, or null when the marker is missing or is no time, or a hook key is missing.
+function ledgerInstalledAt() {
+  let marker;
+  try {
+    marker = readFileSync(join(homedir(), '.claude', 'ledger', 'installed-at'), 'utf8');
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+  const at = Date.parse(marker.trim());
+  if (Number.isNaN(at)) return null;
+  // A predicting check: whether git runs the hooks can be learned only from a commit or a push the session makes, and
+  // a check must not make one. So this reads git's config: the two keys the ledger's install.sh registers.
+  const registered = ['hook.session-ledger-commit.command', 'hook.session-ledger-ref.command'].every((key) => {
+    try {
+      execFileSync('git', ['config', '--global', '--get', key], { stdio: 'ignore' });
+      return true;
+    } catch (error) {
+      if (error.status === 1) return false; // git config: the key is not set
+      throw error;
+    }
+  });
+  return registered ? at : null;
+}
+
+const INSTALL = fileURLToPath(new URL('../../../../hooks/session-ledger/install.sh', import.meta.url));
+export const NO_LEDGER = `session ledger not installed (no ~/.claude/ledger/installed-at, or hook.session-ledger-commit.command or hook.session-ledger-ref.command not in git's global config): the commits and pushes of this session were not read; install it: sh ${INSTALL}`;
+const iso = (ms) => (Number.isNaN(ms) ? 'at no known time' : new Date(ms).toISOString());
+export const uncoveredLine = ({ id, started }, installedAt) => `${id} began ${iso(started)}, before the session ledger was installed (${iso(installedAt)}): its commits and pushes before then were not read`;

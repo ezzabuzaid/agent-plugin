@@ -1,16 +1,23 @@
 // Black-box tests of close-check.mjs: each test runs the script as a child process, as the skill runs it.
 //
-// Seams. git is real: each test makes a throwaway repo with a bare remote, and the transcript holds the real output
-// of its `git commit` and `git push`. gh and agent-backlog are the outer seams: the script reaches them only as
-// executables on PATH, and a real gh would read GitHub's live runs and a real agent-backlog the user's own backlog.
-// So each test puts a stand-in executable on PATH that answers only the exact call the contract names and fails on
-// any other. The child gets the runner's env with every input the script and git read replaced: PATH (the
-// stand-ins, git, node), HOME (an empty folder, so no user git config or hook runs), no GIT_* variable and no
-// CLAUDE_CODE_SESSION_ID. The rest passes through, so the script runs with the Node flags of the test process (a
-// mutation prover's load hook among them). The test process's own env is not changed.
+// Seams. git is real: each test makes a throwaway repo with a bare remote and really commits and pushes there. The
+// session ledger is a record that git's hooks (agent-plugin hooks/session-ledger) write and the script only reads, so
+// each test writes the ledger lines of its commits and pushes into ~/.claude/ledger/<id>.jsonl under its HOME, in
+// the shape that README gives; the sandbox installs the ledger in its HOME as install.sh does (the two hook keys in
+// its git config, ~/.claude/ledger/installed-at a time before the transcript's entries), unless the test is about a
+// missing install. The record reviewer's reviews are files the script only reads, so a test writes each review into
+// ~/.claude/housekeeping/reviews/<sha>.md in the shape references/record-reviewer.md gives. The run log goes to the
+// sandbox HOME's ~/.claude/housekeeping/runs. gh and agent-backlog are the outer seams: the script
+// reaches them only as executables on PATH, and a real gh would read GitHub's live runs and a real agent-backlog the
+// user's own backlog. So each test puts a stand-in executable on PATH that answers only the exact call the contract
+// names and fails on any other; agent-backlog answers `list --session session --all-repos --json` with no item unless
+// the test says otherwise. The child gets the runner's env with every input the script and git read replaced: PATH
+// (the stand-ins, git, node), HOME and XDG_CONFIG_HOME (an empty folder, so no user git config or hook runs), no GIT_*
+// variable and no CLAUDE_CODE_SESSION_ID. The rest passes through, so the script runs with the Node flags of the test
+// process (a mutation prover's load hook among them). The test process's own env is not changed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, chmodSync, realpathSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, symlinkSync, rmSync, chmodSync, realpathSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -23,15 +30,31 @@ const script = join(here, 'close-check.mjs');
 // Each sandbox is its own temp folder, so a run leaves no shared parent folder behind.
 const tempRoot = realpathSync(tmpdir());
 
-function sandbox() {
+// The two hook keys of the session ledger (its README's Install). close-check reads only that both keys exist, so
+// each command is the shell's no-op: the tests' own git commits run no ledger and record nothing. git runs a command
+// with a space through sh and appends the hook's arguments ("$@"), which `:` ignores; a bare `true` would be exec'd
+// without a shell and not found on the sandbox PATH, and a failing reference-transaction hook aborts the ref update.
+const LEDGER_HOOKS = {
+  'session-ledger-commit': '[hook "session-ledger-commit"]\n\tevent = post-commit\n\tcommand = : no ledger in tests\n',
+  'session-ledger-ref': '[hook "session-ledger-ref"]\n\tevent = reference-transaction\n\tcommand = : no ledger in tests\n',
+};
+const SESSION_START = '2026-11-26T10:00:00.000Z';
+
+// installedAt: the line of ~/.claude/ledger/installed-at (null: no marker); hooks: the hook keys in HOME's git config.
+function sandbox({ installedAt = '2026-11-26T09:00:00Z', hooks = Object.keys(LEDGER_HOOKS) } = {}) {
   const root = mkdtempSync(join(tempRoot, 'housekeeping-close-check-'));
   const bin = join(root, 'bin');
   const home = join(root, 'home');
   mkdirSync(bin);
   mkdirSync(home);
+  writeFileSync(join(home, '.gitconfig'), hooks.map((name) => LEDGER_HOOKS[name]).join(''));
+  if (installedAt !== null) {
+    mkdirSync(join(home, '.claude', 'ledger'), { recursive: true });
+    writeFileSync(join(home, '.claude', 'ledger', 'installed-at'), `${installedAt}\n`);
+  }
   symlinkSync('/usr/bin/git', join(bin, 'git'));
   const inherited = Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_') && name !== 'CLAUDE_CODE_SESSION_ID');
-  const env = { ...Object.fromEntries(inherited), PATH: bin, HOME: home, GIT_CONFIG_NOSYSTEM: '1' };
+  const env = { ...Object.fromEntries(inherited), PATH: bin, HOME: home, XDG_CONFIG_HOME: join(home, '.config'), GIT_CONFIG_NOSYSTEM: '1' };
   const run = (cwd, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const runBoth = (cwd, ...args) => {
     const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, env, encoding: 'utf8' });
@@ -53,18 +76,27 @@ function sandbox() {
     return { result, sha: run(work, 'rev-parse', 'HEAD').trim() };
   };
   const push = () => runBoth(work, 'push', 'origin', 'main');
+  // The ledger file of a session id: one JSON line per fact, as the session-ledger hooks append them.
+  const ledger = (facts, id = 'session') => {
+    mkdirSync(join(home, '.claude', 'ledger'), { recursive: true });
+    const at = '2026-11-26T10:00:00.000Z';
+    writeFileSync(join(home, '.claude', 'ledger', `${id}.jsonl`), facts.map((fact) => `${JSON.stringify({ session: id, ...fact, at })}\n`).join(''));
+  };
+  const committed = (sha, repo = work) => ({ kind: 'commit', repo, sha, ref: 'refs/heads/main' });
+  const pushed = (sha, repo = work) => ({ kind: 'ref', repo, ref: 'refs/remotes/origin/main', new: sha, by: 'push' });
   // A stand-in on PATH: prints `answers[args.join(' ')]` and exits 0, or fails on a call nobody expected.
   const standIn = (name, answers) => {
     const file = join(bin, name);
     writeFileSync(file, `#!${process.execPath}\nconst answers = ${JSON.stringify(answers)};\nconst key = process.argv.slice(2).join(' ');\nif (!(key in answers)) { console.error('unexpected call: ${name} ' + key); process.exit(1); }\nprocess.stdout.write(answers[key]);\n`);
     chmodSync(file, 0o755);
   };
+  standIn('agent-backlog', { [listKey('session')]: '[]' });
   // A transcript of Bash calls, each [command, result]; subagent calls go to <id>/subagents/agent-1.jsonl.
   const transcript = (calls, subagentCalls = []) => {
     const file = join(root, 'session.jsonl');
     const lines = (list) => list.flatMap(([command, result], i) => [
-      { type: 'assistant', cwd: work, message: { content: [{ type: 'tool_use', id: `t${i}`, name: 'Bash', input: { command } }] } },
-      { type: 'user', cwd: work, message: { content: [{ type: 'tool_result', tool_use_id: `t${i}`, content: [{ type: 'text', text: result }] }] } },
+      { type: 'assistant', cwd: work, timestamp: SESSION_START, message: { content: [{ type: 'tool_use', id: `t${i}`, name: 'Bash', input: { command } }] } },
+      { type: 'user', cwd: work, timestamp: SESSION_START, message: { content: [{ type: 'tool_result', tool_use_id: `t${i}`, content: [{ type: 'text', text: result }] }] } },
     ].map((e) => JSON.stringify(e)).join('\n')).join('\n');
     writeFileSync(file, lines(calls));
     if (subagentCalls.length) {
@@ -84,25 +116,28 @@ function sandbox() {
     return { result, sha: run(work, 'rev-parse', 'HEAD').trim() };
   };
   // A transcript of events, each one second after the last; subagent events go to <id>/subagents/agent-1.jsonl.
+  // The transcript is <name>.jsonl, so <name> is its session id.
   //   { bash, result }             a Bash call
   //   { tool, input, detail }      another tool call; detail is the result's toolUseResult
   //   { prompt, origin }           a user prompt (origin kind, default 'human')
   //   { meta }                     a meta user entry (a loaded skill's text)
   //   { say }                      the agent's text
+  //   { derivedFrom }              the entry Claude Code writes after a /clear, naming the old session id
   //   { at }                       a seconds offset for the next event (to interleave main and subagent events)
-  const session = (events, subagentEvents = []) => {
-    const file = join(root, 'session.jsonl');
+  const session = (events, subagentEvents = [], name = 'session') => {
+    const file = join(root, `${name}.jsonl`);
     const lines = (list, tag) => {
       let second = 0;
       return list.flatMap((event, i) => {
         if ('at' in event) { second = event.at; return []; }
+        if ('derivedFrom' in event) return [{ type: 'derived-from', v: 1, sessionId: name, sessions: [{ type: 'claude_code_session', id: event.derivedFrom, via: 'clear' }] }];
         const timestamp = new Date(Date.UTC(2026, 10, 26, 10, 0, second++)).toISOString();
         const id = `${tag}${i}`;
         const base = { cwd: work, timestamp };
         if ('bash' in event || 'tool' in event) {
-          const [name, input] = 'bash' in event ? ['Bash', { command: event.bash }] : [event.tool, event.input];
+          const [toolName, input] = 'bash' in event ? ['Bash', { command: event.bash }] : [event.tool, event.input];
           return [
-            { ...base, type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input }] } },
+            { ...base, type: 'assistant', message: { content: [{ type: 'tool_use', id, name: toolName, input }] } },
             { ...base, type: 'user', toolUseResult: event.detail, message: { content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text: event.result ?? 'ok' }] }] } },
           ];
         }
@@ -113,25 +148,39 @@ function sandbox() {
     };
     writeFileSync(file, lines(events, 'm'));
     if (subagentEvents.length) {
-      mkdirSync(join(root, 'session', 'subagents'), { recursive: true });
-      writeFileSync(join(root, 'session', 'subagents', 'agent-1.jsonl'), lines(subagentEvents, 's'));
+      mkdirSync(join(root, name, 'subagents'), { recursive: true });
+      writeFileSync(join(root, name, 'subagents', 'agent-1.jsonl'), lines(subagentEvents, 's'));
     }
     return file;
   };
+  // The record reviewer's review of a commit: its file's whole text.
+  const review = (sha, text) => {
+    mkdirSync(join(home, '.claude', 'housekeeping', 'reviews'), { recursive: true });
+    writeFileSync(join(home, '.claude', 'housekeeping', 'reviews', `${sha}.md`), text);
+  };
+  const reviewed = (sha) => review(sha, `REVIEW ${sha}\nnone\n`);
   const check = (transcriptFile) => spawnSync(process.execPath, [script, '--transcript', transcriptFile], { env, encoding: 'utf8' });
-  return { root, home, work, commit, commitFiles, push, session, standIn, transcript, check, run, [Symbol.dispose]: () => rmSync(root, { recursive: true, force: true }) };
+  return { root, home, work, commit, commitFiles, push, ledger, committed, pushed, session, standIn, transcript, review, reviewed, check, run, [Symbol.dispose]: () => rmSync(root, { recursive: true, force: true }) };
 }
 
 const ghKey = (sha) => `run list --commit ${sha} --json name,status,conclusion,url`;
+function listKey(id) { return `list --session ${id} --all-repos --json`; }
+const showKey = (id) => `show ${id} --json`;
 const lastLine = (out) => out.trimEnd().split('\n').at(-1);
+// The lines under one heading of the output, up to the next heading.
+const section = (out, heading) => out.split('\n').slice(out.split('\n').indexOf(heading) + 1).join('\n').split(/\n(?=\S)/)[0];
+const inProgress = JSON.stringify([{ name: 'CI', status: 'in_progress', conclusion: '', url: 'https://ci/1' }]);
+const green = JSON.stringify([{ name: 'CI', status: 'completed', conclusion: 'success', url: 'https://ci/1' }]);
 
 test('a pushed commit whose CI run is in progress is open, exit 1', () => {
   using s = sandbox();
   const c = s.commit('a.txt');
-  const pushed = s.push();
-  s.standIn('gh', { [ghKey(c.sha)]: JSON.stringify([{ name: 'CI', status: 'in_progress', conclusion: '', url: 'https://ci/1' }]) });
+  s.push();
+  s.ledger([s.committed(c.sha), s.pushed(c.sha)]);
+  s.reviewed(c.sha);
+  s.standIn('gh', { [ghKey(c.sha)]: inProgress });
 
-  const r = s.check(s.transcript([['git commit -m "add a.txt"', c.result], ['git push origin main', pushed]]));
+  const r = s.check(s.transcript([['ls', 'README.md']]));
 
   assert.match(r.stdout, /  OPEN CI: in_progress https:\/\/ci\/1/);
   assert.equal(lastLine(r.stdout), 'Open: 1');
@@ -141,13 +190,15 @@ test('a pushed commit whose CI run is in progress is open, exit 1', () => {
 test('all runs green and nothing unpushed prints Nothing open., exit 0', () => {
   using s = sandbox();
   const c = s.commit('a.txt');
-  const pushed = s.push();
+  s.push();
+  s.ledger([s.committed(c.sha), s.pushed(c.sha)]);
+  s.reviewed(c.sha);
   s.standIn('gh', { [ghKey(c.sha)]: JSON.stringify([
     { name: 'CI', status: 'completed', conclusion: 'success', url: 'https://ci/1' },
     { name: 'Release', status: 'completed', conclusion: 'success', url: 'https://ci/2' },
   ]) });
 
-  const r = s.check(s.transcript([[`git -C ${s.work} commit -m x`, c.result], [`cd ${s.work} && git push origin main`, pushed]]));
+  const r = s.check(s.transcript([['ls', 'README.md']]));
 
   assert.match(r.stdout, /Release: completed success/);
   assert.doesNotMatch(r.stdout, /OPEN/);
@@ -155,113 +206,209 @@ test('all runs green and nothing unpushed prints Nothing open., exit 0', () => {
   assert.equal(r.status, 0, r.stderr);
 });
 
-// #5823: gh run list --commit <short sha> matches no run (deepagents 77101148, 2026-11-26), so a head that
-// rev-parse cannot resolve would read as "no runs" while its CI stays unread.
-test('a pushed head that rev-parse cannot resolve is open, and gh is not asked with the short sha', () => {
+// #5836: the shell guard sends test and build output to a log file, and agents push the same way
+// (agent-plugin 9526d2f and 516c4f4, 2026-11-26: 4 of 6 pushes listed). The transcript shows no range at all.
+test('a push whose output went to a log file is listed with its head and CI, from the ledger; a fetch is no push', () => {
   using s = sandbox();
-  s.standIn('gh', { [ghKey('deadbee')]: '[]' });
+  const start = s.run(s.work, 'rev-parse', 'HEAD').trim();
+  const c = s.commit('a.txt');
+  writeFileSync(join(s.root, 'push.log'), s.push());
+  s.ledger([{ ...s.pushed(start), by: 'fetch' }, s.committed(c.sha), s.pushed(c.sha)]);
+  s.standIn('gh', { [ghKey(c.sha)]: inProgress });
 
-  const r = s.check(s.transcript([['git push origin main', 'To remote.git\n   1234567..deadbee  main -> main\n']]));
+  const r = s.check(s.transcript([['git commit -m "add a.txt" > $L/commit.log 2>&1', ''], ['git push origin main > $L/push.log 2>&1; echo "push exit $?"', 'push exit 0']]));
 
-  assert.match(r.stdout, /  OPEN cannot resolve deadbee to a commit in .+: CI not read\n/);
-  assert.doesNotMatch(r.stdout, /no runs/);
+  assert.equal(section(r.stdout, 'Pushes'), `  ${s.work} main ${c.sha.slice(0, 12)}\n    OPEN CI: in_progress https://ci/1`);
+  assert.equal(section(r.stdout, 'Unpushed'), '  none');
+});
+
+// The ledger is not installed: install.sh has not run since e488eed (no installed-at), or a hook key was removed.
+const NOT_INSTALLED = /^  OPEN session ledger not installed \(no ~\/\.claude\/ledger\/installed-at, or hook\.session-ledger-commit\.command or hook\.session-ledger-ref\.command not in git's global config\): the commits and pushes of this session were not read; install it: sh \/\S+\/hooks\/session-ledger\/install\.sh$/;
+
+test('with no installed-at marker, one open line says the ledger is not installed, the commits and pushes were not read, and how to install it', () => {
+  using s = sandbox({ installedAt: null });
+  const c = s.commit('a.txt');
+  s.ledger([s.committed(c.sha)]);
+
+  const r = s.check(s.transcript([['git commit -m x', c.result], ['git push origin main', s.push()]]));
+
+  assert.match(section(r.stdout, 'Pushes'), NOT_INSTALLED);
+  assert.equal(section(r.stdout, 'Unpushed'), '  not read: no session ledger');
   assert.equal(lastLine(r.stdout), 'Open: 1');
   assert.equal(r.status, 1, r.stderr);
 });
 
-// #5836: the shell guard sends test and build output to a log file, and agents push the same way
-// (agent-plugin 9526d2f and 516c4f4, 2026-11-26: 4 of 6 pushes listed).
-test('a push whose output went to a log file is read from that file', () => {
-  using s = sandbox();
-  const c = s.commit('a.txt');
-  const log = join(s.root, 'push.log');
-  writeFileSync(log, s.push());
-  s.standIn('gh', { [ghKey(c.sha)]: JSON.stringify([{ name: 'CI', status: 'in_progress', conclusion: '', url: 'https://ci/1' }]) });
+test('an installed-at marker that holds no time reads as no install', () => {
+  using s = sandbox({ installedAt: 'soon' });
 
-  const r = s.check(s.transcript([['git commit -m "add a.txt"', c.result], [`git push origin main > ${log} 2>&1`, '']]));
+  const r = s.check(s.transcript([['ls', 'README.md']]));
 
-  assert.match(r.stdout, /  OPEN CI: in_progress https:\/\/ci\/1/);
-});
-
-test('a range line behind a prefix on its line is the push', () => {
-  using s = sandbox();
-  const c = s.commit('a.txt');
-  const range = s.push().split('\n').find((line) => line.includes(' -> ')).trim();
-  s.standIn('gh', { [ghKey(c.sha)]: JSON.stringify([{ name: 'CI', status: 'in_progress', conclusion: '', url: 'https://ci/1' }]) });
-
-  const r = s.check(s.transcript([['git commit -m "add a.txt"', c.result], ['git push origin main > $L/push.log 2>&1; echo "push exit $?: $(tail -1 $L/push.log)"', `push exit 0: ${range}`]]));
-
-  assert.match(r.stdout, /  OPEN CI: in_progress https:\/\/ci\/1/);
-});
-
-test('a push whose range shows nowhere is open: its CI was not read', () => {
-  using s = sandbox();
-  s.standIn('gh', {});
-
-  const r = s.check(s.transcript([['git push origin main > $L/push.log 2>&1; echo "push exit $?"', 'push exit 0']]));
-
-  assert.match(r.stdout, /  OPEN git push in .+: no pushed range in its output or log file, CI not read\n/);
+  assert.match(section(r.stdout, 'Pushes'), NOT_INSTALLED);
   assert.equal(lastLine(r.stdout), 'Open: 1');
 });
 
-test('a push that had nothing to push lists no push and nothing open', () => {
+test('with a ledger hook key missing from git config, the same open line says the ledger is not installed', () => {
+  using s = sandbox({ hooks: ['session-ledger-commit'] });
+  const c = s.commit('a.txt');
+  s.ledger([s.committed(c.sha)]);
+
+  const r = s.check(s.transcript([['ls', 'README.md']]));
+
+  assert.match(section(r.stdout, 'Pushes'), NOT_INSTALLED);
+  assert.equal(lastLine(r.stdout), 'Open: 1');
+});
+
+test('a chain id that began before installed-at is open with its start and installed-at; one that began after is not', () => {
+  using s = sandbox({ installedAt: '2026-11-26T10:00:30Z' });
+  s.standIn('agent-backlog', { [listKey('new')]: '[]', [listKey('old')]: '[]' });
+  s.session([{ say: 'working' }, { at: 45 }, { say: 'still working' }], [], 'old');
+
+  const r = s.check(s.session([{ derivedFrom: 'old' }, { at: 60 }, { say: 'continuing' }], [], 'new'));
+
+  assert.equal(section(r.stdout, 'Pushes'), '  OPEN old began 2026-11-26T10:00:00.000Z, before the session ledger was installed (2026-11-26T10:00:30.000Z): its commits and pushes before then were not read\n  none');
+  assert.equal(lastLine(r.stdout), 'Open: 1');
+});
+
+test("a reviewed commit's STALE lines are CHECK lines naming the repo and short sha", () => {
   using s = sandbox();
-  s.standIn('gh', {});
+  const c = s.commit('a.txt');
+  s.push();
+  s.ledger([s.committed(c.sha)]);
+  s.review(c.sha, `REVIEW ${c.sha}\nSTALE: ~/.claude/CLAUDE.md:12 — says pushes are parsed from output; the ledger records them\nSTALE: #5831 — still says to parse push ranges\n`);
 
-  const r = s.check(s.transcript([['git push origin main', 'Everything up-to-date\n']]));
+  const r = s.check(s.transcript([['ls', 'README.md']]));
 
-  assert.match(r.stdout, /^Pushes\n  none\n/);
+  assert.equal(section(r.stdout, 'Stale records'), [
+    `  CHECK ${s.work} ${c.sha.slice(0, 8)}: ~/.claude/CLAUDE.md:12 — says pushes are parsed from output; the ledger records them`,
+    `  CHECK ${s.work} ${c.sha.slice(0, 8)}: #5831 — still says to parse push ranges`,
+  ].join('\n'));
+  assert.equal(lastLine(r.stdout), 'Nothing open. To mark: 2');
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test('a commit whose review is none prints no stale record', () => {
+  using s = sandbox();
+  const c = s.commit('a.txt');
+  s.push();
+  s.ledger([s.committed(c.sha)]);
+  s.review(c.sha, `REVIEW ${c.sha}\nnone\n`);
+
+  const r = s.check(s.transcript([['ls', 'README.md']]));
+
+  assert.equal(section(r.stdout, 'Stale records'), '  none');
   assert.equal(lastLine(r.stdout), 'Nothing open.');
+});
+
+test('a commit with no review is open as not reviewed for stale records', () => {
+  using s = sandbox();
+  const c = s.commit('a.txt');
+  s.push();
+  s.ledger([s.committed(c.sha)]);
+
+  const r = s.check(s.transcript([['ls', 'README.md']]));
+
+  assert.equal(section(r.stdout, 'Stale records'), `  OPEN ${s.work} ${c.sha.slice(0, 8)}: not reviewed for stale records (run the record reviewer, SKILL.md Finish)`);
+  assert.equal(lastLine(r.stdout), 'Open: 1');
+  assert.equal(r.status, 1);
+});
+
+test('a review whose first line is not REVIEW <its sha> is open as unreadable, and so is one with no STALE line and no none', () => {
+  using s = sandbox();
+  const wrong = s.commit('a.txt');
+  const empty = s.commit('b.txt');
+  s.push();
+  s.ledger([s.committed(wrong.sha), s.committed(empty.sha)]);
+  s.review(wrong.sha, `REVIEW ${empty.sha}\nSTALE: x — y\n`);
+  s.review(empty.sha, `REVIEW ${empty.sha}\n`);
+  const file = (sha) => join(s.home, '.claude', 'housekeeping', 'reviews', `${sha}.md`);
+
+  const r = s.check(s.transcript([['ls', 'README.md']]));
+
+  assert.equal(section(r.stdout, 'Stale records'), [
+    `  OPEN ${s.work} ${wrong.sha.slice(0, 8)}: unreadable review ${file(wrong.sha)}: it must start with "REVIEW ${wrong.sha}", then STALE lines or none`,
+    `  OPEN ${s.work} ${empty.sha.slice(0, 8)}: unreadable review ${file(empty.sha)}: it must start with "REVIEW ${empty.sha}", then STALE lines or none`,
+  ].join('\n'));
+  assert.equal(lastLine(r.stdout), 'Open: 2');
+});
+
+const runLog = (s, id) => readFileSync(join(s.home, '.claude', 'housekeeping', 'runs', `${id}.log`), 'utf8');
+const block = (ids, out) => String.raw`=== \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z close-check ${ids}\n` + RegExp.escape(out);
+
+test("a run appends one block to the run log of the chain's first id: a header with the chain ids, then its exact output", () => {
+  using s = sandbox();
+  s.standIn('agent-backlog', { [listKey('new')]: '[]', [listKey('old')]: '[]' });
+  s.session([{ prompt: 'ship it' }], [], 'old');
+
+  const r = s.check(s.session([{ derivedFrom: 'old' }, { prompt: 'continue' }], [], 'new'));
+
+  assert.match(runLog(s, 'new'), new RegExp(`^${block('new,old', r.stdout)}$`));
+  assert.equal(lastLine(r.stdout), 'Nothing open. To mark: 2');
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test('a second run appends a second block after the first', () => {
+  using s = sandbox();
+  const c = s.commit('a.txt');
+  s.ledger([s.committed(c.sha)]);
+  const transcript = s.transcript([['ls', 'README.md']]);
+  const first = s.check(transcript);
+  s.reviewed(c.sha);
+
+  const second = s.check(transcript);
+
+  assert.notEqual(first.stdout, second.stdout);
+  assert.match(runLog(s, 'session'), new RegExp(`^${block('session', first.stdout)}${block('session', second.stdout)}$`));
+  assert.equal(second.status, 1, second.stderr);
+});
+
+test('a run log that cannot be written is one open line naming its path; the rest of the output is printed', () => {
+  using s = sandbox();
+  mkdirSync(join(s.home, '.claude', 'housekeeping'), { recursive: true });
+  writeFileSync(join(s.home, '.claude', 'housekeeping', 'runs'), 'a file where the folder should be');
+
+  const r = s.check(s.transcript([['ls', 'README.md']]));
+
+  assert.match(section(r.stdout, 'Run log'), new RegExp(`^  OPEN could not append to ${RegExp.escape(join(s.home, '.claude', 'housekeeping', 'runs', 'session.log'))}: `));
+  assert.match(r.stdout, /^Session\n  session\nPushes\n  none\n/);
+  assert.equal(lastLine(r.stdout), 'Open: 1');
+  assert.equal(r.status, 1);
+});
+
+test('with the ledger installed, no ledger file is a session with no commit and no push: nothing open', () => {
+  using s = sandbox();
+
+  const r = s.check(s.transcript([['ls', 'README.md']]));
+
+  assert.equal(section(r.stdout, 'Pushes'), '  none');
+  assert.equal(section(r.stdout, 'Unpushed'), '  none');
+  assert.equal(lastLine(r.stdout), 'Nothing open.');
+  assert.equal(r.status, 0, r.stderr);
 });
 
 test('a missing gh is an open item, not silence', () => {
   using s = sandbox();
   const c = s.commit('a.txt');
-  const pushed = s.push();
+  s.push();
+  s.ledger([s.committed(c.sha), s.pushed(c.sha)]);
+  s.reviewed(c.sha);
 
-  const r = s.check(s.transcript([['git commit -m x', c.result], ['git push', pushed]]));
+  const r = s.check(s.transcript([['ls', 'README.md']]));
 
   assert.match(r.stdout, new RegExp(`OPEN could not read CI for ${c.sha.slice(0, 12)}: gh not found`));
   assert.equal(lastLine(r.stdout), 'Open: 1');
   assert.equal(r.status, 1);
 });
 
-test("a push range line in the output of a command that is not git push lists no push", () => {
-  using s = sandbox();
-  const c = s.commit('a.txt');
-  const pushed = s.push();
-
-  const r = s.check(s.transcript([
-    [`git commit -m x`, c.result],
-    [`cd ${s.work}; grep -h 'git push' other-session.jsonl; node -e 'git push'\ncat > notes.md <<'EOF'\ngit push origin main\nEOF`, pushed],
-  ]));
-
-  assert.match(r.stdout, /Pushes\n  none\n/);
-  assert.equal(lastLine(r.stdout), 'Nothing open.');
-  assert.equal(r.status, 0, r.stderr);
-});
-
-test("a subagent's git push is listed with its CI", () => {
-  using s = sandbox();
-  const c = s.commit('a.txt');
-  const pushed = s.push();
-  s.standIn('gh', { [ghKey(c.sha)]: JSON.stringify([{ name: 'CI', status: 'completed', conclusion: 'success', url: 'https://ci/1' }]) });
-
-  const r = s.check(s.transcript([['ls', 'README.md']], [[`git -C ${s.work} push origin main 2>&1 | tail -3`, pushed]]));
-
-  assert.match(r.stdout, new RegExp(`Pushes\\n  ${s.work} main ${c.sha.slice(0, 12)}\\n    CI: completed success`));
-  assert.equal(lastLine(r.stdout), 'Nothing open.');
-});
-
 test('a push from a repo path that no longer exists is open as repo path not found, not gh not found', () => {
   using s = sandbox();
   const c = s.commit('a.txt');
-  const pushed = s.push();
+  s.push();
   const gone = join(s.root, 'gone');
+  s.ledger([s.pushed(c.sha, gone)]);
 
-  const r = s.check(s.transcript([[`cd ${gone} && git push origin main`, pushed]]));
+  const r = s.check(s.transcript([['ls', 'README.md']]));
 
-  assert.match(r.stdout, new RegExp(`${gone} main ${c.sha.slice(0, 7)}\\S*\\n    OPEN repo path not found: ${gone}\\n`));
+  assert.match(r.stdout, new RegExp(`${gone} main ${c.sha.slice(0, 12)}\\n    OPEN repo path not found: ${gone}\\n`));
   assert.doesNotMatch(r.stdout, /gh not found/);
   assert.equal(lastLine(r.stdout), 'Open: 1');
 });
@@ -270,8 +417,10 @@ test("the session's unpushed commit is open and a peer's unpushed commit is not 
   using s = sandbox();
   const mine = s.commit('mine.txt');
   const peer = s.commit('peer.txt');
+  s.ledger([s.committed(mine.sha)]);
+  s.reviewed(mine.sha);
 
-  const r = s.check(s.transcript([['git commit -m x', mine.result]]));
+  const r = s.check(s.transcript([['ls', 'README.md']]));
 
   assert.match(r.stdout, new RegExp(`OPEN ${s.work} main ${mine.sha.slice(0, 12)} add mine.txt`));
   assert.doesNotMatch(r.stdout, new RegExp(peer.sha.slice(0, 7)));
@@ -279,39 +428,69 @@ test("the session's unpushed commit is open and a peer's unpushed commit is not 
   assert.equal(r.status, 1);
 });
 
-test("a subagent's unpushed commit counts as the session's", () => {
+// After a /clear the context gets a new CLAUDE_CODE_SESSION_ID and the new transcript names the old one
+// (round 3, 2026-11-26: bdbfc940-… derived from 4e0ac864-…).
+test('a session after /clear lists the commits, pushes, items and requests of the session it was derived from', () => {
   using s = sandbox();
-  const c = s.commit('sub.txt');
+  const pushedCommit = s.commit('a.txt');
+  s.push();
+  const unpushed = s.commit('b.txt');
+  s.ledger([s.committed(pushedCommit.sha), s.pushed(pushedCommit.sha), s.committed(unpushed.sha)], 'old');
+  s.standIn('gh', { [ghKey(pushedCommit.sha)]: green });
+  s.standIn('agent-backlog', { [listKey('new')]: '[]', [listKey('old')]: JSON.stringify([sessionItem(41)]), [showKey(41)]: JSON.stringify(shownItem(41)) });
+  s.session([{ prompt: 'ship round 3' }], [], 'old');
 
-  const r = s.check(s.transcript([['ls', 'README.md']], [['git commit -m x', c.result]]));
+  const r = s.check(s.session([{ derivedFrom: 'old' }, { prompt: 'continue' }], [], 'new'));
 
-  assert.match(r.stdout, new RegExp(`OPEN ${s.work} main ${c.sha.slice(0, 12)} add sub.txt`));
-  assert.equal(r.status, 1);
+  assert.equal(section(r.stdout, 'Session'), '  new\n  old');
+  assert.equal(section(r.stdout, 'Pushes'), `  ${s.work} main ${pushedCommit.sha.slice(0, 12)}\n    CI: completed success https://ci/1`);
+  assert.equal(section(r.stdout, 'Unpushed'), `  OPEN ${s.work} main ${unpushed.sha.slice(0, 12)} add b.txt`);
+  assert.equal(section(r.stdout, 'Filed (yours: do it now, or say why it waits)'), '  CHECK #41 item 41 (work)');
+  assert.equal(section(r.stdout, 'Requests'), '  CHECK ship round 3\n  CHECK continue');
 });
 
-const backlogCard = (id) => `┌  agent-backlog\n│\n◇  #${id} · defect · internal ─────╮\n│  item ${id}  │\n`;
-const readyItem = (id, readiness = 'ready') => ({ id, title: `item ${id}`, repositoryName: 'work', readiness });
-
-test("the session's ready items with a condition are open; other ready items and its blocked items are not", () => {
+test('a session derived from an id whose transcript is gone is open for that id, and its ledger is still read', () => {
   using s = sandbox();
-  s.standIn('agent-backlog', { 'ready --all-repos --json': JSON.stringify([readyItem(41), readyItem(43, 'blocked'), readyItem(99)]) });
+  const c = s.commit('a.txt');
+  s.ledger([s.committed(c.sha)], 'old');
+  s.reviewed(c.sha);
+  s.standIn('agent-backlog', { [listKey('new')]: '[]', [listKey('old')]: '[]' });
 
-  const r = s.check(s.transcript([
-    ['agent-backlog add "item 41" --kind defect --work-type internal --until "a third consumer"', backlogCard(41)],
-    ['agent-backlog wait 43 --after 41', ''],
-  ]));
+  const r = s.check(s.session([{ derivedFrom: 'old' }, { say: 'continuing' }], [], 'new'));
 
-  assert.match(r.stdout, /OPEN #41 item 41 \(work\)/);
-  assert.doesNotMatch(r.stdout, /#43|#99/);
+  assert.equal(section(r.stdout, 'Session'), '  new\n  OPEN old: no transcript found, its calls not read');
+  assert.equal(section(r.stdout, 'Unpushed'), `  OPEN ${s.work} main ${c.sha.slice(0, 12)} add a.txt`);
+  assert.equal(lastLine(r.stdout), 'Open: 2');
+});
+
+// An item as `list --session <id> --json` prints it, and as `show <id> --json` prints it (agent-backlog d8799aefa).
+const sessionItem = (id, readiness = 'ready', actions = ['add']) => ({
+  id, title: `item ${id}`, repositoryName: 'work', status: readiness === 'done' ? 'done' : 'open', readiness,
+  sessionEvents: actions.map((action, n) => ({ action, atMs: 1795000000000 + n })),
+});
+const shownItem = (id, conditions = []) => ({ id, title: `item ${id}`, repositoryName: 'work', status: 'open', readiness: 'ready', conditions });
+const untilMet = { id: 1, itemId: 41, kind: 'until', text: 'a third consumer', met: { note: 'third', metAtMs: 1795000000000 }, state: 'met' };
+
+test("the session's ready items with a condition are open; its waiting and done items are not listed", () => {
+  using s = sandbox();
+  s.standIn('agent-backlog', {
+    [listKey('session')]: JSON.stringify([sessionItem(41), sessionItem(43, 'waiting', ['wait']), sessionItem(44, 'done', ['done'])]),
+    [showKey(41)]: JSON.stringify(shownItem(41, [untilMet])),
+  });
+
+  const r = s.check(s.transcript([['agent-backlog add "item 41" --kind defect --work-type internal --until "a third consumer"', '']]));
+
+  assert.equal(section(r.stdout, 'Ready items'), '  OPEN #41 item 41 (work)');
+  assert.doesNotMatch(r.stdout, /#43|#44/);
   assert.equal(lastLine(r.stdout), 'Open: 1');
   assert.equal(r.status, 1);
 });
 
 test('a ready item the session filed with no condition is a CHECK line to mark, not open', () => {
   using s = sandbox();
-  s.standIn('agent-backlog', { 'ready --all-repos --json': JSON.stringify([readyItem(41)]) });
+  s.standIn('agent-backlog', { [listKey('session')]: JSON.stringify([sessionItem(41)]), [showKey(41)]: JSON.stringify(shownItem(41)) });
 
-  const r = s.check(s.transcript([['cd /tmp && agent-backlog add "item 41" --kind defect --work-type internal 2>&1 | tail -5', backlogCard(41)]]));
+  const r = s.check(s.transcript([['ls', 'README.md']]));
 
   assert.match(r.stdout, /Filed \(yours: do it now, or say why it waits\)\n  CHECK #41 item 41 \(work\)\n/);
   assert.doesNotMatch(r.stdout, /OPEN/);
@@ -319,78 +498,25 @@ test('a ready item the session filed with no condition is a CHECK line to mark, 
   assert.equal(r.status, 0);
 });
 
-// #5834: an add whose JSON result a pipeline stage reshaped, as jq -r '"#\(.id) \(.title)"' or jq -r .id does.
-test('an add whose result a pipeline reshaped to a "#<id> <title>" line files its item', () => {
+// #5834: an add whose JSON result a jq stage reshaped printed no card, so the old output parser missed #5833.
+test('an item added through a jq pipe is listed under Filed', () => {
   using s = sandbox();
-  s.standIn('agent-backlog', { 'ready --all-repos --json': JSON.stringify([readyItem(41)]) });
+  s.standIn('agent-backlog', { [listKey('session')]: JSON.stringify([sessionItem(41)]), [showKey(41)]: JSON.stringify(shownItem(41)) });
 
   const r = s.check(s.transcript([['agent-backlog add "item 41" --kind defect --work-type internal --json | jq -r \'"#\\(.id) \\(.title)"\'', '#41 item 41\n']]));
 
-  assert.match(r.stdout, /Filed \(yours: do it now, or say why it waits\)\n  CHECK #41 item 41 \(work\)\n/);
+  assert.equal(section(r.stdout, 'Filed (yours: do it now, or say why it waits)'), '  CHECK #41 item 41 (work)');
 });
 
-test('an add whose result a pipeline printed as compact JSON files its item', () => {
-  using s = sandbox();
-  s.standIn('agent-backlog', { 'ready --all-repos --json': JSON.stringify([readyItem(41)]) });
-
-  const r = s.check(s.transcript([['agent-backlog add "item 41" --kind defect --work-type internal --json | jq -c \'{id}\'', '{"id":41}\n']]));
-
-  assert.match(r.stdout, /Filed \(yours: do it now, or say why it waits\)\n  CHECK #41 item 41 \(work\)\n/);
-});
-
-test('an add whose result a pipeline reshaped to a bare id line files its item', () => {
-  using s = sandbox();
-  s.standIn('agent-backlog', { 'ready --all-repos --json': JSON.stringify([readyItem(41)]) });
-
-  const r = s.check(s.transcript([['agent-backlog add "item 41" --kind defect --work-type internal --json | jq -r .id', '41\n']]));
-
-  assert.match(r.stdout, /Filed \(yours: do it now, or say why it waits\)\n  CHECK #41 item 41 \(work\)\n/);
-});
-
-test('an item filed with no condition and then given one with wait is open once ready', () => {
-  using s = sandbox();
-  s.standIn('agent-backlog', { 'ready --all-repos --json': JSON.stringify([readyItem(41)]) });
-
-  const r = s.check(s.transcript([
-    ['agent-backlog add "item 41" --kind defect --work-type internal', backlogCard(41)],
-    ['agent-backlog wait 41 --after 40', backlogCard(41)],
-  ]));
-
-  assert.match(r.stdout, /OPEN #41 item 41 \(work\)/);
-  assert.equal(lastLine(r.stdout), 'Open: 1');
-});
-
-test('an add guarded by a dedup list in the same call files its item', () => {
-  using s = sandbox();
-  s.standIn('agent-backlog', { 'ready --all-repos --json': JSON.stringify([readyItem(41)]) });
-  const listRow = '│  #3621  Turn 66 memory rules into claude-hook checks (agent-plugin)\n';
-
-  const r = s.check(s.transcript([[
-    "agent-backlog list --all-repos --search \"item\" 2>&1 | grep -E '^│  #' | head -3; cd /tmp && agent-backlog add \"item 41\" --kind defect --work-type internal",
-    `${listRow}${backlogCard(41)}`,
-  ]]));
-
-  assert.match(r.stdout, /Filed \(yours: do it now, or say why it waits\)\n  CHECK #41 item 41 \(work\)\n/);
-  assert.doesNotMatch(r.stdout, /#3621/);
-});
-
-// Item headers in a call's output add no item unless the call itself filed or changed the item.
-function assertNoItemFrom(command) {
+test("a failed read of the session's backlog items is open", () => {
   using s = sandbox();
   s.standIn('agent-backlog', {});
 
-  const r = s.check(s.transcript([[command, `${backlogCard(41)}${backlogCard(42)}`]]));
+  const r = s.check(s.transcript([['ls', 'README.md']]));
 
-  assert.match(r.stdout, /Ready items\n  none\nFiled \(yours: do it now, or say why it waits\)\n  none\n/);
-  assert.equal(lastLine(r.stdout), 'Nothing open.');
-  assert.equal(r.status, 0, r.stderr);
-}
-
-test('item headers in agent-backlog list output add no item', () => assertNoItemFrom('agent-backlog list --all-repos --search memory'));
-test('item headers in agent-backlog show output add no item', () => assertNoItemFrom('agent-backlog show 41'));
-test('a show beside an add counts no id from the result', () => assertNoItemFrom('agent-backlog show 42; agent-backlog add "item 41" --kind defect --work-type internal'));
-test('add --help beside a list adds no item', () => assertNoItemFrom('agent-backlog add --help 2>&1 | head; agent-backlog list --all-repos'));
-test("item headers in a non-backlog command's output add no item", () => assertNoItemFrom("grep -h 'agent-backlog add' other-session.jsonl"));
+  assert.equal(section(r.stdout, 'Ready items'), '  OPEN could not read the backlog items of session session: unexpected call: agent-backlog list --session session --all-repos --json\n  none');
+  assert.equal(lastLine(r.stdout), 'Open: 1');
+});
 
 test('a transcript that does not exist is a read error, exit 2', () => {
   using s = sandbox();
@@ -401,9 +527,6 @@ test('a transcript that does not exist is a read error, exit 2', () => {
   assert.equal(r.status, 2);
 });
 
-// The lines under one heading of the output, up to the next heading.
-const section = (out, heading) => out.split('\n').slice(out.split('\n').indexOf(heading) + 1).join('\n').split(/\n(?=\S)/)[0];
-
 test('the docs of a package the session committed to, that its commits did not change, are listed to mark', () => {
   using s = sandbox();
   s.commitFiles({
@@ -413,10 +536,12 @@ test('the docs of a package the session committed to, that its commits did not c
   });
   s.push();
   const c = s.commitFiles({ 'packages/p/src/a.ts': 'export const a = 1;', 'packages/p/CONTEXT.md': 'new words' });
-  const pushed = s.push();
-  s.standIn('gh', { [ghKey(c.sha)]: JSON.stringify([{ name: 'CI', status: 'completed', conclusion: 'success', url: 'https://ci/1' }]) });
+  s.push();
+  s.ledger([s.committed(c.sha), s.pushed(c.sha)]);
+  s.reviewed(c.sha);
+  s.standIn('gh', { [ghKey(c.sha)]: green });
 
-  const r = s.check(s.session([{ bash: 'git commit -m x', result: c.result }, { bash: 'git push origin main', result: pushed }]));
+  const r = s.check(s.session([{ bash: 'ls', result: 'README.md' }]));
 
   assert.equal(section(r.stdout, 'Docs of changed packages'), [
     `  ${s.work}`,
@@ -437,8 +562,9 @@ test("a package's ADR folder stays one line when the session changed some of its
   s.push();
   const first = s.commitFiles({ 'packages/p/src/a.ts': 'export const a = 1;', 'packages/p/docs/adr/0001-a.md': 'Superseded.\n\nadr' });
   const second = s.commitFiles({ 'packages/p/docs/adr/0004-d.md': 'new decision' });
+  s.ledger([s.committed(first.sha), s.committed(second.sha)]);
 
-  const r = s.check(s.session([{ bash: 'git commit -m x', result: first.result }, { bash: 'git commit -m y', result: second.result }]));
+  const r = s.check(s.session([{ bash: 'ls', result: 'README.md' }]));
 
   assert.equal(section(r.stdout, 'Docs of changed packages'),
     `  ${s.work}\n    CHECK packages/p/docs/adr (4 decisions, 2 changed by this session): a decision this change overturns gets a status paragraph`);
