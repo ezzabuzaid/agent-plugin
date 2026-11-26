@@ -56,6 +56,10 @@ const HEADING_VERBS = [
 // "Nothing needs your decision", "Nothing is waiting for your answer".
 const NOT_AN_ASK = String.raw`(?<!\b(?:nothing|none|no one|nobody|whether it|if it)\s(?:is\s)?)`;
 
+// "none", also "none of them" / "none of these" / "none of the items" (the blind
+// judge, 2026-11-26: "none of them waits on you" is a report).
+const NONE_OF = String.raw`none(?: of (?:them|these|those|the \w+))?`;
+
 const MULTI_QUESTION_PATTERNS = [
   // A report verb earlier in the clause makes it a report of questions put to someone else:
   // "I sent the same two questions to build-classification-generic-core."
@@ -99,7 +103,7 @@ const MULTI_QUESTION_PATTERNS = [
   // starts with Reply; "the reply from the peer" describes.
   /(^|[.!?;:]\s+)(\*\*)?reply (with|like|\*\*|["“'`])/im,
   // Parking on the user: "Still waiting on you at the mini:", "blocked on you".
-  /(?<!\b(?:nothing|no one|nobody|not)\s(?:is\s)?)\b(waiting|blocked) (on|for) you\b/i,
+  new RegExp(String.raw`(?<!\b(?:nothing|no one|nobody|not|${NONE_OF})\s(?:is\s)?)\b(waiting|blocked) (on|for) you\b`, 'i'),
   // A task handed to the user: "**Cleanup that's yours, through Mole:**", "the next step is yours".
   /(?<!\b(?:nothing|none)\s)\b(that's|that is|those are|these are|is|are|stays|remains) (all )?yours\b/i,
   // The asks the patterns above missed (forensics 2026-11-26, K4: 126 more hits
@@ -109,7 +113,10 @@ const MULTI_QUESTION_PATTERNS = [
   /\byours,? when you (choose|decide|want|are ready)\b/i,
   /(?<!\b(?:per|with|on|after|got|had|took|have|without|for|wait for)\s)\byour (go|go-ahead|direction)\b(?!\s+(to|from|on|is|was|has been)\b)/i,
   /\b(wait(s|ing)? for|needs?) your (go|go-ahead|direction)\b/i,
-  /(?<!\b(?:nothing|no one|nobody|not|none|no \w+|no \w+ \w+)\s(?:is\s)?)\bwait(s|ing)? (on|for) (you|your (answer|go|word|pick|reply|direction))\b(?![*_:\s]*(nothing|none|no one)\b)/i,
+  new RegExp(
+    String.raw`(?<!\b(?:nothing|no one|nobody|not|${NONE_OF}|no \w+|no \w+ \w+)\s(?:is\s)?)\bwait(s|ing)? (on|for) (you|your (answer|go|word|pick|reply|direction))\b(?![*_:\s]*(nothing|none|no one)\b)`,
+    'i',
+  ),
   /\b(both|it|they|the questions?|my questions?) (is|are) (above|in the chat|in chat)\b/i,
   /\bnext step is (yours|your)\b/i,
 ];
@@ -164,7 +171,37 @@ function bashCommand(block: ContentBlock): string {
   return block.name === 'Bash' ? (stringField(block.input, 'command') ?? '') : '';
 }
 
-const GIT_COMMIT_OR_PUSH = /\bgit\b[^\n;&|]{0,80}\b(commit|push)\b/;
+// A heredoc body, up to its delimiter line (or the end, when it has none); the
+// rest of the line that opens it stays, since it is still shell code.
+const HEREDOC_BODY =
+  /<<-?[ \t]*(['"]?)([\w.-]+)\1([^\n]*)\n(?:(?:[\s\S]*?\n)?[ \t]*\2[ \t]*(?=\n|$)|[\s\S]*$)/g;
+const QUOTED = /'[^']*'|"(?:[^"\\]|\\[\s\S])*"/g;
+// The code a shell runs from its -c argument: `timeout 900 bash -c "git add … && git commit …"`.
+const SHELL_DASH_C = /\b(?:ba|z)?sh\s+-\w*c\s+(?:"((?:[^"\\]|\\[\s\S])*)"|'([^']*)')/g;
+// Commands and shell keywords that run the command after them: timeout 1500,
+// gtimeout -s KILL 900, caffeinate -dimsu, nohup, time, env, sudo, exec, if, then, do.
+const COMMAND_WRAPPERS = String.raw`(?:(?:if|then|else|elif|do|while|until|!)\s+|g?timeout(?:\s+-[sk]\s+\S+|\s+--?[\w-]+(?:=\S+)?)*\s+\d+[smhd]?\s+|caffeinate(?:\s+-\w+)*\s+|(?:nohup|time|sudo|exec|command)\s+|env(?:\s+\w+=\S*)*\s+)*`;
+// A command segment that runs git commit or git push, after optional variable
+// assignments, wrappers and git's own options (-C <dir>, -c <key=value>, --no-pager).
+const GIT_COMMIT_OR_PUSH_COMMAND = new RegExp(
+  String.raw`^[\s({]*(?:\w+=\S*\s+)*${COMMAND_WRAPPERS}git(?:\s+(?:-[Cc]\s+\S+|--[\w-]+(?:=\S+)?))*\s+(?:commit|push)\b`,
+);
+
+// The command runs git commit or git push where a command starts: at its start
+// or after &&, ||, ;, |, & or a new line, also inside a shell's -c argument.
+// Words in a heredoc body, in another quoted string or in another command's
+// arguments are not a commit (the blind judge, 2026-11-26: a python heredoc and
+// a backlog description).
+function runsGitCommitOrPush(command: string): boolean {
+  const code = command.replaceAll(HEREDOC_BODY, '<<$3');
+  for (const [, doubleQuoted, singleQuoted] of code.matchAll(SHELL_DASH_C)) {
+    if (runsGitCommitOrPush(singleQuoted ?? (doubleQuoted ?? '').replaceAll(/\\(["\\$`])/g, '$1'))) return true;
+  }
+  return code
+    .replaceAll(QUOTED, "''")
+    .split(/&&|\|\||[;|&\n]/)
+    .some((segment) => GIT_COMMIT_OR_PUSH_COMMAND.test(segment));
+}
 
 // A launch or a stop of background work changes the task set the session owns.
 function changesTasks(block: ContentBlock): boolean {
@@ -176,7 +213,7 @@ function changesTasks(block: ContentBlock): boolean {
 // one (forensics 2026-11-26, K1), and neither is a task-set change: the agent
 // that starts work is doing what idle mode asks (step 6c).
 function changesState(block: ContentBlock): boolean {
-  return GIT_COMMIT_OR_PUSH.test(bashCommand(block));
+  return runsGitCommitOrPush(bashCommand(block));
 }
 
 const BACKLOG_WRITE = /\bagent-backlog (add|update|close|done|decide|note|edit|start|block)\b/;
@@ -184,9 +221,10 @@ const BACKLOG_WRITE = /\bagent-backlog (add|update|close|done|decide|note|edit|s
 const BASH_RECORD_WRITE =
   /(?:>>?|\btee\b|\bsed\s+-i|\bperl\s+-\w*i|\bmv\b|\bcp\b)[^\n;&|]*?(?:\/memory\/|\/\.claude\/plans\/|STATUS|HANDOFF|MEMORY\.md)/;
 
-// Any write the turn made, so a turn with one is not an answer alone.
+// Any write the turn made, so a turn with one is not an answer alone. A
+// message to a subagent or a peer acts too (the blind judge, 2026-11-26).
 function writes(block: ContentBlock): boolean {
-  if (block.name === 'Edit' || block.name === 'Write' || block.name === 'NotebookEdit') return true;
+  if (block.name === 'Edit' || block.name === 'Write' || block.name === 'NotebookEdit' || block.name === 'SendMessage') return true;
   const command = bashCommand(block);
   return changesState(block) || changesTasks(block) || BACKLOG_WRITE.test(command) || BASH_RECORD_WRITE.test(command);
 }
@@ -297,36 +335,59 @@ function asksAQuestion(text: string): boolean {
   );
 }
 
-// A question that asks for the sweep itself, so the rules still fire.
+// A question that asks for the sweep itself, so the rules still fire. "remain"
+// matches loosely, so a typo such as "remiaining" is still a wrap-up (the blind
+// judge, 2026-11-26), and "reminds" is not one.
 const WRAP_UP_QUESTION =
-  /\b(what(?:'|’)?s left|what is left|what remains|anything (remaining|left)|can I close|are you sure|double[- ]check|what are you waiting (for|on)|what now|finished everything)\b/i;
+  /\b(what(?:'|’)?s left|what is left|what(?:(?:'|’)?s| is)? rem[aeiou]{1,4}n(?:ing|s)?\b|anything (rem[aeiou]{1,4}ning|left)|can I close|are you sure|double[- ]check|what are you waiting (for|on)|what now|finished everything)\b/i;
 
-type Turn = { lastHumanInput?: HumanInput; blocks: ContentBlock[] };
+type Turn = { lastHumanInput?: HumanInput; blocks: ContentBlock[]; lastText: string };
 
-// The current turn, from the last prompt the user typed: his last input and
-// every tool call since that prompt.
+// The current turn, from the last prompt the user typed: his last input, every
+// tool call since that prompt, and the last text the agent wrote.
 async function currentTurn(transcriptPath: string): Promise<Turn> {
-  let turn: Turn = { blocks: [] };
+  let turn: Turn = { blocks: [], lastText: '' };
   for await (const entry of readTranscriptEntries(transcriptPath)) {
     const human = humanInput(entry);
-    if (human?.startsTurn) turn = { lastHumanInput: human, blocks: [] };
+    if (human?.startsTurn) turn = { lastHumanInput: human, blocks: [], lastText: '' };
     else if (human) turn.lastHumanInput = human;
-    if (entry.type === 'assistant') turn.blocks.push(...toolUses(entry.message?.content));
+    if (entry.type !== 'assistant') continue;
+    turn.blocks.push(...toolUses(entry.message?.content));
+    turn.lastText = textOf(entry.message?.content) || turn.lastText;
   }
   return turn;
 }
 
+// A line that hands the user a `!` command to run, also inside a code block;
+// a markdown image (![alt](src)) is not one.
+const HANDED_COMMAND = /^[ \t]*!(?!\[)[ \t]*\S/m;
+
 /**
  * The turn only answers the user's question: his last input asks one, it is
- * no wrap-up question, and the turn wrote nothing (forensics 2026-11-26, K2:
- * 76 fires on such turns once wrap-up questions are left out).
+ * no wrap-up question, the turn wrote nothing and its final message hands the
+ * user no `!` command (forensics 2026-11-26, K2: 76 fires on such turns once
+ * wrap-up questions are left out).
  */
 async function questionOnlyTurn(input: ClaudeHookInput): Promise<boolean> {
   if (!input.transcript_path) return false;
-  const { lastHumanInput, blocks } = await currentTurn(input.transcript_path);
+  const { lastHumanInput, blocks, lastText } = await currentTurn(input.transcript_path);
   if (!lastHumanInput || !asksAQuestion(lastHumanInput.text)) return false;
   if (WRAP_UP_QUESTION.test(lastHumanInput.text)) return false;
-  return !blocks.some(writes);
+  const finalText = typeof input.last_assistant_message === 'string' ? input.last_assistant_message : lastText;
+  return !blocks.some(writes) && !HANDED_COMMAND.test(finalText);
+}
+
+// "Safe to close" as a verdict, not "Not safe to close (yet)": a negated
+// verdict claims nothing (the blind judge, 2026-11-26).
+const AFFIRMED_SAFE_TO_CLOSE = /(?<!\b(?:not|never)\s+|n't\s+)(?<!\b(?:not|never)\s+yet\s+)\bsafe to close\b/i;
+// A sentence that opens with a condition: "Once both pass, the session is safe to close".
+const CONDITION_OPENER = /^[\s*_>#-]*(?:once|when|after|if|until|unless|as soon as)\b/i;
+
+// The final message claims the session can close now, in a sentence of its own.
+function claimsSafeToClose(text: string): boolean {
+  return text
+    .split(/(?<=[.!?])\s+|\n/)
+    .some((sentence) => AFFIRMED_SAFE_TO_CLOSE.test(sentence) && !CONDITION_OPENER.test(sentence));
 }
 
 const CLOSE_CHECK_SCRIPT = 'close-check.mjs';
@@ -398,7 +459,7 @@ export const stopRules: ReminderRule[] = [
     continuedStops: 'once',
     when: async (input) =>
       !runsHeadless(input) &&
-      /\bSafe to close\b/i.test(await finalAssistantText(input)) &&
+      claimsSafeToClose(await finalAssistantText(input)) &&
       !(await closeCheckRanThisTurn(input)),
     message:
       "You wrote 'Safe to close' without running the housekeeping skill's scripts/close-check.mjs in this turn. Run it, and quote its output.",

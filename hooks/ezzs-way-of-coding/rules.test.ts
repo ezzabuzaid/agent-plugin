@@ -1434,6 +1434,45 @@ test('stop stays quiet on housekeeping after edits, reads, messages and backgrou
   }
 });
 
+// The blind judge of 2026-11-26 found 3 of 10 sampled fires false: the words
+// "commit" and "push" inside a heredoc body or another command's quoted
+// argument, in sessions that never committed or pushed (judge-result.md).
+test('housekeeping counts a git commit or push only where a shell command starts, never words in a heredoc or a quoted argument', async () => {
+  for (const [label, command] of [
+    ['a commit with a message', 'git commit -m "fix: the reaper"'],
+    ['a push after cd', 'cd ~/Desktop/x && git push origin main'],
+    ['a commit in another checkout', 'git -C /repo commit --only -F f -- a b'],
+    ['a commit after a semicolon', 'npx prettier --write a.ts; git commit --only -m x a.ts'],
+    ['a commit on a new line', 'git add a.ts\ngit commit -m x'],
+    ['a commit after a heredoc', "cat > msg.txt <<'EOF'\nfix: the reaper\nEOF\ngit commit -F msg.txt"],
+    ['a commit whose message is a heredoc', "git commit -m \"$(cat <<'EOF'\nfix: the reaper\n\nIt stops at once.\nEOF\n)\""],
+    // Real pushes and commits of the corpus run under a wrapper or a shell -c.
+    ['a push under timeout', 'timeout 1500 git push origin main > push.log 2>&1'],
+    ['a push under gtimeout -s KILL', 'gtimeout -s KILL 900 git push origin main'],
+    ['a push under caffeinate', 'log=/x/push.log && caffeinate -dimsu git push origin main > "$log" 2>&1'],
+    ['a push after a test', '[ "$(git log --format=%h origin/main..main)" = "d418442" ] && nohup git push origin main'],
+    ['a commit as an if condition', 'if git commit --only -F msg.txt -- a.ts > commit.log 2>&1; then echo ok; fi'],
+    ['a commit inside bash -c', 'F="a.ts b.ts"; timeout 900 bash -c "git add -- $F && git commit -q -m \\"fix: x\\" -- $F"'],
+  ] as const) {
+    assert.ok((await stopContext({}, [request, bash(command), reply])).includes(BEFORE_DONE), label);
+  }
+  for (const [label, command] of [
+    [
+      'a python heredoc that writes a plan line',
+      "python3 - <<'EOF'\nimport re\np = '/Users/x/.claude/plans/p.md'\ns = open(p).read()\ns = s.replace('STATUS:', 'STATUS: LAUNCHED C1 apply: git apply, agent-backlog typecheck+test, copy-check, commit, push')\nopen(p, 'w').write(s)\nEOF",
+    ],
+    [
+      'a backlog description that names git',
+      'agent-backlog update 5410 --description "Track the file: .gitignore + git rm --cached src/gen.ts, then commit the regenerated file"',
+    ],
+    ['a single-quoted argument', "echo 'next: git push origin main'"],
+    ['a quoted argument that holds a whole command', 'agent-backlog add "Push: run the gate && git push origin main once it passes" --repo mutex'],
+    ['a heredoc body line that names a command', "cat >> ~/.claude/plans/p.md <<'EOF'\nNext, after the gate:\ngit push origin main\nEOF"],
+  ] as const) {
+    assert.doesNotMatch(await stopContext({}, [request, bash(command), reply]), /housekeeping-due/, label);
+  }
+});
+
 test('only a housekeeping Skill call answers a housekeeping fire; an inline sweep or another skill does not', async () => {
   const fired = [request, commit, reply, stopped];
   for (const [label, entries] of [
@@ -1520,6 +1559,9 @@ test('neither Stop rule fires after a turn that only answers a question from the
     ['a question with no question mark', [userSays('which of them is the oldest'), said(answer)]],
     ['a question sent while the turn ran', [userSays('Fix the reaper.'), bash('git status'), queued('wait, how many items are open?'), said(answer)]],
     ['a question typed into the dialog', [userSays('Fix the reaper.'), toolCall('AskUserQuestion'), dialogAnswer('Push main now?', ['Push', 'Hold'], 'what does the push release?'), said(answer)]],
+    // The loose match of "remaining" catches no other rem…n word.
+    ['a question with a word like remain', [userSays('what reminds the agent of the remote?'), said(answer)]],
+    ['an answer that shows a markdown image', [userSays('how does the chart look?'), said(`![chart](chart.png)\n\n${answer}`)]],
   ] as const) {
     const context = await stopContext({}, [...unswept, ...entries]);
     assert.doesNotMatch(context, /housekeeping-due|ask-in-the-tool/, label);
@@ -1535,6 +1577,9 @@ test('the Stop rules still fire after a question when the turn wrote, or the que
     ['a background command', [userSays('how many items open?'), bash('npm test', { run_in_background: true }), said(answer)]],
     ['a Bash write into memory', [userSays('how many items open?'), bash("printf '%s' x >> ~/.claude/projects/p/memory/MEMORY.md"), said(answer)]],
     ['a Bash write into a plan', [userSays('how many items open?'), bash("sed -i '' 's/a/b/' ~/.claude/plans/x.md"), said(answer)]],
+    // The blind judge of 2026-11-26: a turn that messaged a subagent (5aa5f72e:2780), or handed the user `!` commands (7e65b385:7610), acted.
+    ['a message to a subagent', [userSays('why does the agent host live in startup.ts?'), toolCall('SendMessage', { to: 'a1', message: 'Use the Docker host.' }), said(answer)]],
+    ['a `!` command for the user', [userSays('are we using gpt tokenizer'), bash('node probe.mjs'), said(`${answer}\n\n\`\`\`\n! /Applications/Tailscale.app/Contents/MacOS/Tailscale set --exit-node=\n\`\`\``)]],
     ['a statement, not a question', [userSays('Count the open items.'), said(answer)]],
     ['a peer asks, not the user', [userSays('Fix the reaper.'), queued('can you release the lock on mutex?', 'peer'), said(answer)]],
     // The tool_result quotes each question, so only the typed words are read; a picked label is an answer even when it ends in a question mark.
@@ -1547,6 +1592,9 @@ test('the Stop rules still fire after a question when the turn wrote, or the que
   for (const wrapUp of [
     "what's left?",
     'what remains?',
+    // A typo the judge found (7e65b385:8351).
+    'what is remiaining?',
+    "what's remaining?",
     'anything remaining?',
     'can I close this session?',
     'you finished everything? are you sure?',
@@ -1579,6 +1627,23 @@ test('stop sends a Safe to close claim back unless the close check ran in the sa
   // Only the verdict phrase: other done words are often descriptions ("Reader B finished").
   for (const message of ['Nothing of mine is running.', 'Reader B finished.', 'All done.', 'The skill writes "Safe to close" as its verdict.']) {
     assert.doesNotMatch(await stopContext({}, [request, sweep, said(message)]), /close-check-before-safe-to-close/, message);
+  }
+});
+
+// The blind judge of 2026-11-26 found 4 of 10 sampled fires false: a negated
+// verdict or a condition, which claims nothing (judge-result.md).
+test('stop leaves a Not safe to close verdict or a condition alone and still sends back a Safe to close claim', async () => {
+  for (const message of [
+    'Not safe to close: both are still open.',
+    '**Not safe to close:** CI is the last open check.',
+    'Not safe to close yet: 9f07a59 is unpushed',
+    'The session is not yet safe to close: CI still runs.',
+    'Once both pass, the session is safe to close.',
+  ]) {
+    assert.doesNotMatch(await stopContext({}, [request, sweep, said(message)]), /close-check-before-safe-to-close/, message);
+  }
+  for (const message of ['Safe to close.', 'Once CI passed, I pushed 9f07a59; nothing of mine runs. Safe to close.']) {
+    assert.ok((await stopContext({}, [request, sweep, said(message)])).includes(CLOSE_CHECK), message);
   }
 });
 
@@ -1639,6 +1704,7 @@ test('stop sends the asks it used to miss to AskUserQuestion: your go, waits on 
     'The writer question waits on your direction.',
     '**Still waits on you:** a yes to the zukhruf push for #5682.',
     '#5463 waits on you.',
+    'Waiting on you: the zukhruf push for #5682.',
     'The questions are above.',
     'To resume, type `/housekeeping` when you are back.',
     'The next step is your review of the paper.',
@@ -1656,6 +1722,11 @@ test('stop stays quiet on a report that only mentions the user\'s go or a wait t
     'Per your direction, the push waits for CI.',
     'No decision waits on you.',
     'I pushed it without your go-ahead to the staging branch only.',
+    // The blind judge of 2026-11-26 (881553d1:5507): a negation through "none of them".
+    'Three things are running now, and none of them waits on you.',
+    'None of these wait on you.',
+    'none of them is waiting on you',
+    'No item waits on you.',
   ]) {
     assert.doesNotMatch(await stopContext({ last_assistant_message: message }), /ask-in-the-tool/, message);
   }
@@ -1818,14 +1889,14 @@ test('a Write of a MEMORY.md that adds a line or drops one or two of twenty goes
 });
 
 // A tracking record never points into one session's folder. Measured on the
-// 1967 Write and Edit calls of the 59 corpus sessions
-// (hooks-6c-scratch/measure.mts): the guard refuses 7, all real: the forensics'
-// 4 (69df537a:9037 writes a HANDOFF into its scratchpad; 7bb55ec4:4890 and
-// 6b29866e:955 put a scratchpad log or repro path into a plan; b6b06c50:9584
-// names a live task output in a HANDOFF), a plan that sends a later session to
-// a dead session's task outputs (9a40fd6b:9608), and 2 briefs in
-// ~/.claude/plans that place a throwaway workspace in the scratchpad
-// (259dc838:2260 and 4245), which ~/.claude/scratch holds instead.
+// 1973 Write and Edit calls of the 59 corpus sessions
+// (hooks-6d-scratch/dump9.mts): the guard refuses 5: 69df537a:9037 writes a
+// HANDOFF into its scratchpad; 7bb55ec4:4890 and 6b29866e:955 put a scratchpad
+// log or repro path into a plan; b6b06c50:9584 names a live task output in a
+// HANDOFF; 9a40fd6b:9608 sends a later session to a dead session's task
+// outputs. The blind judge of 2026-11-26 found the 2 briefs that place a
+// throwaway workspace in the scratchpad (259dc838:2260 and 4245) false; they
+// now go through.
 const RECORD_OUTLIVES_SESSION =
   'A tracking record must outlive the session: move the file to ~/.claude/scratch/ or ~/.claude/plans/ and point there.';
 const SCRATCHPAD = '/private/tmp/claude-501/-Users-ezzabuzaid-Desktop-experiments-mutex/7bb55ec4-a068-4516-a90b-a25762fde657/scratchpad';
@@ -1838,6 +1909,13 @@ test('a Write or Edit of a plan, STATUS, HANDOFF or memory that names a path in 
     ['a memory', 'Edit', { file_path: '/Users/ezzabuzaid/.claude/projects/-Users-x/memory/steps.md', old_string: 'a', new_string: `Patches are in \`${SCRATCHPAD}/steps/\`.` }],
     ['a /tmp path without /private', 'Write', { file_path: '/Users/ezzabuzaid/.claude/plans/p.md', content: `See ${SCRATCHPAD.replace('/private', '')}/x.md` }],
     ['a HANDOFF written into the scratchpad', 'Write', { file_path: `${SCRATCHPAD}/HANDOFF-deepagents-e7-2.md`, content: '# Handoff\nResume at step 3.' }],
+    // The corpus's pointers, word for word around the path.
+    ['a plan that sends a later session to task outputs (9a40fd6b:9608)', 'Write', { file_path: '/Users/ezzabuzaid/.claude/plans/elt-s9-handoff.md', content: `How to see their results if 9a40fd6b is gone: their transcripts are \`${SCRATCHPAD.replace('/scratchpad', '/tasks')}/<agent-id>.output\` (JSONL, huge).` }],
+    ['a plan STATUS that names a gate log (7bb55ec4:4890)', 'Edit', { file_path: '/Users/ezzabuzaid/.claude/plans/retrieval-text-search-api.md', old_string: 'a', new_string: `SQL Server crashed in the gdb crash dump under gate load (log ${SCRATCHPAD}/gate-5424.log). BUG FIRST.` }],
+    ['a plan that names a repro (6b29866e:955)', 'Write', { file_path: '/Users/ezzabuzaid/.claude/plans/msw-bugs-2026-11-24.md', content: `- Repro hangs 3/3, source and dist: ${SCRATCHPAD}/repro/repro.mjs (run it from packages/testing).` }],
+    ['a plan to continue from a scratchpad file', 'Write', { file_path: '/Users/ezzabuzaid/.claude/plans/p.md', content: `Continue from ${SCRATCHPAD}/step-3.md` }],
+    ['a plan that names a task output alone', 'Write', { file_path: '/Users/ezzabuzaid/.claude/plans/p.md', content: `Shell b1 writes ${SCRATCHPAD.replace('/scratchpad', '/tasks')}/b1.output until the deploy lands.` }],
+    ['a plan that labels a path', 'Write', { file_path: '/Users/ezzabuzaid/.claude/plans/p.md', content: `Fixture for step 2: \`${SCRATCHPAD}/fx.json\`` }],
   ] as const) {
     assert.equal(await refusal(tool, input), RECORD_OUTLIVES_SESSION, label);
   }
@@ -1852,6 +1930,9 @@ test('a record that points to ~/.claude/scratch or only mentions /tmp/claude-501
     ['a scratch note in the scratchpad', 'Write', { file_path: `${SCRATCHPAD}/notes.md`, content: `See ${SCRATCHPAD}/x.md` }],
     ['a read of a plan', 'Read', { file_path: '/Users/ezzabuzaid/.claude/plans/p.md' }],
     ['a plan edit with no new text', 'Edit', { file_path: '/Users/ezzabuzaid/.claude/plans/p.md', old_string: SCRATCHPAD }],
+    // The blind judge of 2026-11-26: a brief that tells a subagent to build throwaway work in the scratchpad (259dc838:2260 and 4245).
+    ['a brief that makes a throwaway repo there', 'Write', { file_path: '/Users/ezzabuzaid/.claude/plans/stop-npm-link-r1-brief-2026-11-22.md', content: `Read the plan first.\nMake a throwaway repo under ${SCRATCHPAD}/r1/ (git init + a bare remote there; tags are allowed only in that throwaway repo).` }],
+    ['a brief that runs in a throwaway workspace there', 'Write', { file_path: '/Users/ezzabuzaid/.claude/plans/4985-u1-brief.md', content: `- Run version.mjs for real in a throwaway workspace under ${SCRATCHPAD}/u1/ for cases (a)-(c).` }],
   ] as const) {
     assert.equal(await refusal(tool, input), undefined, label);
   }

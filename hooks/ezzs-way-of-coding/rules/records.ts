@@ -8,6 +8,27 @@ import { basename } from 'node:path';
 // of /tmp/claude-501 alone, or of a glob such as */scratchpad, names no file.
 const SESSION_FOLDER_PATH =
   /(?:\/private)?\/tmp\/claude-\d+\/[^/\s]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\//;
+const SESSION_FOLDER_PATHS = new RegExp(SESSION_FOLDER_PATH.source, 'g');
+
+// Words before a path that send a later reader to the file: "see", "log",
+// "Repro … :", "Patches are in". A brief that tells a subagent to build
+// throwaway work there ("Make a throwaway repo under …") points at nothing that
+// must outlive the session (the blind judge, 2026-11-26: 259dc838:2260, 4245).
+const POINTS_TO_READ =
+  /\b(?:see|read|continue from|resume from|results?|outputs?|logs?|logging to|transcripts?|repro|patches|(?:is|are|lives?|sits?) in)\b|:\s*[`'"(]?$/i;
+const POINTER_WINDOW = 80;
+
+// The text sends a later reader to a file in a session folder: a task output
+// (…/tasks/…), or a path that the words just before it point at.
+function pointsIntoSessionFolder(text: string): boolean {
+  for (const match of text.matchAll(SESSION_FOLDER_PATHS)) {
+    if (text.startsWith('tasks/', match.index + match[0].length)) return true;
+    const lineStart = text.lastIndexOf('\n', match.index) + 1;
+    const before = text.slice(Math.max(lineStart, match.index - POINTER_WINDOW), match.index);
+    if (POINTS_TO_READ.test(before)) return true;
+  }
+  return false;
+}
 
 function isTrackingRecord(filePath: string): boolean {
   return (
@@ -32,7 +53,7 @@ export const recordGuards: GuardRule[] = [
         const filePath = input.tool_input?.file_path;
         const text = newText(input.tool_name, input.tool_input);
         if (typeof filePath !== 'string' || text === undefined || !isTrackingRecord(filePath)) return false;
-        return SESSION_FOLDER_PATH.test(filePath) || SESSION_FOLDER_PATH.test(text);
+        return SESSION_FOLDER_PATH.test(filePath) || pointsIntoSessionFolder(text);
       } catch {
         return false;
       }

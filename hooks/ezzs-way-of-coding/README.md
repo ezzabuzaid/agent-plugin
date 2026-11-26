@@ -84,22 +84,30 @@ question and short labels (the user, 2026-11-24).
 `ask-in-the-tool` fires when the final message asks the user something, gives
 him a task or waits on him in prose, also after an earlier AskUserQuestion,
 including an answer format ("Reply **"A"** or **"B"**") and phrasings such as
-"yours, when you choose", "your go" or "type `/x`". A `!` command is the last
-chat line, with no dialog after it.
+"yours, when you choose", "your go" or "type `/x`"; a negation such as "none
+of them waits on you" or "no item waits on you" is a report. A `!` command is
+the last chat line, with no dialog after it.
 `housekeeping-due` reads a Claude Code transcript: since the last `housekeeping`
 Skill call, it fires on a commit, a push or a close claim in the final message
 ("Safe to close", "Nothing new", "nothing running", "all done"); edits, reads,
 messages and task launches alone do not fire it, and only a Skill call for
-`housekeeping` answers it (a sweep written from memory leaves it due). With
+`housekeeping` answers it (a sweep written from memory leaves it due). A
+commit or push counts only where a shell command starts `git commit` or
+`git push` (also `git -C <dir>`, after `&&`, `||`, `;`, `|` or a new line,
+under `timeout`, `caffeinate`, `nohup`, `if` and the like, or inside `bash -c`),
+never the words in a heredoc body, a quoted string or another command's
+arguments. With
 `background_tasks` running it asks for the skill's idle mode and names each
 task by kind, id and description; otherwise its before-done mode.
-`close-check-before-safe-to-close` sends a final message that says "Safe to
+`close-check-before-safe-to-close` sends a final message that claims "Safe to
 close" back unless the same turn ran the housekeeping skill's
-`scripts/close-check.mjs`.
+`scripts/close-check.mjs`; a negated verdict ("Not safe to close yet: …") or a
+condition ("Once both pass, the session is safe to close") claims nothing.
 Neither `housekeeping-due` nor `ask-in-the-tool` fires after a turn that only
-answered a question from the user (a typed, queued or dialog-typed question and
-no write in the turn); a wrap-up question (what's left, can I close, double
-check) still fires them.
+answered a question from the user (a typed, queued or dialog-typed question, no
+write or `SendMessage` in the turn, and no `!` command handed to the user in
+the final message); a wrap-up question (what's left, what remains, also
+misspelt, can I close, double check) still fires them.
 `ask-in-the-tool` and `close-check-before-safe-to-close` also run on a stop that
 a stop hook already continued (`stop_hook_active`), at most once per chain
 (`continuedStops: 'once'` of `@deepagents/experimental` 7.38+): agents wrote
@@ -117,6 +125,9 @@ characters or whose option description is over 100;
 `MEMORY.md` under a size, and a Write that drops more than max(1, 10%) of a
 `MEMORY.md`'s index lines (an Edit is not checked yet: agent-plugin #5756);
 `tracking-record-outside-the-scratchpad` refuses a plan, memory, HANDOFF or
-STATUS record whose text or path names a session's scratchpad folder.
+STATUS record written into a session's folder, or whose text sends a later
+reader to a file there: a task output (`…/tasks/…`), or a path that words such
+as "see", "log", "repro", "continue from" or a label colon point at. A brief
+that tells a subagent to build throwaway work in the scratchpad goes through.
 The evidence for these rules is in `skills/housekeeping/references/RULINGS.md`
 ("The 2026-11-26 forensics round").
