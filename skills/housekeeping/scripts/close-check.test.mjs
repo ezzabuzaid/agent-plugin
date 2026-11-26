@@ -20,11 +20,11 @@ const here = dirname(fileURLToPath(import.meta.url));
 const script = join(here, 'close-check.mjs');
 // Outside every git repo: "Created outside repos" lists a path only when no repo holds it, so a sandbox inside the
 // checkout would hide the very files that section exists for. realpath: macOS links /var to /private/var.
-const scratchRoot = join(realpathSync(tmpdir()), 'housekeeping-close-check');
+// Each sandbox is its own temp folder, so a run leaves no shared parent folder behind.
+const tempRoot = realpathSync(tmpdir());
 
 function sandbox() {
-  mkdirSync(scratchRoot, { recursive: true });
-  const root = mkdtempSync(join(scratchRoot, 'close-'));
+  const root = mkdtempSync(join(tempRoot, 'housekeeping-close-check-'));
   const bin = join(root, 'bin');
   const home = join(root, 'home');
   mkdirSync(bin);

@@ -8,18 +8,20 @@
 // The test process's own env is not changed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, chmodSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, chmodSync, realpathSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const script = join(here, 'records-check.mjs');
-const scratchRoot = join(here, '..', '..', 'scripts-scratch');
+// Each sandbox is its own temp folder outside the checkout, so a run leaves nothing in the shared tree.
+// realpath: macOS links /var to /private/var.
+const tempRoot = realpathSync(tmpdir());
 
 function sandbox({ backlog = [] } = {}) {
-  mkdirSync(scratchRoot, { recursive: true });
-  const root = mkdtempSync(join(scratchRoot, 'records-'));
+  const root = mkdtempSync(join(tempRoot, 'housekeeping-records-check-'));
   const bin = join(root, 'bin');
   const home = join(root, 'home');
   mkdirSync(bin);
