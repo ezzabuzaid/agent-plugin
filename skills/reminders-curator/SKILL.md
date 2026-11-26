@@ -61,7 +61,9 @@ proposed trigger.
 ### 4. Encode
 
 Add one `ReminderRule` per cluster to the matching `rules/<theme>.ts` file
-(create a new theme file plus one `rules/index.ts` line when no theme fits):
+(when no theme fits, create a new theme file and add it to `rules/index.ts` in three places: its name in
+the destructured list, its `load('<theme>.ts', () => import('./<theme>.ts'))` entry, and the spread of its rules
+into `reminderRules` or `guardRules`):
 
 - **target/events** — prompt rules (`UserPromptSubmit`) for "when asked to X"
   guidance; tool rules (`PostToolUse`/`PostToolUseFailure`) for "when Y

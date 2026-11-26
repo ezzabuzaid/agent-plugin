@@ -4,7 +4,7 @@ This is Ezz's global Claude Code and Codex application of
 `@deepagents/experimental/coding-agent-reminders`. Both agents execute
 `hook.ts` directly with Node — wired by absolute path in
 `~/.claude/settings.json` and `~/.codex/hooks.json` — backed by the pinned
-`4.3.0` package installed in this directory. It has no runtime dependency on a
+`7.38.1` package installed in this directory. It has no runtime dependency on a
 project checkout.
 
 Per-turn session harvesting and the shared Claude/Codex coding defaults also
