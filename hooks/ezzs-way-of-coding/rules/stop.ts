@@ -70,7 +70,10 @@ const MULTI_QUESTION_PATTERNS = [
   /(?<!\b(sent|asked|forwarded|relayed|passed|posted|answered)\b[^.!?\n]{0,30})(?<!["'`“‘]|\bthe\s)\b(a few|couple of|two|three|four|some|several|\d+)\s+(quick\s+)?questions?\b(?=[^.!?\n]{0,40}(:|\bfor you\b|\bbefore (I|we)\b)|[^\n]{0,40}\n\s*(\d+[.)]|[-*])\s)/i,
   /\bclarifying questions?\b/i,
   /\bjust to (confirm|check|make sure|clarify)\b/i,
-  new RegExp(`\\bbefore (I|we) (${PRE_QUESTION_VERBS})\\b`, 'i'),
+  // After a wait on something that is not the user ("I wait for those five before I
+  // start the graders", #5799), the clause orders the agent's own steps; "wait for
+  // your answer before I start" stays an ask.
+  new RegExp(`(?<!\\bwait(?:s|ing)?\\s+(?:for|on)\\s+(?!you\\b|your\\b)[^.!?\\n]{1,80})\\bbefore (I|we) (${PRE_QUESTION_VERBS})\\b`, 'i'),
   /\b(need to clarify|to clarify)\b/i,
   // Heading-style framings without `?` or "questions" word: "Decisions to confirm:",
   // "Things to clarify:", "Points to nail down:". These appear above bullet lists where

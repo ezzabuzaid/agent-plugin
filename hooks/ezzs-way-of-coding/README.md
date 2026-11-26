@@ -101,8 +101,11 @@ a report too when it names a later or conditional ask ("**Yours, later:**",
 or what the user holds without asking for it now ("stays yours", "is yours to
 read"), or when a relative clause only describes a noun ("drop decisions that
 are yours"); "that one is yours", "the next step is yours" and a heading over a
-task list ("**Next, two things that are yours:**") still fire. A `!`
-command is the last chat line, with no dialog after it.
+task list ("**Next, two things that are yours:**") still fire. "Before I
+start" after a wait on the agent's own work ("I wait for those five before I
+start the graders") orders its steps and is a report; "I'll wait for your
+answer before I start" still fires. A `!` command is the last chat line, with
+no dialog after it.
 `housekeeping-due` reads a Claude Code transcript: since the last `housekeeping`
 Skill call, it fires on a commit, a push or a close claim in the final message
 ("Safe to close", "Nothing new", "nothing running", "all done"); edits, reads,

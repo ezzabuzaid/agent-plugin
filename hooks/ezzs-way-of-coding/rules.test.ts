@@ -1288,6 +1288,8 @@ test('stop sends a prose question, offer or request for input to AskUserQuestion
     // A quoted word is stripped before the check; the request around it stays.
     'Say "go" to start with step 0, or tell me which steps to change or drop.',
     'Nothing is committed yet, so either way is a small move. Say if you want it.',
+    // A wait on the user's answer before the agent starts is still an ask (#5799's control).
+    "I'll wait for your answer before I start the migration.",
   ]) {
     assert.match(await stopContext({ last_assistant_message: message }), ASK_IN_THE_TOOL, message);
   }
@@ -1315,6 +1317,9 @@ test('stop stays quiet on a final message that reports, finishes or only mention
     // An offer phrase with no question mark in its paragraph describes.
     'The CLI asks which option you want and stores it.',
     '**Defect 2: the "two questions" pattern matched a report**',
+    // A wait on the agent's own work before its next step is a status line (#5799: c2896527, 2026-11-26).
+    '79 of 84 results are in, all with the three required sections. R70, R78, R82, R83 and R84 still run. Anonymizing must happen once over all 84 so the grading key stays whole, so I wait for those five before I start the 7 blind graders (3 cases each).',
+    'The gate still runs, so I am waiting on its result before I start the commit.',
   ]) {
     assert.doesNotMatch(await stopContext({ last_assistant_message: message }), /ask-in-the-tool/, message);
   }
