@@ -7,12 +7,17 @@
 //
 // A claim only the type checker can see (an @ts-expect-error, a type that must
 // not accept a value) is proven by the type mode ("typecheck"), in place: the
-// project's own TypeScript, resolved from `cwd`, checks the project's own
-// tsconfig through its compiler API, and a mutated file reads as its mutated
-// text from memory. No command runs, nothing is copied and nothing is written
-// (no emit, no build info). Each mutation names the lines of the test that
-// assert the claim: `"assertion": { "file": "src/a.test.ts", "lines": [12, 14] }`.
-// Each assertion first gets a baseline: no error on its lines without any
+// compiler that the project's `tsc` runs (the first node_modules/.bin/tsc from
+// `cwd` up, followed to its package) checks the project's own tsconfig, and a
+// mutated file reads as its mutated text from memory. TypeScript 6 or older
+// checks through its compiler API, TypeScript 7 through its unstable API with
+// a file-system hook; a repo whose `typescript` is an alias of TypeScript 6
+// and whose tsc is TypeScript 7 is checked by TypeScript 7. No command runs,
+// nothing is copied and nothing is written (no emit, no build info). Each
+// mutation names the lines of the test that assert the claim:
+// `"assertion": { "file": "src/a.test.ts", "lines": [12, 14] }`.
+// Each assertion first gets a baseline, which names the compiler
+// (`"compiler": "typescript 7.0.2"`): no error on its lines without any
 // mutation, or INVALID-BASELINE and its mutations SKIPPED. Then a mutation is
 // - CAUGHT when the claimed lines have an error: TS2578 ("Unused
 //   '@ts-expect-error' directive") on the directive, or any error on the line
@@ -20,8 +25,9 @@
 // - INVALID when a mutated file is not in the tsconfig's program, or the
 //   mutation gives a mutated file an error it did not have;
 // - SURVIVED otherwise.
-// The check reads sources, never built declarations: project references and
-// composite are dropped, as an editor reads the source of a reference.
+// The check reads sources, never built declarations: TypeScript 6 drops
+// project references and composite, and TypeScript 7's API follows a
+// reference to its source, as an editor reads the source of a reference.
 //
 //   { "cwd": "/abs/packages/launchd", "typecheck": "tsconfig.spec.json",
 //     "mutations": [{ "id": "T1", "claim": "...", "edits": [...],
@@ -93,7 +99,7 @@ import { isAbsolute, join, relative, resolve } from 'node:path';
 import { text } from 'node:stream/consumers';
 import { pathToFileURL } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
-import { projectTypeScript, typeChecker } from './type-check.mjs';
+import { projectChecker } from './type-check.mjs';
 
 function badSpec(reason) {
   console.error(reason);
@@ -309,20 +315,29 @@ async function proveInMemory(mutation, original) {
 }
 
 // The type mode: each mutant is a text in the memory of this process, which
-// the project's own TypeScript reads in place of the file on disk.
-function proveTypes() {
-  let ts;
-  let check;
+// the compiler of the project's tsc reads in place of the file on disk.
+async function proveTypes() {
+  let checker;
+  let unmutated;
   try {
-    ts = projectTypeScript(spec.cwd);
-    check = typeChecker(ts, resolve(spec.cwd, spec.typecheck));
+    checker = await projectChecker(spec.cwd, resolve(spec.cwd, spec.typecheck));
+    unmutated = checker.check(new Map());
   } catch (error) {
+    // undefined when no compiler was found; else it stops TypeScript 7's server.
+    checker?.close();
     badSpec(error.message);
   }
+  try {
+    proveWith(checker, unmutated);
+  } finally {
+    checker.close();
+  }
+}
+
+function proveWith({ compiler, check }, unmutated) {
   const claimed = ({ file, lines: [first, last] }) => (error) => error.file === pathOf(file) && error.line >= first && error.line <= last;
   const asText = (error) => `${relative(spec.cwd, error.file)}:${error.line} TS${error.code} ${error.message}`;
 
-  const unmutated = check(new Map());
   const baselines = new Map();
   for (const { assertion } of spec.mutations) {
     const key = JSON.stringify(assertion);
@@ -334,6 +349,7 @@ function proveTypes() {
     emit({
       kind: 'baseline',
       typecheck: resolve(spec.cwd, spec.typecheck),
+      compiler,
       assertion,
       verdict: passed ? 'PASS' : 'INVALID-BASELINE',
       diagnostics,
@@ -430,7 +446,7 @@ async function proveRuntime() {
 
 const commandOf = (mutation) => mutation.command ?? spec.command;
 const counts = {};
-if (typeMode) proveTypes();
+if (typeMode) await proveTypes();
 else await proveRuntime();
 
 emit({ kind: 'summary', counts });

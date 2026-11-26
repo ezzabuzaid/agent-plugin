@@ -16,9 +16,14 @@ function nodeTests(args, reporter = 'spec') {
 }
 
 // No user git config, and no NODE_TEST_CONTEXT from this runner leaking into
-// the `node --test` that mutate spawns.
+// the `node --test` that mutate spawns. A mutation proof of this suite sets
+// NODE_OPTIONS and WRITE_TEST_MUTANT; they pass through, so its mutant reaches
+// the mutate.mjs and type-check.mjs that each test starts.
 function cleanEnv(root) {
-  return { PATH: process.env.PATH, HOME: root, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+  const proof = Object.fromEntries(['NODE_OPTIONS', 'WRITE_TEST_MUTANT']
+    .filter((name) => process.env[name] !== undefined)
+    .map((name) => [name, process.env[name]]));
+  return { PATH: process.env.PATH, HOME: root, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', ...proof };
 }
 
 // A plain directory of files: an in-memory run needs no git repo.
@@ -1245,8 +1250,9 @@ test('an in-memory mutation that makes the test hang is reported TIMEOUT and its
 });
 
 // A TypeScript project the way a user's repo looks to the type mode: its own
-// typescript installed in its node_modules, and a tsconfig that would emit.
-function typeProject(root, files) {
+// compilers installed in its node_modules, as npm install specs, and a
+// tsconfig that would emit.
+function typeProject(root, files, compilers) {
   const project = treeOf(root, {
     'package.json': '{ "name": "fixture", "private": true, "type": "module" }\n',
     'tsconfig.json': `${JSON.stringify({
@@ -1259,7 +1265,7 @@ function typeProject(root, files) {
     }, null, 2)}\n`,
     ...files,
   });
-  execFileSync('npm', ['install', 'typescript@6', '--no-save', '--no-package-lock', '--prefer-offline', '--no-audit', '--no-fund', '--ignore-scripts'], {
+  execFileSync('npm', ['install', ...compilers, '--no-save', '--no-package-lock', '--prefer-offline', '--no-audit', '--no-fund', '--ignore-scripts'], {
     cwd: project,
     stdio: 'ignore',
   });
@@ -1300,7 +1306,7 @@ const narrowLines = { file: 'src/path.test.ts', lines: [3, 8] };
 test('a type mutation that leaves the @ts-expect-error unused is CAUGHT as TS2578 after a clean baseline, and no file of the project changes', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
-    const project = typeProject(root, { 'src/path.ts': pathSource, 'src/path.test.ts': pathTypeTest });
+    const project = typeProject(root, { 'src/path.ts': pathSource, 'src/path.test.ts': pathTypeTest }, ['typescript@6']);
     const before = filesOf(project);
 
     const { status, lines, of } = await mutate(root, {
@@ -1330,7 +1336,7 @@ test('a type mutation that leaves the @ts-expect-error unused is CAUGHT as TS257
 test('a type mutation that loosens a guard to boolean is CAUGHT by the error it causes on the asserting line', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
-    const project = typeProject(root, { 'src/path.ts': pathSource, 'src/path.test.ts': pathTypeTest });
+    const project = typeProject(root, { 'src/path.ts': pathSource, 'src/path.test.ts': pathTypeTest }, ['typescript@6']);
 
     const { status, of } = await mutate(root, {
       cwd: project,
@@ -1354,7 +1360,7 @@ test('a type mutation that loosens a guard to boolean is CAUGHT by the error it 
 test("a type mutation that breaks the mutated file's own syntax is INVALID, not CAUGHT", async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
-    const project = typeProject(root, { 'src/path.ts': pathSource, 'src/path.test.ts': pathTypeTest });
+    const project = typeProject(root, { 'src/path.ts': pathSource, 'src/path.test.ts': pathTypeTest }, ['typescript@6']);
 
     const { status, of } = await mutate(root, {
       cwd: project,
@@ -1378,7 +1384,7 @@ test("a type mutation that breaks the mutated file's own syntax is INVALID, not 
 test('a type mutation the claimed lines do not see is SURVIVED', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
-    const project = typeProject(root, { 'src/path.ts': pathSource, 'src/path.test.ts': pathTypeTest });
+    const project = typeProject(root, { 'src/path.ts': pathSource, 'src/path.test.ts': pathTypeTest }, ['typescript@6']);
 
     const { status, of } = await mutate(root, {
       cwd: project,
@@ -1403,7 +1409,7 @@ test('claimed lines that have a type error without any mutation are INVALID-BASE
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
     const unusedDirective = pathTypeTest.replace('const unchecked: AbsolutePath = resolved;', "const unchecked: AbsolutePath = '/a';");
-    const project = typeProject(root, { 'src/path.ts': pathSource, 'src/path.test.ts': unusedDirective });
+    const project = typeProject(root, { 'src/path.ts': pathSource, 'src/path.test.ts': unusedDirective }, ['typescript@6']);
 
     const { status, lines, of } = await mutate(root, {
       cwd: project,
@@ -1433,7 +1439,7 @@ test('a type mutation of a file outside the program of the tsconfig is INVALID, 
       'src/path.ts': pathSource,
       'src/path.test.ts': pathTypeTest,
       'scripts/limit.ts': 'export const limit = 10;\n',
-    });
+    }, ['typescript@6']);
 
     const { status, of } = await mutate(root, {
       cwd: project,
@@ -1449,6 +1455,181 @@ test('a type mutation of a file outside the program of the tsconfig is INVALID, 
     assert.equal(status, 0);
     assert.equal(of('T6').verdict, 'INVALID');
     assert.match(of('T6').reason, /not in the program of .*tsconfig\.json: scripts\/limit\.ts/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// The setup of a repo whose typecheck runs TypeScript 7 while the package
+// named `typescript` is TypeScript 6 for tools that need its compiler API:
+// node_modules/.bin/tsc is TypeScript 7's.
+const dualCompilers = ['typescript@npm:@typescript/typescript6@6', '@typescript/native@npm:typescript@7'];
+
+// A class whose variance annotation on I matters to TypeScript 6 and not to
+// TypeScript 7 (zukhruf's FusionRetriever, reduced): without `out` on I,
+// TypeScript 6 still refuses a fusion of 2026 as a fusion of any year, and
+// TypeScript 7 accepts it.
+const fusionDeclarations = [
+  'export type Metadata = Readonly<Record<string, unknown>>;',
+  'export type Passage<M extends Metadata = Metadata> = { readonly id: string; readonly metadata: M };',
+  'export type Ranked<P extends Passage = Passage> = { readonly passage: P };',
+  "export type Rescored<I extends Ranked> = { [K in keyof I as Exclude<K, 'score'>]: I[K] } & { readonly score: number };",
+  'export type Result<P extends Passage = Passage, I extends Ranked<P> = Ranked<P>> = { readonly passages: readonly I[] };',
+  "type Fields<P extends Passage> = { readonly [F in keyof P & 'source']: P[F] } & { readonly [K in keyof P['metadata'] & string as `metadata.${K}`]: P['metadata'][K] };",
+  'export type Filter<P extends Passage = Passage> = { [F in keyof Fields<P>]: { readonly field: F; readonly value: Fields<P>[F] } }[keyof Fields<P>];',
+  'export type Options<P extends Passage = Passage> = { readonly filter?: Filter<P> };',
+  'export interface Retriever<in Q = string, P extends Passage = Passage, out I extends Ranked<P> = Ranked<P>> {',
+  '  readonly retrieve: (query: Q, options?: Options<P>) => Promise<Result<P, I>>;',
+  '}',
+  'export declare class Fusion<in Q = string, in out P extends Passage = Passage, out I extends Ranked<P> = Ranked<P>> implements Retriever<Q, P, Rescored<I>> {',
+  '  #private;',
+  '  retrieve(query: Q, options?: Options<P>): Promise<Result<P, Rescored<I>>>;',
+  '}',
+  '',
+].join('\n');
+const fusionTypeTest = [
+  "import type { Fusion, Passage } from './fusion.d.ts';",
+  'declare const narrow: Fusion<string, Passage<{ readonly year: 2026 }>>;',
+  '// @ts-expect-error a fusion of 2026 is not a fusion of any year.',
+  'export const wide: Fusion<string, Passage<{ readonly year: number }>> = narrow;',
+  '',
+].join('\n');
+
+test('with typescript aliased to TypeScript 6 and tsc running TypeScript 7, the verdict is the one of TypeScript 7, the compiler that tsc runs', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
+  try {
+    const project = typeProject(root, { 'src/fusion.d.ts': fusionDeclarations, 'src/fusion.test.ts': fusionTypeTest }, dualCompilers);
+
+    const { status, lines, of } = await mutate(root, {
+      cwd: project,
+      typecheck: 'tsconfig.json',
+      mutations: [{
+        id: 'D1',
+        claim: 'a fusion of 2026 is not a fusion of any year',
+        edits: [{ file: 'src/fusion.d.ts', find: 'out I extends Ranked<P> = Ranked<P>> implements', replace: 'I extends Ranked<P> = Ranked<P>> implements' }],
+        assertion: { file: 'src/fusion.test.ts', lines: [3, 4] },
+      }],
+    });
+
+    assert.equal(status, 0);
+    const baseline = lines.find((line) => line.kind === 'baseline');
+    assert.equal(baseline.verdict, 'PASS');
+    assert.match(baseline.compiler, /^typescript 7\./);
+    assert.equal(of('D1').verdict, 'CAUGHT');
+    assert.deepEqual(of('D1').diagnostics.map(({ line, code }) => ({ line, code })), [{ line: 3, code: 2578 }]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('in a project of TypeScript 7 alone, a type mutation that leaves the @ts-expect-error unused is CAUGHT as TS2578, and no file of the project changes', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
+  try {
+    const project = typeProject(root, { 'src/path.ts': pathSource, 'src/path.test.ts': pathTypeTest }, ['typescript@7']);
+    const before = filesOf(project);
+
+    const { status, lines, of } = await mutate(root, {
+      cwd: project,
+      typecheck: 'tsconfig.json',
+      mutations: [{
+        id: 'S1',
+        claim: 'a plain string is not an AbsolutePath',
+        edits: [{ file: 'src/path.ts', find: 'AbsolutePath = `/${string}`', replace: 'AbsolutePath = string' }],
+        assertion: narrowLines,
+      }],
+    });
+
+    assert.equal(status, 0);
+    const baseline = lines.find((line) => line.kind === 'baseline');
+    assert.equal(baseline.verdict, 'PASS');
+    assert.match(baseline.compiler, /^typescript 7\./);
+    assert.equal(of('S1').verdict, 'CAUGHT');
+    assert.deepEqual(of('S1').diagnostics.map(({ file, line, code }) => ({ file, line, code })), [{ file: join(project, 'src/path.test.ts'), line: 4, code: 2578 }]);
+    assert.equal(of('S1').drift, false);
+    assert.deepEqual(filesOf(project), before);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('under TypeScript 7, a mutant that breaks its own syntax and a mutant outside the program are INVALID, the run exits, and no file of the project changes', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
+  try {
+    const project = typeProject(root, {
+      'src/path.ts': pathSource,
+      'src/path.test.ts': pathTypeTest,
+      'scripts/limit.ts': 'export const limit = 10;\n',
+    }, ['typescript@7']);
+    const before = filesOf(project);
+
+    const { status, of } = await mutate(root, {
+      cwd: project,
+      typecheck: 'tsconfig.json',
+      mutations: [
+        {
+          id: 'S2',
+          claim: 'only isAbsolutePath narrows a string to an AbsolutePath',
+          edits: [{ file: 'src/path.ts', find: "path.startsWith('/');", replace: "path.startsWith('/';" }],
+          assertion: narrowLines,
+        },
+        {
+          id: 'S3',
+          claim: 'a plain string is not an AbsolutePath',
+          edits: [{ file: 'scripts/limit.ts', find: '10', replace: '11' }],
+          assertion: narrowLines,
+        },
+      ],
+    });
+
+    assert.equal(status, 0);
+    assert.equal(of('S2').verdict, 'INVALID');
+    assert.match(of('S2').reason, /the mutant does not compile: src\/path\.ts:4 TS1005/);
+    assert.equal(of('S3').verdict, 'INVALID');
+    assert.match(of('S3').reason, /not in the program of .*tsconfig\.json: scripts\/limit\.ts/);
+    assert.deepEqual(filesOf(project), before);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("under TypeScript 7, a mutant in the source of a referenced project is checked, not the referenced project's built declarations", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
+  try {
+    const project = typeProject(root, {
+      'tsconfig.json': `${JSON.stringify({
+        compilerOptions: { target: 'ESNext', module: 'NodeNext', strict: true, types: [], noEmit: true, allowImportingTsExtensions: true },
+        include: ['src/**/*.ts'],
+        references: [{ path: './limits' }],
+      }, null, 2)}\n`,
+      'limits/tsconfig.json': `${JSON.stringify({
+        compilerOptions: { target: 'ESNext', module: 'NodeNext', strict: true, types: [], composite: true, rootDir: 'src', outDir: 'dist' },
+        include: ['src/**/*.ts'],
+      }, null, 2)}\n`,
+      'limits/src/limit.ts': 'export type Limit = 10;\n',
+      // As the last build left it.
+      'limits/dist/limit.d.ts': 'export type Limit = 10;\n',
+      'src/limit.test.ts': [
+        "import type { Limit } from '../limits/src/limit.ts';",
+        '// @ts-expect-error eleven is over the limit.',
+        'export const over: Limit = 11;',
+        '',
+      ].join('\n'),
+    }, ['typescript@7']);
+
+    const { status, of } = await mutate(root, {
+      cwd: project,
+      typecheck: 'tsconfig.json',
+      mutations: [{
+        id: 'R1',
+        claim: 'eleven is over the limit',
+        edits: [{ file: 'limits/src/limit.ts', find: 'Limit = 10', replace: 'Limit = number' }],
+        assertion: { file: 'src/limit.test.ts', lines: [2, 3] },
+      }],
+    });
+
+    assert.equal(status, 0);
+    assert.equal(of('R1').verdict, 'CAUGHT');
+    assert.deepEqual(of('R1').diagnostics.map(({ line, code }) => ({ line, code })), [{ line: 2, code: 2578 }]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
