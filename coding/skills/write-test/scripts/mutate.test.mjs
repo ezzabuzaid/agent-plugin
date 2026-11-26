@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { constants as osConstants, tmpdir } from 'node:os';
@@ -9,7 +8,6 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const mutateScript = fileURLToPath(new URL('./mutate.mjs', import.meta.url));
-const copyScript = fileURLToPath(new URL('./scratch-copy.mjs', import.meta.url));
 const evidenceReporter = fileURLToPath(new URL('./node-evidence.mjs', import.meta.url));
 
 function nodeTests(args, reporter = 'spec') {
@@ -18,24 +16,19 @@ function nodeTests(args, reporter = 'spec') {
 }
 
 // No user git config, and no NODE_TEST_CONTEXT from this runner leaking into
-// the `node --test` that mutate spawns inside the copy.
+// the `node --test` that mutate spawns.
 function cleanEnv(root) {
   return { PATH: process.env.PATH, HOME: root, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
 }
 
-// A git repo holding `files`, copied by the real scratch-copy, as a prover would.
-function copyOf(root, files) {
-  const repo = join(root, 'repo');
+// A plain directory of files: an in-memory run needs no git repo.
+function treeOf(root, files) {
+  const tree = join(root, 'tree');
   for (const [path, content] of Object.entries(files)) {
-    mkdirSync(dirname(join(repo, path)), { recursive: true });
-    writeFileSync(join(repo, path), content);
+    mkdirSync(dirname(join(tree, path)), { recursive: true });
+    writeFileSync(join(tree, path), content);
   }
-  execFileSync('git', ['init', '-q'], { cwd: repo, env: cleanEnv(root) });
-  const copy = join(root, `copy-${randomUUID()}`);
-  execFileSync(process.execPath, [copyScript, '--repo', repo, '--dest', copy, '--min-free-gb', '0'], {
-    env: cleanEnv(root),
-  });
-  return { repo, copy };
+  return tree;
 }
 
 // Async on purpose: a hung mutate must not block this runner's own timeout.
@@ -76,52 +69,24 @@ const clampTest = [
 test('a run started inside the original tree, with the spec on stdin, reports on stdout and leaves no file in that tree', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
-    const { repo, copy } = copyOf(root, { 'apps/cli/src/clamp.mjs': clampSource, 'apps/cli/src/clamp.test.mjs': clampTest });
-    const before = readdirSync(repo, { recursive: true }).sort();
+    const tree = treeOf(root, { 'apps/cli/src/clamp.mjs': clampSource, 'apps/cli/src/clamp.test.mjs': clampTest });
+    const before = readdirSync(tree, { recursive: true }).sort();
 
     // Where a prover's shell is left when its `cd` to its scratch area fails.
     const { status, of } = await mutate(
       root,
       {
-        copy,
+        cwd: tree,
         command: nodeTests(['apps/cli/src/']),
         timeoutSeconds: 60,
         mutations: [{ id: 'M1', claim: 'clamp caps at ten', edits: [{ file: 'apps/cli/src/clamp.mjs', find: '10', replace: '11' }] }],
       },
-      { cwd: join(repo, 'apps/cli/src') },
+      { cwd: join(tree, 'apps/cli/src') },
     );
 
     assert.equal(status, 0);
     assert.equal(of('M1').verdict, 'CAUGHT');
-    assert.deepEqual(readdirSync(repo, { recursive: true }).sort(), before);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('a relative copy path is refused before any command runs, so the directory the shell is in is never mutated', async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
-  try {
-    const { repo } = copyOf(root, { 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
-    const runs = join(root, 'runs.log');
-
-    // From a shell left in the original tree, "." names the original tree.
-    const { status, stderr, lines } = await mutate(
-      root,
-      {
-        copy: '.',
-        command: nodeTests(['src/']),
-        env: { RUNS_FILE: runs },
-        timeoutSeconds: 60,
-        mutations: [{ id: 'M1', claim: 'clamp caps at ten', edits: [{ file: 'src/clamp.mjs', find: '10', replace: '11' }] }],
-      },
-      { cwd: repo },
-    );
-
-    assert.equal(status, 1);
-    assert.match(stderr, /"copy" must be the absolute path/);
-    assert.deepEqual(lines, []);
-    assert.equal(existsSync(runs), false, 'no baseline or mutation ran in the original tree');
+    assert.deepEqual(readdirSync(tree, { recursive: true }).sort(), before);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -131,9 +96,9 @@ test('a spec file named as an argument is refused at once, without waiting on st
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   let child;
   try {
-    const { copy } = copyOf(root, { 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
+    const tree = treeOf(root, { 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
     const specPath = join(root, 'spec.json');
-    writeFileSync(specPath, JSON.stringify({ copy, command: nodeTests(['src/']), mutations: [] }));
+    writeFileSync(specPath, JSON.stringify({ cwd: tree, command: nodeTests(['src/']), mutations: [] }));
 
     // stdin stays open, like a terminal's: a mutate that read it would wait until killed.
     child = spawn(process.execPath, [mutateScript, specPath], {
@@ -157,43 +122,7 @@ test('a spec file named as an argument is refused at once, without waiting on st
   }
 });
 
-test('an edit that does not match exactly once fails to apply, the tests never run, and no earlier edit stays applied', async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
-  try {
-    const { copy } = copyOf(root, { 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
-    const runs = join(root, 'runs.log');
-
-    const { status, of } = await mutate(root, {
-      copy,
-      command: nodeTests(['src/']),
-      env: { RUNS_FILE: runs },
-      timeoutSeconds: 60,
-      mutations: [
-        { id: 'absent', claim: 'clamp caps at ten', edits: [{ file: 'src/clamp.mjs', find: 'Math.max', replace: 'Math.min' }] },
-        {
-          id: 'partial',
-          claim: 'clamp caps at ten',
-          edits: [
-            { file: 'src/clamp.mjs', find: '10', replace: '11' },
-            { file: 'src/clamp.mjs', find: 'n', replace: 'x' },
-          ],
-        },
-      ],
-    });
-
-    assert.equal(status, 0);
-    assert.equal(of('absent').verdict, 'APPLY-FAILED');
-    assert.match(of('absent').reason, /edit 1 .*matched 0 times/);
-    assert.equal(of('partial').verdict, 'APPLY-FAILED');
-    assert.match(of('partial').reason, /edit 2 .*matched \d+ times/);
-    assert.equal(readFileSync(runs, 'utf8'), 'run\n', 'only the baseline ran the tests');
-    assert.equal(readFileSync(join(copy, 'src/clamp.mjs'), 'utf8'), clampSource);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('a command that fails without any mutation is reported INVALID-BASELINE, its mutations are skipped, and the hint names what the copy left out', async () => {
+test('a command that fails without any mutation is reported INVALID-BASELINE, and its mutations are skipped', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
     const needsEnv = [
@@ -202,15 +131,14 @@ test('a command that fails without any mutation is reported INVALID-BASELINE, it
       "test('reads the token', async () => { readFileSync('.env', 'utf8'); });",
       '',
     ].join('\n');
-    const { copy } = copyOf(root, {
-      '.gitignore': '.env\n',
-      '.env': 'TOKEN=secret\n',
+    // No .env in the tree, so the test fails before any mutation.
+    const tree = treeOf(root, {
       'src/clamp.mjs': clampSource,
       'src/token.test.mjs': needsEnv,
     });
 
     const { status, lines, of } = await mutate(root, {
-      copy,
+      cwd: tree,
       command: nodeTests(['src/']),
       timeoutSeconds: 60,
       mutations: [{ id: 'M1', claim: 'clamp caps at ten', edits: [{ file: 'src/clamp.mjs', find: '10', replace: '11' }] }],
@@ -219,10 +147,8 @@ test('a command that fails without any mutation is reported INVALID-BASELINE, it
     const baseline = lines.find((line) => line.kind === 'baseline');
     assert.equal(status, 0);
     assert.equal(baseline.verdict, 'INVALID-BASELINE');
-    assert.match(baseline.hint, /\.env/);
-    assert.match(baseline.hint, /--include-ignored/);
     assert.equal(of('M1').verdict, 'SKIPPED');
-    assert.equal(readFileSync(join(copy, 'src/clamp.mjs'), 'utf8'), clampSource);
+    assert.equal(readFileSync(join(tree, 'src/clamp.mjs'), 'utf8'), clampSource);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -232,7 +158,7 @@ test('a per-mutation command gets its own baseline, identical commands share one
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
     const alreadyBroken = "import test from 'node:test';\ntest('was red before', async () => { throw new Error('red'); });\n";
-    const { copy } = copyOf(root, {
+    const tree = treeOf(root, {
       'src/clamp.mjs': clampSource,
       'src/clamp.test.mjs': clampTest,
       'src/broken.test.mjs': alreadyBroken,
@@ -243,7 +169,7 @@ test('a per-mutation command gets its own baseline, identical commands share one
     const lift = { file: 'src/clamp.mjs', find: '10', replace: '11' };
 
     const { lines, of } = await mutate(root, {
-      copy,
+      cwd: tree,
       command: clampOnly,
       env: { RUNS_FILE: runs },
       timeoutSeconds: 60,
@@ -289,11 +215,11 @@ test('a mutation that makes the test hang is reported TIMEOUT and its whole proc
       '});',
       '',
     ].join('\n');
-    const { copy } = copyOf(root, { 'src/flag.mjs': 'export const hang = false;\n', 'src/hang.test.mjs': hangTest });
+    const tree = treeOf(root, { 'src/flag.mjs': 'export const hang = false;\n', 'src/hang.test.mjs': hangTest });
     const started = Date.now();
 
     const { of } = await mutate(root, {
-      copy,
+      cwd: tree,
       command: nodeTests(['src/']),
       timeoutSeconds: 3,
       mutations: [
@@ -307,7 +233,7 @@ test('a mutation that makes the test hang is reported TIMEOUT and its whole proc
     // A killed process stays a zombie until it is reaped, so the kill takes effect a moment later.
     await t.waitFor(() => assert.throws(() => process.kill(grandchild, 0), { code: 'ESRCH' }), { timeout: 10_000 });
     assert.ok(Date.now() - started < 20_000, 'the timeout bounded the run');
-    assert.equal(readFileSync(join(copy, 'src/flag.mjs'), 'utf8'), 'export const hang = false;\n');
+    assert.equal(readFileSync(join(tree, 'src/flag.mjs'), 'utf8'), 'export const hang = false;\n');
   } finally {
     try {
       process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL');
@@ -320,7 +246,7 @@ test('a mutation that makes the test hang is reported TIMEOUT and its whole proc
 // that nobody has reaped. Mutate reads the group with a synchronous ps at the
 // timeout, so a leader that exits during that read is such a zombie. The slow ps
 // holds this window open; the race itself is real and only rarely this wide.
-test('a test run that exits just as its timeout fires is reported TIMEOUT, and mutate restores the file instead of crashing', { timeout: 30_000 }, async () => {
+test('a test run that exits just as its timeout fires is reported TIMEOUT, and mutate leaves the file unchanged instead of crashing', { timeout: 30_000 }, async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
     const bin = join(root, 'bin');
@@ -336,10 +262,10 @@ test('a test run that exits just as its timeout fires is reported TIMEOUT, and m
       '});',
       '',
     ].join('\n');
-    const { copy } = copyOf(root, { 'src/flag.mjs': 'export const delay = 0;\n', 'src/late.test.mjs': lateTest });
+    const tree = treeOf(root, { 'src/flag.mjs': 'export const delay = 0;\n', 'src/late.test.mjs': lateTest });
 
     const { status, stderr, of } = await mutate(root, {
-      copy,
+      cwd: tree,
       command: nodeTests(['src/']),
       timeoutSeconds: 3,
       mutations: [
@@ -350,7 +276,7 @@ test('a test run that exits just as its timeout fires is reported TIMEOUT, and m
     assert.doesNotMatch(stderr, /EPERM/);
     assert.equal(status, 0, stderr);
     assert.equal(of('L1')?.verdict, 'TIMEOUT');
-    assert.equal(readFileSync(join(copy, 'src/flag.mjs'), 'utf8'), 'export const delay = 0;\n');
+    assert.equal(readFileSync(join(tree, 'src/flag.mjs'), 'utf8'), 'export const delay = 0;\n');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -360,7 +286,7 @@ test('a mutation that breaks the import, or fails the run with no failing test, 
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
     const check = "import { strict } from './src/flag.mjs';\nif (strict) process.exit(2);\n";
-    const { copy } = copyOf(root, {
+    const tree = treeOf(root, {
       'src/clamp.mjs': clampSource,
       'src/clamp.test.mjs': clampTest,
       'src/flag.mjs': 'export const strict = false;\n',
@@ -368,7 +294,7 @@ test('a mutation that breaks the import, or fails the run with no failing test, 
     });
 
     const { of } = await mutate(root, {
-      copy,
+      cwd: tree,
       // Tests, then a second step, the way an nx target chains a build or lint.
       command: ['sh', '-c', `${nodeTests(['src/']).map((arg) => `'${arg.replaceAll("'", "'\\''")}'`).join(' ')} && \"${process.execPath}\" check.mjs`],
       timeoutSeconds: 60,
@@ -403,10 +329,10 @@ test('a failing run with no test summary in its output is reported UNPARSED with
       `process.exitCode = spawnSync(process.execPath, ${JSON.stringify(nodeTests(['src/clamp.test.mjs']).slice(1))}, { stdio: 'inherit' }).status;`,
       '',
     ].join('\n');
-    const { copy } = copyOf(root, { 'src/flag.mjs': 'export const strict = false;\n', 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest, 'run.mjs': quietRunner });
+    const tree = treeOf(root, { 'src/flag.mjs': 'export const strict = false;\n', 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest, 'run.mjs': quietRunner });
 
     const { of } = await mutate(root, {
-      copy,
+      cwd: tree,
       command: [process.execPath, 'run.mjs'],
       timeoutSeconds: 60,
       mutations: [{ id: 'Q1', claim: 'the check passes', edits: [{ file: 'src/flag.mjs', find: 'false', replace: 'true' }] }],
@@ -437,10 +363,10 @@ test('a character split across two chunks of output stays whole in the excerpt',
       `process.exitCode = spawnSync(process.execPath, ${JSON.stringify(nodeTests(['src/clamp.test.mjs']).slice(1))}, { stdio: 'inherit' }).status;`,
       '',
     ].join('\n');
-    const { copy } = copyOf(root, { 'src/flag.mjs': 'export const strict = false;\n', 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest, 'run.mjs': splitRunner });
+    const tree = treeOf(root, { 'src/flag.mjs': 'export const strict = false;\n', 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest, 'run.mjs': splitRunner });
 
     const { of } = await mutate(root, {
-      copy,
+      cwd: tree,
       command: [process.execPath, 'run.mjs'],
       timeoutSeconds: 60,
       mutations: [{ id: 'S1', claim: 'the check passes', edits: [{ file: 'src/flag.mjs', find: 'false', replace: 'true' }] }],
@@ -452,47 +378,8 @@ test('a character split across two chunks of output stays whole in the excerpt',
   }
 });
 
-test('a mutation that never reaches the built output the tests import is reported INVALID, not SURVIVED', async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
-  try {
-    const distTest = [
-      "import test from 'node:test';",
-      "import assert from 'node:assert/strict';",
-      "import { clamp } from '../dist/clamp.mjs';",
-      "test('clamps to ten', () => { assert.equal(clamp(42), 10); });",
-      '',
-    ].join('\n');
-    // The tests import dist, and the command never rebuilds it: a stale build.
-    const { copy } = copyOf(root, {
-      '.gitignore': 'dist/\n',
-      'src/clamp.mjs': clampSource,
-      'dist/clamp.mjs': clampSource,
-      'test/clamp.test.mjs': distTest,
-    });
-
-    const { of } = await mutate(root, {
-      copy,
-      command: nodeTests(['test/']),
-      timeoutSeconds: 60,
-      mutations: [
-        {
-          id: 'B1',
-          claim: 'clamp caps at ten',
-          edits: [{ file: 'src/clamp.mjs', find: 'Math.min(n, 10)', replace: 'Math.min(n, 11)' }],
-          built: { file: 'dist/clamp.mjs', contains: 'Math.min(n, 11)' },
-        },
-      ],
-    });
-
-    assert.equal(of('B1').verdict, 'INVALID');
-    assert.match(of('B1').reason, /not in the build.*dist\/clamp\.mjs/);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 for (const signal of ['SIGTERM', 'SIGINT']) {
-  test(`${signal} to mutate in the middle of a run restores the mutated file in the copy`, { timeout: 30_000 }, async (t) => {
+  test(`${signal} to mutate in the middle of a run leaves the mutated file unchanged on disk`, { timeout: 30_000 }, async (t) => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
     let child;
     try {
@@ -508,11 +395,11 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
         '});',
         '',
       ].join('\n');
-      const { copy } = copyOf(root, { 'src/flag.mjs': 'export const hang = false;\n', 'src/hang.test.mjs': hangTest });
+      const tree = treeOf(root, { 'src/flag.mjs': 'export const hang = false;\n', 'src/hang.test.mjs': hangTest });
       child = spawn(process.execPath, [mutateScript], { cwd: root, env: cleanEnv(root), stdio: ['pipe', 'ignore', 'ignore'] });
       child.stdin.end(
         JSON.stringify({
-          copy,
+          cwd: tree,
           command: nodeTests(['src/']),
           timeoutSeconds: 60,
           mutations: [{ id: 'S1', claim: 'the test finishes', edits: [{ file: 'src/flag.mjs', find: 'false', replace: 'true' }] }],
@@ -527,9 +414,9 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
       child.kill(signal);
       const [code] = await once(child, 'close');
 
-      // 128 + the signal's number is what the handler exits with after a verified restore.
+      // 128 + the signal's number is what the handler exits with once it has killed the running group.
       assert.equal(code, 128 + osConstants.signals[signal]);
-      assert.equal(readFileSync(join(copy, 'src/flag.mjs'), 'utf8'), 'export const hang = false;\n');
+      assert.equal(readFileSync(join(tree, 'src/flag.mjs'), 'utf8'), 'export const hang = false;\n');
       // A killed process stays a zombie until it is reaped, so the kill takes effect a moment later.
       await t.waitFor(() => assert.throws(() => process.kill(Number(readFileSync(pidFile, 'utf8')), 0), { code: 'ESRCH' }), { timeout: 10_000 });
     } finally {
@@ -539,68 +426,13 @@ for (const signal of ['SIGTERM', 'SIGINT']) {
   });
 }
 
-test('a restore that cannot write the file back fails loudly instead of leaving a mutated copy silently', async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
-  try {
-    const lockingTest = [
-      "import test from 'node:test';",
-      "import assert from 'node:assert/strict';",
-      "import { chmodSync } from 'node:fs';",
-      "import { clamp } from './clamp.mjs';",
-      "test('clamps to ten', () => {",
-      "  if (clamp(42) !== 10) chmodSync(new URL('./clamp.mjs', import.meta.url), 0o444);",
-      '  assert.equal(clamp(42), 10);',
-      '});',
-      '',
-    ].join('\n');
-    const { copy } = copyOf(root, { 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': lockingTest });
-
-    const { status, of } = await mutate(root, {
-      copy,
-      command: nodeTests(['src/']),
-      timeoutSeconds: 60,
-      mutations: [{ id: 'R1', claim: 'clamp caps at ten', edits: [{ file: 'src/clamp.mjs', find: '10', replace: '11' }] }],
-    });
-
-    assert.equal(status, 3);
-    assert.equal(of('R1').restored, false);
-    assert.match(of('R1').restoreError, /EACCES/);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('an original file edited after the copy was made marks the result as drifted, and the copy is restored to its own content', async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
-  try {
-    const { repo, copy } = copyOf(root, { 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
-    // Another session keeps editing the real tree while the proof runs.
-    const editedInRepo = 'export function clamp(n) {\n  return Math.min(n, 12);\n}\n';
-    writeFileSync(join(repo, 'src/clamp.mjs'), editedInRepo);
-
-    const { of } = await mutate(root, {
-      copy,
-      command: nodeTests(['src/']),
-      timeoutSeconds: 60,
-      mutations: [{ id: 'D1', claim: 'clamp caps at ten', edits: [{ file: 'src/clamp.mjs', find: '10', replace: '11' }] }],
-    });
-
-    assert.equal(of('D1').drift, true);
-    assert.equal(of('D1').restored, true);
-    assert.equal(readFileSync(join(copy, 'src/clamp.mjs'), 'utf8'), clampSource);
-    assert.equal(readFileSync(join(repo, 'src/clamp.mjs'), 'utf8'), editedInRepo);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
 test('a command that forces colored output is still parsed, and a caught mutation is reported CAUGHT', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
-    const { copy } = copyOf(root, { 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
+    const tree = treeOf(root, { 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
 
     const { of } = await mutate(root, {
-      copy,
+      cwd: tree,
       command: nodeTests(['src/']),
       env: { FORCE_COLOR: '1' },
       timeoutSeconds: 60,
@@ -614,23 +446,22 @@ test('a command that forces colored output is still parsed, and a caught mutatio
   }
 });
 
-test('a mutation the tests catch is reported CAUGHT with the failing assertion, from the spec cwd and env, and both trees end unchanged', async () => {
+test('a mutation the tests catch is reported CAUGHT with the failing assertion, from the spec cwd and env, and the file on disk keeps its original text', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
-    const { repo, copy } = copyOf(root, {
+    const tree = treeOf(root, {
       'packages/lib/src/clamp.mjs': clampSource,
       'packages/lib/src/clamp.test.mjs': clampTest,
     });
     const runs = join(root, 'runs.log');
 
     const { status, of } = await mutate(root, {
-      copy,
-      cwd: 'packages/lib',
+      cwd: join(tree, 'packages/lib'),
       command: nodeTests(['src/']),
       env: { RUNS_FILE: runs },
       timeoutSeconds: 60,
       mutations: [
-        { id: 'M1', claim: 'clamp caps at ten', edits: [{ file: 'packages/lib/src/clamp.mjs', find: '10', replace: '11' }] },
+        { id: 'M1', claim: 'clamp caps at ten', edits: [{ file: 'src/clamp.mjs', find: '10', replace: '11' }] },
       ],
     });
 
@@ -638,33 +469,8 @@ test('a mutation the tests catch is reported CAUGHT with the failing assertion, 
     assert.equal(of('M1').verdict, 'CAUGHT');
     assert.equal(of('M1').claim, 'clamp caps at ten');
     assert.match(of('M1').excerpt, /11 !== 10/);
-    assert.equal(of('M1').restored, true);
     assert.equal(readFileSync(runs, 'utf8'), 'run\nrun\n', 'the spec env reached the tests');
-    assert.equal(readFileSync(join(copy, 'packages/lib/src/clamp.mjs'), 'utf8'), clampSource);
-    assert.equal(readFileSync(join(repo, 'packages/lib/src/clamp.mjs'), 'utf8'), clampSource);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('a mutation the tests miss is reported SURVIVED and the copy is restored', async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
-  try {
-    // The test only checks a value above the cap, so lowering the floor goes unseen.
-    const floored = 'export function clamp(n) {\n  return Math.max(Math.min(n, 10), 0);\n}\n';
-    const { copy } = copyOf(root, { 'src/clamp.mjs': floored, 'src/clamp.test.mjs': clampTest });
-
-    const { status, of } = await mutate(root, {
-      copy,
-      command: nodeTests(['src/']),
-      timeoutSeconds: 60,
-      mutations: [{ id: 'F1', claim: 'clamp never goes below zero', edits: [{ file: 'src/clamp.mjs', find: ', 0)', replace: ', -5)' }] }],
-    });
-
-    assert.equal(status, 0);
-    assert.equal(of('F1').verdict, 'SURVIVED');
-    assert.equal(of('F1').restored, true);
-    assert.equal(readFileSync(join(copy, 'src/clamp.mjs'), 'utf8'), floored);
+    assert.equal(readFileSync(join(tree, 'packages/lib/src/clamp.mjs'), 'utf8'), clampSource);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -673,10 +479,10 @@ test('a mutation the tests miss is reported SURVIVED and the copy is restored', 
 test('TAP reporter output gives the same verdict and counts as the spec reporter', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
-    const { copy } = copyOf(root, { 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
+    const tree = treeOf(root, { 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
 
     const { of } = await mutate(root, {
-      copy,
+      cwd: tree,
       command: nodeTests(['src/'], 'tap'),
       timeoutSeconds: 60,
       mutations: [{ id: 'T1', claim: 'clamp caps at ten', edits: [{ file: 'src/clamp.mjs', find: '10', replace: '11' }] }],
@@ -693,14 +499,14 @@ test('the baseline reports how many tests the command ran, so a filter the targe
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
     const other = "import test from 'node:test';\ntest('unrelated one', () => {});\ntest('unrelated two', () => {});\n";
-    const { copy } = copyOf(root, {
+    const tree = treeOf(root, {
       'src/clamp.mjs': clampSource,
       'src/clamp.test.mjs': clampTest,
       'src/other.test.mjs': other,
     });
 
     const { lines } = await mutate(root, {
-      copy,
+      cwd: tree,
       // The prover meant one test; a target that drops the filter runs all three.
       command: nodeTests(['src/']),
       timeoutSeconds: 60,
@@ -724,10 +530,10 @@ test("a mutation that makes a test outlast node:test's own --test-timeout is CAU
       "test('finishes', async () => { if (hang) await new Promise(() => {}); });",
       '',
     ].join('\n');
-    const { copy } = copyOf(root, { 'src/flag.mjs': 'export const hang = false;\n', 'src/hang.test.mjs': hangTest });
+    const tree = treeOf(root, { 'src/flag.mjs': 'export const hang = false;\n', 'src/hang.test.mjs': hangTest });
 
     const { of } = await mutate(root, {
-      copy,
+      cwd: tree,
       // The target's own per-test timeout fires long before mutate's.
       command: nodeTests(['--test-timeout=1000', 'src/']),
       timeoutSeconds: 60,
@@ -758,10 +564,10 @@ test('a command that itself ignores SIGTERM is still killed after the grace peri
       '}',
       '',
     ].join('\n');
-    const { copy } = copyOf(root, { 'src/flag.mjs': 'export const hang = false;\n', 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest, 'run.mjs': stubbornRunner });
+    const tree = treeOf(root, { 'src/flag.mjs': 'export const hang = false;\n', 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest, 'run.mjs': stubbornRunner });
 
     const { of } = await mutate(root, {
-      copy,
+      cwd: tree,
       command: [process.execPath, 'run.mjs'],
       timeoutSeconds: 2,
       mutations: [{ id: 'K1', claim: 'the run finishes', edits: [{ file: 'src/flag.mjs', find: 'false', replace: 'true' }] }],
@@ -799,7 +605,7 @@ test('a test that fails because a module is missing or the disk is full is INVAL
       `test('saves the export', () => { writeFileSync(${JSON.stringify(join(volume.mountpoint, 'export.bin'))}, Buffer.alloc(size)); });`,
       '',
     ].join('\n');
-    const { copy } = copyOf(root, {
+    const tree = treeOf(root, {
       'src/clamp.mjs': clampSource,
       'src/clamp.test.mjs': clampTest,
       'src/size.mjs': 'export const size = 1024;\n',
@@ -807,7 +613,7 @@ test('a test that fails because a module is missing or the disk is full is INVAL
     });
 
     const { of } = await mutate(root, {
-      copy,
+      cwd: tree,
       command: nodeTests(['src/']),
       timeoutSeconds: 60,
       mutations: [
@@ -836,7 +642,7 @@ test('a test that fails because a module is missing or the disk is full is INVAL
 test('an empty filtered Node run is rejected before any mutation is applied', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
-    const { copy } = copyOf(root, {
+    const tree = treeOf(root, {
       'src/clamp.mjs': clampSource,
       'src/clamp.test.mjs': clampTest,
       'src/unregistered.test.mjs': "import test from 'node:test'; if (false) test('not registered', () => {});\n",
@@ -854,7 +660,7 @@ test('an empty filtered Node run is rejected before any mutation is applied', as
     ];
     for (const command of commands) {
       const { status, lines, of } = await mutate(root, {
-        copy, command,
+        cwd: tree, command,
         mutations: [{ id: 'empty', claim: 'clamp caps at ten', edits: [{ file: 'src/clamp.mjs', find: '10', replace: '11' }] }],
       });
       assert.equal(status, 0);
@@ -863,14 +669,14 @@ test('an empty filtered Node run is rejected before any mutation is applied', as
       assert.match(baseline.reason, /test evidence|no named tests/i);
       if (command.includes(`--test-reporter=${evidenceReporter}`)) assert.equal(baseline.tests.pass, 0);
       assert.equal(of('empty').verdict, 'SKIPPED');
-      assert.equal(readFileSync(join(copy, 'src/clamp.mjs'), 'utf8'), clampSource);
+      assert.equal(readFileSync(join(tree, 'src/clamp.mjs'), 'utf8'), clampSource);
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('a mutation that removes the selected tests is INVALID and restores its source', async () => {
+test('a mutation that removes the selected tests is INVALID and leaves its source unchanged on disk', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
     const flag = 'export const enabled = true;\n';
@@ -882,10 +688,10 @@ test('a mutation that removes the selected tests is INVALID and restores its sou
       "if (enabled) test('clamps to ten', () => assert.equal(clamp(42), 10));",
       '',
     ].join('\n');
-    const { copy } = copyOf(root, { 'src/flag.mjs': flag, 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': selected });
+    const tree = treeOf(root, { 'src/flag.mjs': flag, 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': selected });
     for (const reporter of ['spec', 'tap']) {
       const { status, lines, of } = await mutate(root, {
-        copy,
+        cwd: tree,
         command: nodeTests(['--test-name-pattern=^clamps to ten$', 'src/clamp.test.mjs'], reporter),
         mutations: [{ id: 'disappeared', claim: 'the selected assertion must execute', edits: [{ file: 'src/flag.mjs', find: 'true', replace: 'false' }] }],
       });
@@ -894,8 +700,7 @@ test('a mutation that removes the selected tests is INVALID and restores its sou
       assert.equal(of('disappeared').verdict, 'INVALID');
       assert.match(of('disappeared').reason, /no named tests executed/);
       assert.deepEqual(of('disappeared').tests, { run: 0, pass: 0, fail: 0, cancelled: 0 });
-      assert.equal(of('disappeared').restored, true);
-      assert.equal(readFileSync(join(copy, 'src/flag.mjs'), 'utf8'), flag);
+      assert.equal(readFileSync(join(tree, 'src/flag.mjs'), 'utf8'), flag);
     }
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -907,14 +712,14 @@ test('real named tests survive a project wrapper and file-like names without cou
   try {
     const floored = 'export function clamp(n) {\n  return Math.max(Math.min(n, 10), 0);\n}\n';
     const wrapper = "import { spawnSync } from 'node:child_process';\nprocess.exitCode = spawnSync(process.execPath, process.argv.slice(2), { stdio: 'inherit' }).status;\n";
-    const { copy } = copyOf(root, {
+    const tree = treeOf(root, {
       'run.mjs': wrapper,
       'src/clamp.mjs': floored,
       'src/clamp.test.mjs': clampTest.replace("'clamps to ten'", "'src/clamp.test.mjs'"),
       'src/other.test.mjs': "import test from 'node:test'; test('not selected', () => {});\n",
     });
     const { status, lines, of } = await mutate(root, {
-      copy,
+      cwd: tree,
       command: [process.execPath, 'run.mjs', ...nodeTests(['--test-name-pattern=^src/clamp', 'src/']).slice(1)],
       mutations: [
         { id: 'caught', claim: 'clamp caps at ten', edits: [{ file: 'src/clamp.mjs', find: 'n, 10', replace: 'n, 11' }] },
@@ -930,9 +735,7 @@ test('real named tests survive a project wrapper and file-like names without cou
     assert.match(of('caught').excerpt, /11 !== 10/);
     assert.equal(of('survived').verdict, 'SURVIVED');
     assert.deepEqual(of('survived').tests, { run: 1, pass: 1, fail: 0, cancelled: 0 });
-    assert.equal(of('caught').restored, true);
-    assert.equal(of('survived').restored, true);
-    assert.equal(readFileSync(join(copy, 'src/clamp.mjs'), 'utf8'), floored);
+    assert.equal(readFileSync(join(tree, 'src/clamp.mjs'), 'utf8'), floored);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -951,10 +754,10 @@ test('a runner that prefixes every output line with the project name still yield
       "child.on('close', (status) => (process.exitCode = status));",
       '',
     ].join('\n');
-    const { copy } = copyOf(root, { 'run.mjs': prefixing, 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
+    const tree = treeOf(root, { 'run.mjs': prefixing, 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
 
     const { status, lines, of } = await mutate(root, {
-      copy,
+      cwd: tree,
       command: [process.execPath, 'run.mjs', ...nodeTests(['src/']).slice(1)],
       timeoutSeconds: 60,
       mutations: [{ id: 'P1', claim: 'clamp caps at ten', edits: [{ file: 'src/clamp.mjs', find: '10', replace: '11' }] }],
@@ -976,10 +779,10 @@ test('a runner that prefixes every output line with the project name still yield
 test('a Node run with --test-force-exit still yields structured evidence beside the human reporter', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
   try {
-    const { copy } = copyOf(root, { 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
+    const tree = treeOf(root, { 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
 
     const { status, lines, of } = await mutate(root, {
-      copy,
+      cwd: tree,
       command: nodeTests(['--test-force-exit', 'src/']),
       timeoutSeconds: 60,
       mutations: [{ id: 'F1', claim: 'clamp caps at ten', edits: [{ file: 'src/clamp.mjs', find: '10', replace: '11' }] }],
@@ -995,16 +798,6 @@ test('a Node run with --test-force-exit still yields structured evidence beside 
     rmSync(root, { recursive: true, force: true });
   }
 });
-
-// A plain directory of files: an in-memory run needs no git repo and no copy.
-function treeOf(root, files) {
-  const tree = join(root, 'tree');
-  for (const [path, content] of Object.entries(files)) {
-    mkdirSync(dirname(join(tree, path)), { recursive: true });
-    writeFileSync(join(tree, path), content);
-  }
-  return tree;
-}
 
 test('an in-memory mutation of a file that no test process loads is INVALID, not SURVIVED', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
@@ -1116,7 +909,7 @@ test('an in-memory spec with a relative cwd is refused before any command runs',
     );
 
     assert.equal(status, 1);
-    assert.match(stderr, /without "copy", "cwd" must be the absolute directory/);
+    assert.match(stderr, /"cwd" must be the absolute directory/);
     assert.deepEqual(lines, []);
     assert.equal(existsSync(runs), false, 'no baseline or mutation ran');
   } finally {
@@ -1446,34 +1239,6 @@ test('an in-memory mutation that makes the test hang is reported TIMEOUT and its
     assert.equal(status, 0);
     assert.equal(of('H1').verdict, 'TIMEOUT');
     assert.ok(of('H1').killedPids.length > 0, 'the hung run had processes to kill');
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('an in-memory spec that asks for a build check is refused before any command runs', async () => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'wt-mutate-')));
-  try {
-    const tree = treeOf(root, { 'src/clamp.mjs': clampSource, 'src/clamp.test.mjs': clampTest });
-    const runs = join(root, 'runs.log');
-
-    const { status, stderr, lines } = await mutate(root, {
-      cwd: tree,
-      command: nodeTests(['src/']),
-      env: { RUNS_FILE: runs },
-      timeoutSeconds: 60,
-      mutations: [{
-        id: 'B1',
-        claim: 'clamp caps at ten',
-        edits: [{ file: 'src/clamp.mjs', find: '10', replace: '11' }],
-        built: { file: 'dist/clamp.mjs', contains: '11' },
-      }],
-    });
-
-    assert.equal(status, 1);
-    assert.match(stderr, /"built" checks the build output of a copy/);
-    assert.deepEqual(lines, []);
-    assert.equal(existsSync(runs), false, 'no baseline or mutation ran');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

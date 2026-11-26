@@ -27,20 +27,16 @@
 //     "mutations": [{ "id": "T1", "claim": "...", "edits": [...],
 //                     "assertion": { "file": "src/job/job.test.ts", "lines": [247, 254] } }] }
 //
-// For a claim a test run sees, a mutant lives in one of two places:
-// - In memory (no "copy"): each mutant exists only in the Node processes of its
-//   own run. mutant-hook.mjs, loaded through NODE_OPTIONS=--import, edits a
-//   file's source as Node loads it, so nothing is copied, written, rebuilt or
-//   restored, and other sessions keep building and testing the same tree. It
-//   reaches every Node process the run starts with its environment, a
-//   TypeScript source before Node strips its types, and require() as well as
-//   import. Edit the file the tests load: a source they import directly, or a
-//   dependency's built output. A file no process loaded is INVALID ("never
-//   loaded"); so is a process that clears its environment before loading it.
-// - In a scratch copy ("copy", made by scratch-copy.mjs): the edits are written
-//   into the copy and restored after each run. Use it for what a Node load hook
-//   cannot reach: CSS, JSON or Rust files, and code a bundler such as Vite
-//   transforms before Node loads it, where the repository allows a copy.
+// For a claim a test run sees, each mutant exists only in the memory of the
+// Node processes of its own run. mutant-hook.mjs, loaded through
+// NODE_OPTIONS=--import, edits a file's source as Node loads it, so nothing is
+// copied, written, rebuilt or restored, and other sessions keep building and
+// testing the same tree. It reaches every Node process the run starts with its
+// environment, a TypeScript source before Node strips its types, and require()
+// as well as import. Edit the file the tests load: a source they import
+// directly, or a dependency's built output. A file no process loaded is INVALID
+// ("never loaded"); so is a process that clears its environment before loading
+// it.
 //
 // The spec comes on stdin, the report goes to stdout, and the directory the
 // command runs in is absolute, so nothing a run reads or writes depends on the
@@ -49,9 +45,7 @@
 //
 // The spec:
 //   {
-//     "copy": "/abs/path/to/copy",             // optional, the path scratch-copy printed
-//     "cwd": "/abs/dir",                       // where the command runs: absolute in memory;
-//                                              // with a copy, optional and relative to it
+//     "cwd": "/abs/dir",                       // where the command runs, absolute
 //     "command": ["npx", "nx", "run", "queue:test", "--skip-nx-cache"],
 //     "env": { "NX_DAEMON": "false" },         // optional, added to this process's env
 //     "timeoutSeconds": 180,                   // per run, default 180
@@ -60,25 +54,22 @@
 //         "id": "M1",
 //         "claim": "ledger row: what breaks",
 //         "edits": [{ "file": "src/index.ts", "find": "exact text", "replace": "new text" }],
-//         "command": [...],                    // optional override, baselined on its own
-//         "built": { "file": "dist/index.js", "contains": "new text" }  // optional, copy only
+//         "command": [...]                     // optional override, baselined on its own
 //       }
 //     ]
 //   }
 //
-// `file` paths are relative to the copy, or in memory to `cwd` (or absolute).
+// `file` paths are relative to `cwd`, or absolute.
 // Every distinct command runs once unmutated first (its baseline); a command
 // without a passing named test skips its mutations. Then each mutation: every `find` must
 // match exactly once or nothing runs; the command runs in its own process
-// group, killed on timeout. In a copy, the files are restored from the copy's
-// own content and read back to prove it, and with the copy's manifest `drift`
-// says whether the real tree changed a mutated file since the copy was made.
-// In memory, `drift` says whether a mutated file changed during its run.
+// group, killed on timeout. `drift` says whether a mutated file changed on disk
+// during its run.
 //
 // Prints one JSON line per baseline and per mutation, then a summary line.
 // Verdicts: CAUGHT, SURVIVED, INVALID, UNPARSED, TIMEOUT, APPLY-FAILED, SKIPPED.
-// Exit codes: 0 all restores verified (nothing to restore in memory); 3 a
-// restore failed; 1 bad spec.
+// Exit codes: 0 the spec ran; 1 bad spec; 128 + the signal's number when a
+// SIGTERM or SIGINT stops it.
 //
 // Configure Node's reporters in the command that actually runs the tests:
 //   node --test --test-reporter=spec --test-reporter=/abs/path/node-evidence.mjs \
@@ -95,8 +86,8 @@
 // line, such as Nx's `<project>: ` with --output-style=stream; the evidence is
 // found anywhere in its line. Human summary counts are not evidence.
 import { execFileSync, spawn } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { constants as osConstants, tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { text } from 'node:stream/consumers';
@@ -118,7 +109,7 @@ const spec = await text(process.stdin)
 const typeMode = spec?.typecheck !== undefined;
 if (typeMode) {
   if (typeof spec.typecheck !== 'string') badSpec(`"typecheck" names the tsconfig, relative to "cwd", not ${JSON.stringify(spec.typecheck)}`);
-  if (spec.copy !== undefined || spec.command !== undefined) badSpec('"typecheck" checks the tree in place and runs no command: drop "copy" and "command"');
+  if (spec.command !== undefined) badSpec('"typecheck" checks the tree in place and runs no command: drop "command"');
   if (!Array.isArray(spec.mutations)) badSpec('the spec on stdin needs a "mutations" array');
   const unclaimed = spec.mutations.find(({ assertion }) => typeof assertion?.file !== 'string'
     || !Array.isArray(assertion.lines) || assertion.lines.length !== 2 || !assertion.lines.every(Number.isSafeInteger));
@@ -126,37 +117,13 @@ if (typeMode) {
 } else if (!Array.isArray(spec?.command) || !Array.isArray(spec.mutations)) {
   badSpec('the spec on stdin needs a "command" argv array and a "mutations" array');
 }
-const copy = spec.copy;
-if (copy !== undefined && (typeof copy !== 'string' || !isAbsolute(copy))) {
-  badSpec(`"copy" must be the absolute path scratch-copy printed, not ${JSON.stringify(copy)}`);
+if (typeof spec.cwd !== 'string' || !isAbsolute(spec.cwd)) {
+  badSpec(`"cwd" must be the absolute directory the command runs in, not ${JSON.stringify(spec.cwd)}`);
 }
-const inMemory = copy === undefined;
-if (inMemory && (typeof spec.cwd !== 'string' || !isAbsolute(spec.cwd))) {
-  badSpec(`without "copy", "cwd" must be the absolute directory the command runs in, not ${JSON.stringify(spec.cwd)}`);
-}
-if (inMemory && spec.mutations.some((mutation) => mutation.built)) {
-  badSpec('"built" checks the build output of a copy; in memory nothing is built, so edit the built file itself');
-}
-const workdir = inMemory ? spec.cwd : join(copy, spec.cwd ?? '.');
-const pathOf = (file) => (inMemory ? resolve(spec.cwd, file) : join(copy, file));
+const pathOf = (file) => resolve(spec.cwd, file);
 const timeoutMs = (spec.timeoutSeconds ?? 180) * 1000;
 
 const emit = (line) => console.log(JSON.stringify(line));
-
-// The manifest scratch-copy wrote: what it left out, and each source file's hash.
-const manifest = (() => {
-  if (inMemory) return null;
-  try {
-    return JSON.parse(readFileSync(join(copy, '.write-test-copy.json'), 'utf8'));
-  } catch {
-    return null;
-  }
-})();
-
-// A baseline that fails in the copy often needs something the copy left out.
-const leftOutHint = manifest?.ignoredLeftOut?.length
-  ? `the copy left out ${manifest.ignoredLeftOut.join(', ')}; if the command needs one, re-copy with --include-ignored <name>`
-  : undefined;
 
 // Human reporters count an empty test file as a pass. Only the companion
 // reporter's structured per-file summaries establish that named tests ran.
@@ -207,15 +174,14 @@ function signalGroup(pgid, signal) {
   }
 }
 
-// What is in flight: the running group, and the mutated files' original text.
-// A SIGTERM or SIGINT mid-run must not leave either behind.
-const active = { pgid: null, original: null };
+// What is in flight: the running group. A SIGTERM or SIGINT mid-run must not
+// leave it behind.
+const active = { pgid: null };
 for (const signal of ['SIGTERM', 'SIGINT']) {
   process.on(signal, () => {
     if (active.pgid) signalGroup(active.pgid, 'SIGKILL');
-    const restoring = active.original ? restore(active.original) : { restored: true };
-    emit({ kind: 'interrupted', signal, ...restoring });
-    process.exit(restoring.restored ? 128 + osConstants.signals[signal] : 3);
+    emit({ kind: 'interrupted', signal });
+    process.exit(128 + osConstants.signals[signal]);
   });
 }
 
@@ -225,7 +191,7 @@ function run(command, mutantEnv = {}) {
   return new Promise((done) => {
     const reportId = randomUUID();
     const child = spawn(command[0], command.slice(1), {
-      cwd: workdir,
+      cwd: spec.cwd,
       env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0', ...spec.env, ...mutantEnv, WRITE_TEST_REPORT_ID: reportId },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
@@ -254,17 +220,6 @@ function run(command, mutantEnv = {}) {
   });
 }
 
-// Whether the real tree changed a mutated file since the copy was made: the
-// verdict then describes code that is no longer there. Null without a manifest.
-function drifted(edits) {
-  if (!manifest) return null;
-  return [...new Set(edits.map(({ file }) => file))].some((file) => {
-    const original = join(manifest.source, file);
-    const now = existsSync(original) ? createHash('sha256').update(readFileSync(original)).digest('hex') : null;
-    return now !== manifest.files[file];
-  });
-}
-
 // Failures that happen before any assertion runs. node:test counts a test file
 // that can't load as a failing test, so these are checked before the count.
 const SETUP_FAILURES = [
@@ -290,16 +245,6 @@ function classify(result) {
     return { verdict: 'INVALID', reason: `exit ${result.exit}, but no test failed` };
   }
   return { verdict: 'CAUGHT' };
-}
-
-// When the tests import built output, a mutation the command didn't rebuild
-// into it proves nothing either way.
-function notInBuild(built) {
-  if (!built) return null;
-  const text = readFileSync(join(copy, built.file), 'utf8');
-  return text.includes(built.contains)
-    ? null
-    : { verdict: 'INVALID', reason: `mutation not in the build: ${built.file} does not contain the replacement` };
 }
 
 // Applies every edit to the files' text in memory first, so a mutation whose
@@ -361,18 +306,6 @@ async function proveInMemory(mutation, original) {
   }
   if (result.timedOut) return { verdict: 'TIMEOUT', killedPids: result.killedPids, ...evidence };
   return { ...classify(result), ...evidence };
-}
-
-// Writes the copy's own text back and reads it again to prove it. A failure is
-// reported, never thrown: a silently mutated copy poisons every later run.
-function restore(original) {
-  try {
-    for (const [file, text] of original) writeFileSync(join(copy, file), text);
-    const ok = [...original].every(([file, text]) => readFileSync(join(copy, file), 'utf8') === text);
-    return ok ? { restored: true } : { restored: false, restoreError: 'content differs after writing it back' };
-  } catch (error) {
-    return { restored: false, restoreError: `${error.code ?? ''} ${error.message}`.trim() };
-  }
 }
 
 // The type mode: each mutant is a text in the memory of this process, which
@@ -452,8 +385,7 @@ function proveTypes() {
   }
 }
 
-// The runtime modes: each mutant runs under the test command, in memory or in
-// a copy.
+// The runtime mode: each mutant runs under the test command, in memory.
 async function proveRuntime() {
   const baselines = new Map();
   for (const command of [spec.command, ...spec.mutations.map(commandOf)]) {
@@ -472,7 +404,7 @@ async function proveRuntime() {
         reason: result.exit !== 0 ? `command exited ${result.exit}`
           : !result.tests ? 'no structured test evidence; configure node-evidence.mjs as a Node test reporter'
             : 'no named tests passed; check the filter, skips and test registration',
-        excerpt: excerpt(result.output), hint: leftOutHint,
+        excerpt: excerpt(result.output),
       }),
     });
   }
@@ -481,7 +413,7 @@ async function proveRuntime() {
     const { id, claim } = mutation;
     const report = (line) => {
       counts[line.verdict] = (counts[line.verdict] ?? 0) + 1;
-      emit({ kind: 'mutation', id, claim, drift: drifted(mutation.edits), ...line });
+      emit({ kind: 'mutation', id, claim, ...line });
     };
     if (!baselines.get(JSON.stringify(commandOf(mutation)))) {
       report({ verdict: 'SKIPPED', reason: 'its command has no valid passing baseline (INVALID-BASELINE)' });
@@ -492,31 +424,13 @@ async function proveRuntime() {
       report({ verdict: 'APPLY-FAILED', reason: applied.error });
       continue;
     }
-    if (inMemory) {
-      report(await proveInMemory(mutation, applied.original));
-      continue;
-    }
-    for (const [file, text] of applied.mutated) writeFileSync(join(copy, file), text);
-    active.original = applied.original;
-    const result = await run(commandOf(mutation));
-    const restoring = restore(applied.original);
-    active.original = null;
-    if (!restoring.restored) restoreFailed = true;
-    if (result.timedOut) {
-      report({ verdict: 'TIMEOUT', killedPids: result.killedPids, excerpt: excerpt(result.output), ...restoring });
-      continue;
-    }
-    const verdict = notInBuild(mutation.built) ?? classify(result);
-    report({ ...verdict, exit: result.exit, tests: result.tests, excerpt: excerpt(result.output), ...restoring });
+    report(await proveInMemory(mutation, applied.original));
   }
-  
 }
 
 const commandOf = (mutation) => mutation.command ?? spec.command;
 const counts = {};
-let restoreFailed = false;
 if (typeMode) proveTypes();
 else await proveRuntime();
 
 emit({ kind: 'summary', counts });
-process.exitCode = restoreFailed ? 3 : 0;
