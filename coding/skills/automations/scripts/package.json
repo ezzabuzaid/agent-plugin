@@ -18,5 +18,8 @@
     "rrule-temporal": "^2.2.9",
     "typescript": "^7.0.2",
     "yaml": "^2.9.1"
+  },
+  "allowScripts": {
+    "esbuild": true
   }
 }
