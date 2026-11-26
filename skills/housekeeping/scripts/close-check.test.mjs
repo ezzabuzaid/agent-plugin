@@ -169,6 +169,51 @@ test('a pushed head that rev-parse cannot resolve is open, and gh is not asked w
   assert.equal(r.status, 1, r.stderr);
 });
 
+// #5836: the shell guard sends test and build output to a log file, and agents push the same way
+// (agent-plugin 9526d2f and 516c4f4, 2026-11-26: 4 of 6 pushes listed).
+test('a push whose output went to a log file is read from that file', () => {
+  using s = sandbox();
+  const c = s.commit('a.txt');
+  const log = join(s.root, 'push.log');
+  writeFileSync(log, s.push());
+  s.standIn('gh', { [ghKey(c.sha)]: JSON.stringify([{ name: 'CI', status: 'in_progress', conclusion: '', url: 'https://ci/1' }]) });
+
+  const r = s.check(s.transcript([['git commit -m "add a.txt"', c.result], [`git push origin main > ${log} 2>&1`, '']]));
+
+  assert.match(r.stdout, /  OPEN CI: in_progress https:\/\/ci\/1/);
+});
+
+test('a range line behind a prefix on its line is the push', () => {
+  using s = sandbox();
+  const c = s.commit('a.txt');
+  const range = s.push().split('\n').find((line) => line.includes(' -> ')).trim();
+  s.standIn('gh', { [ghKey(c.sha)]: JSON.stringify([{ name: 'CI', status: 'in_progress', conclusion: '', url: 'https://ci/1' }]) });
+
+  const r = s.check(s.transcript([['git commit -m "add a.txt"', c.result], ['git push origin main > $L/push.log 2>&1; echo "push exit $?: $(tail -1 $L/push.log)"', `push exit 0: ${range}`]]));
+
+  assert.match(r.stdout, /  OPEN CI: in_progress https:\/\/ci\/1/);
+});
+
+test('a push whose range shows nowhere is open: its CI was not read', () => {
+  using s = sandbox();
+  s.standIn('gh', {});
+
+  const r = s.check(s.transcript([['git push origin main > $L/push.log 2>&1; echo "push exit $?"', 'push exit 0']]));
+
+  assert.match(r.stdout, /  OPEN git push in .+: no pushed range in its output or log file, CI not read\n/);
+  assert.equal(lastLine(r.stdout), 'Open: 1');
+});
+
+test('a push that had nothing to push lists no push and nothing open', () => {
+  using s = sandbox();
+  s.standIn('gh', {});
+
+  const r = s.check(s.transcript([['git push origin main', 'Everything up-to-date\n']]));
+
+  assert.match(r.stdout, /^Pushes\n  none\n/);
+  assert.equal(lastLine(r.stdout), 'Nothing open.');
+});
+
 test('a missing gh is an open item, not silence', () => {
   using s = sandbox();
   const c = s.commit('a.txt');
@@ -280,6 +325,15 @@ test('an add whose result a pipeline reshaped to a "#<id> <title>" line files it
   s.standIn('agent-backlog', { 'ready --all-repos --json': JSON.stringify([readyItem(41)]) });
 
   const r = s.check(s.transcript([['agent-backlog add "item 41" --kind defect --work-type internal --json | jq -r \'"#\\(.id) \\(.title)"\'', '#41 item 41\n']]));
+
+  assert.match(r.stdout, /Filed \(yours: do it now, or say why it waits\)\n  CHECK #41 item 41 \(work\)\n/);
+});
+
+test('an add whose result a pipeline printed as compact JSON files its item', () => {
+  using s = sandbox();
+  s.standIn('agent-backlog', { 'ready --all-repos --json': JSON.stringify([readyItem(41)]) });
+
+  const r = s.check(s.transcript([['agent-backlog add "item 41" --kind defect --work-type internal --json | jq -c \'{id}\'', '{"id":41}\n']]));
 
   assert.match(r.stdout, /Filed \(yours: do it now, or say why it waits\)\n  CHECK #41 item 41 \(work\)\n/);
 });

@@ -16,8 +16,12 @@
 //
 // Prints, under these headings, then a last line:
 //   Pushes       for each Bash call that runs `git push` (or `git -C <path> push`), each range line
-//                `<old>..<new>  <src> -> <dst>` in that call's own result; text in any other call's result never makes
-//                a push. The repo is the call's `git -C <path>`, else its last `cd <path>`, else its working directory.
+//                `<old>..<new>  <src> -> <dst>` in that call's own result, also behind a prefix on its line
+//                (`push exit 0: <old>..<new>  main -> main`), or in a file the push's output was redirected to (a
+//                target with no `$` or backtick in it); text in any other call's result never makes a push. A push
+//                call whose range shows in none of them, and that did not print "Everything up-to-date", is open as
+//                "git push in <repo>: no pushed range in its output or log file, CI not read" (#5836).
+//                The repo is the call's `git -C <path>`, else its last `cd <path>`, else its working directory.
 //                For each pushed head, the runs of `gh run list --commit <sha> --json name,status,conclusion,url` in
 //                that repo. A run that is not completed + success is open. A head with no run yet is printed, not
 //                open. A repo directory that no longer exists is open as "repo path not found: <path>", and gh is not
@@ -40,7 +44,8 @@
 //                instead of a two-word fix).
 //                The session's items: the id operand of `agent-backlog update|wait <id>`, and each `#<id> · ` card
 //                header or JSON top-level "id" (and, when the call runs no list, ready, decisions or explore, each
-//                line that starts with `#<id>` or is only `<id>`, as a jq stage prints it; #5834) in the result
+//                line that starts with `#<id>`, is only `<id>`, or opens compact JSON with `{"id":<id>`, as a jq
+//                stage prints it; #5834, #5836) in the result
 //                of a call that runs `agent-backlog add|update|wait|met`
 //                (no --help), runs no `agent-backlog show`, and runs no other command but cd, echo, other agent-backlog
 //                reads and pipeline stages. The output of list, show, ready, decisions and any other command never
@@ -101,7 +106,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
-import { UsageError, transcriptFiles, toolCalls, bashCalls, entries, entryText, simpleCommands, commandWords, commandsIn, gitDirectory, repoRoot, sessionCommits, git, firstLine, expand } from './lib/session.mjs';
+import { UsageError, transcriptFiles, toolCalls, bashCalls, entries, entryText, simpleCommands, commandWords, commandsIn, gitCall, repoRoot, sessionCommits, git, firstLine, expand } from './lib/session.mjs';
 
 function main() {
   let options;
@@ -126,8 +131,9 @@ function main() {
   const none = (list) => { if (list.length === 0) say('none'); };
 
   console.log('Pushes');
-  const pushes = pushedHeads(calls);
-  if (pushes.length === 0) say('none');
+  const { heads: pushes, unseen } = pushedHeads(calls);
+  if (pushes.length === 0 && unseen.length === 0) say('none');
+  for (const repo of unseen) say(`git push in ${repo}: no pushed range in its output or log file, CI not read`, true);
   for (const push of pushes) {
     say(`${push.repo} ${push.ref} ${push.unresolved ?? push.sha.slice(0, 12)}`);
     if (!existsSync(push.repo)) {
@@ -500,21 +506,32 @@ function dialogAnswers(tools) {
     .flatMap((call) => Object.entries(call.detail.answers).map(([question, answer]) => clip(`answer: ${question} → ${answer}`)));
 }
 
-// One entry per repo and pushed head, from `<old>..<new>  <src> -> <dst>` (or `...` for a forced update).
+// A range line `<old>..<new>  <src> -> <dst>` (or `...` for a forced update), also behind a prefix on its line
+// (`push exit 0: <old>..<new>  main -> main`, #5836).
+const PUSH_RANGE = /(?:^|\s)\+?\s*([0-9a-f]{7,40})\.\.\.?([0-9a-f]{7,40})\s+(\S+)\s+->\s+(\S+)/gm;
+const readText = (path) => { try { return readFileSync(path, 'utf8'); } catch { return ''; } };
+
+// One entry per repo and pushed head, and the repo of each push call whose range shows nowhere.
 function pushedHeads(calls) {
   const heads = new Map();
+  const unseen = [];
   for (const call of calls) {
-    const dir = gitDirectory(call.command, 'push', call.cwd);
-    if (!dir) continue;
-    const repo = repoRoot(dir) ?? dir;
-    for (const m of call.result.matchAll(/^\s*[+ ]?\s*([0-9a-f]{7,40})\.\.\.?([0-9a-f]{7,40})\s+(\S+)\s+->\s+(\S+)/gm)) {
+    const push = gitCall(call.command, 'push', call.cwd);
+    if (!push) continue;
+    const repo = repoRoot(push.dir) ?? push.dir;
+    // The call's own output, then each file the push wrote to (a target with no shell expansion in it).
+    const logs = push.redirects.filter((path) => !/[$`]/.test(path)).map((path) => readText(expand(path, push.shellDir)));
+    const output = [call.result, ...logs].join('\n');
+    const ranges = [...output.matchAll(PUSH_RANGE)];
+    if (ranges.length === 0 && !/Everything up-to-date/.test(output)) unseen.push(repo);
+    for (const m of ranges) {
       // An unresolved head keeps only its short sha: gh run list --commit <short sha> matches no run (#5823).
       let head;
       try { head = { repo, ref: m[4], sha: git(repo, ['rev-parse', `${m[2]}^{commit}`]).trim() }; } catch { head = { repo, ref: m[4], unresolved: m[2] }; }
       heads.set(`${repo}\0${head.sha ?? head.unresolved}`, head);
     }
   }
-  return [...heads.values()];
+  return { heads: [...heads.values()], unseen };
 }
 
 const BACKLOG_WRITES = new Set(['add', 'update', 'wait', 'met']);
@@ -550,8 +567,10 @@ function backlogItems(calls) {
     // With no list read in the call, a line that a pipeline stage reshaped is the add's own id (#5834):
     // `#<id> <title>` from jq -r '"#\(.id) \(.title)"', or a bare `<id>` from jq -r .id.
     const readsRows = backlog.some(({ words }) => ROW_READS.has(words[1]));
-    const ids = readsRows ? /#(\d+) · |^ {2}"id": (\d+)/gm : /#(\d+) · |^ {2}"id": (\d+)|^#(\d+)\b|^(\d+)$/gm;
-    const found = [...call.result.matchAll(ids)].map((m) => Number(m[1] ?? m[2] ?? m[3] ?? m[4]));
+    // A line that opens compact JSON with the id (jq -c '{id}') is the add's too; an "id" further in may be a
+    // condition's (#5836).
+    const ids = readsRows ? /#(\d+) · |^ {2}"id": (\d+)/gm : /#(\d+) · |^ {2}"id": (\d+)|^#(\d+)\b|^(\d+)$|^\{"id":\s*(\d+)/gm;
+    const found = [...call.result.matchAll(ids)].map((m) => Number(m[1] ?? m[2] ?? m[3] ?? m[4] ?? m[5]));
     const filed = [...new Set(found)].filter((id) => !operands.has(id));
     // One id per add, in order; when the counts differ, an id has a condition if any add of the call has one.
     filed.forEach((id, n) => note(id, met || (filed.length === adds.length ? hasCondition(adds[n]) : adds.some(hasCondition))));

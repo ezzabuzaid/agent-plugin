@@ -82,27 +82,32 @@ export const expand = (p, cwd) => (p === '~' ? homedir() : resolve(cwd ?? proces
 
 // The simple commands of a shell command line, in the order bash runs them. Each is its words, quotes removed, with
 // redirections dropped, plus `link`: the operator before it (';' for a newline, '&&', '||', '|', '|&', '&'), null for
-// the first. Heredoc bodies, comments, and quoted, $( ) and backtick text are never commands, so `grep 'git push'`,
+// the first, and `redirects`: the target of each output redirection (`>`, `>>`, `>|`, `&>`, `&>>`), as written.
+// Heredoc bodies, comments, and quoted, $( ) and backtick text are never commands, so `grep 'git push'`,
 // `node -e '…git push…'` and `cat <<EOF … git push … EOF` run no git.
 export function simpleCommands(line) {
   const commands = [];
   const heredocs = [];
   let words = [];
+  let redirects = [];
   let word = null;
   let link = null;
   let target = null; // null, 'file' (the next word is a redirection target) or a heredoc kind ('<<' or '<<-')
+  let output = false; // the redirection target is written to
   let i = 0;
   const endWord = () => {
     if (word === null) return;
     if (target === null) words.push(word);
-    else if (target !== 'file') heredocs.push({ delimiter: word, tabs: target === '<<-' });
+    else if (target === 'file') { if (output) redirects.push(word); }
+    else heredocs.push({ delimiter: word, tabs: target === '<<-' });
     target = null;
     word = null;
   };
   const endCommand = (next) => {
     endWord();
-    if (words.length) commands.push({ words, link });
+    if (words.length) commands.push({ words, link, redirects });
     words = [];
+    redirects = [];
     link = next;
   };
   while (i < line.length) {
@@ -166,6 +171,7 @@ export function simpleCommands(line) {
       else endWord();
       const op = redirect[0];
       target = /^[<>]&[0-9-]$/.test(op) ? null : op === '<<' || op === '<<-' ? op : 'file';
+      output = /^(?:>|>>|>\||&>|&>>)$/.test(op);
       i += op.length;
       continue;
     }
@@ -197,18 +203,19 @@ export function commandWords(words) {
 export function commandsIn(command, cwd) {
   let dir = cwd;
   const commands = [];
-  for (const { words, link } of simpleCommands(command)) {
+  for (const { words, link, redirects } of simpleCommands(command)) {
     const program = commandWords(words);
     if (program[0] === 'cd' && program[1] !== '-') dir = expand(program[1] ?? '~', dir);
-    commands.push({ words: program, link, dir });
+    commands.push({ words: program, link, dir, redirects });
   }
   return commands;
 }
 
-// The directory a git subcommand ran in, or null when no simple command of the line runs `git <subcommand>`:
-// its `git -C <path>`, else the last `cd <path>` before it, else the call's cwd.
-export function gitDirectory(command, subcommand, cwd) {
-  for (const { words: [name, ...args], dir } of commandsIn(command, cwd)) {
+// The first simple command of the line that runs `git <subcommand>`, or null: the directory git ran in (its
+// `git -C <path>`, else the last `cd <path>` before it, else the call's cwd), the shell's directory there (where a
+// relative redirection target lives) and its output redirection targets.
+export function gitCall(command, subcommand, cwd) {
+  for (const { words: [name, ...args], dir, redirects } of commandsIn(command, cwd)) {
     if (name === undefined || basename(name) !== 'git') continue;
     let at = dir;
     let k = 0;
@@ -216,10 +223,13 @@ export function gitDirectory(command, subcommand, cwd) {
       if (args[k] === '-C') at = expand(args[++k] ?? '.', at);
       else if (args[k] === '-c') k++;
     }
-    if (args[k] === subcommand) return at;
+    if (args[k] === subcommand) return { dir: at, shellDir: dir, redirects };
   }
   return null;
 }
+
+// The directory a git subcommand ran in, or null when no simple command of the line runs `git <subcommand>`.
+export const gitDirectory = (command, subcommand, cwd) => gitCall(command, subcommand, cwd)?.dir ?? null;
 
 // The top of the repo that holds dir, or null when dir is no repo (or is gone).
 export function repoRoot(dir) {
