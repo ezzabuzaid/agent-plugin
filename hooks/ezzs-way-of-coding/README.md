@@ -50,8 +50,10 @@ those files and encode it here as rules.
 Out-of-scope follow-up capture works in every repository with no configuration:
 the global `agent-backlog` command stores all repositories' items in one
 database at `~/.agent-backlog/backlog.sqlite`. Subagent findings are left for
-the root agent to store. Upstream bug reports and dev-tooling audit items
-(agent hooks, agent settings, test tooling) do not go to the backlog. The agent mentions each one once in its reply. Items are
+the root agent to store. A problem in the user's own hooks, skills or plugins
+(agent-plugin, `~/.claude/hooks`, `~/.agents/skills`) is filed in agent-plugin
+like any other defect; only a third-party tool's problem stays out of the
+backlog, mentioned once in the reply. Items are
 classified on two axes: `--kind feature|defect|risk|debt` (Unicorn Project
 investment categories — what the item is) and `--work-type
 business|internal|change|unplanned` (Phoenix Project four types — how the
@@ -73,24 +75,48 @@ The register has no off switch. An off switch needs a command that does not
 exist. The transcript is the session state, so a new session starts with the
 register off and a resumed session keeps it on.
 
-Two Stop rules (root sessions only) keep a turn from ending on the user. The
-user reads only AskUserQuestion, and AskUserQuestion answers inside the turn,
-so a turn ends only finished, or parked: machine work that will wake the
-session still runs and every decision for the user has been asked. A choice
-that needs an explanation is asked there too, with the explanation inside the
-question and its options, because an open dialog hides the chat.
+Three Stop rules (root sessions only) keep a turn from ending on the user or on
+an unproven claim. The user reads only AskUserQuestion, and AskUserQuestion
+answers inside the turn, so a turn ends only finished, or parked: machine work
+that will wake the session still runs and every decision for the user has been
+asked. The chat explains, in plain words; the dialog holds only a one-line
+question and short labels (the user, 2026-11-24).
 `ask-in-the-tool` fires when the final message asks the user something, gives
 him a task or waits on him in prose, also after an earlier AskUserQuestion,
-including a message that explains a choice, gives its own pick, and ends on an
-answer format ("Reply **"A"** or **"B"**").
-`housekeeping-due` reads a Claude Code transcript: it fires once the agent
-called a tool after the first stop (`stop_hook_summary`) that follows the last
-`housekeeping` skill call, or called any tool when no sweep ran yet. With
-`background_tasks` running it asks for the skill's idle mode, names each task
-by kind, id and description, and sends the agent on to every queued item that
-does not depend on that work; otherwise it asks for its before-done mode.
-It is off in a Codex transcript and without one.
-Both rules are off in a headless run (`claude -p`, the Agent SDKs), which has
-no AskUserQuestion and no person to sweep for: `hook.ts` copies Claude Code's
-`CLAUDE_CODE_ENTRYPOINT` (`cli` in a terminal, `sdk-cli` under `-p`) into the
-input as `claude_code_entrypoint`.
+including an answer format ("Reply **"A"** or **"B"**") and phrasings such as
+"yours, when you choose", "your go" or "type `/x`". A `!` command is the last
+chat line, with no dialog after it.
+`housekeeping-due` reads a Claude Code transcript: since the last `housekeeping`
+Skill call, it fires on a commit, a push or a close claim in the final message
+("Safe to close", "Nothing new", "nothing running", "all done"); edits, reads,
+messages and task launches alone do not fire it, and only a Skill call for
+`housekeeping` answers it (a sweep written from memory leaves it due). With
+`background_tasks` running it asks for the skill's idle mode and names each
+task by kind, id and description; otherwise its before-done mode.
+`close-check-before-safe-to-close` sends a final message that says "Safe to
+close" back unless the same turn ran the housekeeping skill's
+`scripts/close-check.mjs`.
+Neither `housekeeping-due` nor `ask-in-the-tool` fires after a turn that only
+answered a question from the user (a typed, queued or dialog-typed question and
+no write in the turn); a wrap-up question (what's left, can I close, double
+check) still fires them.
+`ask-in-the-tool` and `close-check-before-safe-to-close` also run on a stop that
+a stop hook already continued (`stop_hook_active`), at most once per chain
+(`continuedStops: 'once'` of `@deepagents/experimental` 7.38+): agents wrote
+about half of their "Safe to close" claims in that reply. Every other Stop rule
+skips such a stop. `housekeeping-due` is off in a Codex transcript and without
+one. All Stop rules are off in a headless run (`claude -p`, the Agent SDKs),
+which has no AskUserQuestion and no person to sweep for: `hook.ts` copies
+Claude Code's `CLAUDE_CODE_ENTRYPOINT` (`cli` in a terminal, `sdk-cli` under
+`-p`) into the input as `claude_code_entrypoint`.
+
+Three PreToolUse guards refuse a call before it runs:
+`dialog-only-asks` refuses an AskUserQuestion whose question is over 150
+characters or whose option description is over 100;
+`memory-compaction-is-the-users` refuses an Agent brief that asks to shrink a
+`MEMORY.md` under a size, and a Write that drops more than max(1, 10%) of a
+`MEMORY.md`'s index lines (an Edit is not checked yet: agent-plugin #5756);
+`tracking-record-outside-the-scratchpad` refuses a plan, memory, HANDOFF or
+STATUS record whose text or path names a session's scratchpad folder.
+The evidence for these rules is in `skills/housekeeping/references/RULINGS.md`
+("The 2026-11-26 forensics round").
