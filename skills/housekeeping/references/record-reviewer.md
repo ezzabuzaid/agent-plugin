@@ -21,11 +21,11 @@ You review one commit that a coding session made. You did not write it and have 
 
 ## Write
 
-Write the file your prompt names (create its folder), exactly:
+First resolve the sha your prompt gives to the full 40-character one: `git -C <repo> rev-parse <sha>`. Write `~/.claude/housekeeping/reviews/<full sha>.md` (create its folder), whatever form of the sha or file name the prompt gives, because close-check reads only that name (#5896). Exactly:
 
 ```
-REVIEW <sha>
+REVIEW <full sha>
 STALE: <path:line, or #id> — <what in it is now wrong, and what this commit made true instead>
 ```
 
-One line per stale record, most certain first, naming the exact record and the exact wrong statement; a line that names only an area ("memory", "docs") is worth nothing. With none, write `REVIEW <sha>` and `none`. Write nothing anywhere else: you only read. Then return only the word `done`.
+One line per stale record, most certain first, naming the exact record and the exact wrong statement; a line that names only an area ("memory", "docs") is worth nothing. With none, write `REVIEW <full sha>` and `none`. Write nothing anywhere else: you only read. Then return only the word `done`.

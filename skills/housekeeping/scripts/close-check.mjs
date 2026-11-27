@@ -72,11 +72,13 @@
 //   Stale records
 //                for each commit of the chain's ledger whose repo still exists, the review that the record reviewer
 //                (references/record-reviewer.md, launched by SKILL.md Finish) wrote to
-//                ~/.claude/housekeeping/reviews/<full sha>.md: its first line is `REVIEW <sha>`, then `STALE: <text>`
-//                lines or `none`. Each STALE line is a CHECK line `<repo> <sha8>: <text>`; a `none` review prints
-//                nothing. No file is open: "<repo> <sha8>: not reviewed for stale records (run the record reviewer,
-//                SKILL.md Finish)". A file that does not start with `REVIEW <sha>`, or has neither a STALE line nor
-//                `none`, is open as an unreadable review.
+//                ~/.claude/housekeeping/reviews/<full sha>.md: its first line is `REVIEW <full sha>`, then
+//                `STALE: <text>` lines or `none`. Each STALE line is a CHECK line `<repo> <sha8>: <text>`; a `none`
+//                review prints nothing. No file is open: "<repo> <full sha>: not reviewed for stale records (run the
+//                record reviewer for this full sha, SKILL.md Finish)". The full sha is the name the review must have:
+//                a Finish job that launched reviewers with an abbreviation got reviews this script never found
+//                (#5896). A file that does not start with `REVIEW <full sha>`, or has neither a STALE line nor `none`,
+//                is open as an unreadable review.
 //   Tests of touched packages
 //                for each package (as above, in a git repo) that holds a file the session's Edit, Write or
 //                NotebookEdit calls changed: OPEN when no test command ran for it after the last such change, by
@@ -373,7 +375,7 @@ function staleRecords(commits) {
       text = readFileSync(file, 'utf8');
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
-      lines.push({ text: `${name}: not reviewed for stale records (run the record reviewer, SKILL.md Finish)`, mark: 'open' });
+      lines.push({ text: `${repo} ${sha}: not reviewed for stale records (run the record reviewer for this full sha, SKILL.md Finish)`, mark: 'open' });
       continue;
     }
     const [first, ...body] = text.split('\n').map((line) => line.trimEnd());

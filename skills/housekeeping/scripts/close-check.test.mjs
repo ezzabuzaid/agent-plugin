@@ -299,7 +299,7 @@ test('a commit whose review is none prints no stale record', () => {
   assert.equal(lastLine(r.stdout), 'Nothing open.');
 });
 
-test('a commit with no review is open as not reviewed for stale records', () => {
+test('a commit with no review is open as not reviewed for stale records, named by the full sha its review must have', () => {
   using s = sandbox();
   const c = s.commit('a.txt');
   s.push();
@@ -307,7 +307,7 @@ test('a commit with no review is open as not reviewed for stale records', () => 
 
   const r = s.check(s.transcript([['ls', 'README.md']]));
 
-  assert.equal(section(r.stdout, 'Stale records'), `  OPEN ${s.work} ${c.sha.slice(0, 8)}: not reviewed for stale records (run the record reviewer, SKILL.md Finish)`);
+  assert.equal(section(r.stdout, 'Stale records'), `  OPEN ${s.work} ${c.sha}: not reviewed for stale records (run the record reviewer for this full sha, SKILL.md Finish)`);
   assert.equal(lastLine(r.stdout), 'Open: 1');
   assert.equal(r.status, 1);
 });
