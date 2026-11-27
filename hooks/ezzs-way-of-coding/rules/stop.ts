@@ -442,6 +442,19 @@ function runningWork(input: ClaudeHookInput): string[] {
   });
 }
 
+// A final message that defers named next work to running work: "everything else waits on it",
+// "next after it: commit", "when it finishes I'll … then start #5127". That is the claim the idle
+// sweep checks, and after 5833640 housekeeping-due stayed quiet on it when nothing was committed
+// since the last sweep: 13 of the 13 misses Ezz answered with "don't idle" or "what are you waiting
+// on?" on 2026-11-26..27 (#6067). It matched 62 of 1458 real final messages of 2026-11-13..27;
+// any wait wording matched 562, which would bring back the noise 5833640 removed.
+const DEFERS_NEXT_WORK =
+  /\b(?:next after (?:it|that|them)\b|next,? in order\b|(?:when|once|after) (?:it|they|that|th(?:is|ese)|the [\w#/.-]+(?: [\w#/.-]+){0,3}) (?:finishes|finish|lands|land|completes|reports|returns|is done|are done|is back|ends)\b[^.\n]{0,60}\b(?:I(?:'|’)ll|I will|then|starts?|begins?)\b|(?:starts?|begins?|comes) (?:once|after|when) (?:it|they|that|the [\w#/.-]+(?: [\w#/.-]+){0,3}) (?:is back|finishes|lands|reports|completes)\b|every remaining item waits on|(?:everything|all) (?:left|else|remaining) waits on)/i;
+
+async function defersWorkToRunningWork(input: ClaudeHookInput): Promise<boolean> {
+  return runningWork(input).length > 0 && DEFERS_NEXT_WORK.test(await finalAssistantText(input));
+}
+
 // A headless run (`claude -p`, the Agent SDKs) has no AskUserQuestion and no
 // person to sweep for. Claude Code names how it started only in its
 // environment (CLAUDE_CODE_ENTRYPOINT: 'cli' in a terminal, 'sdk-cli' under
@@ -474,7 +487,9 @@ export const stopRules: ReminderRule[] = [
     target: 'stop-feedback',
     events: ['Stop'],
     when: async (input) =>
-      !runsHeadless(input) && (await housekeepingDue(input)) && !(await questionOnlyTurn(input)),
+      !runsHeadless(input) &&
+      ((await housekeepingDue(input)) || (await defersWorkToRunningWork(input))) &&
+      !(await questionOnlyTurn(input)),
     message: (input) => {
       const running = runningWork(input);
       return running.length > 0

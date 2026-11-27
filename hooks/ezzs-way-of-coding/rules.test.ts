@@ -1448,6 +1448,31 @@ test('stop asks for an idle housekeeping round while any background work still r
   assert.ok((await stopContext({ background_tasks: [] }, [request, commit, reply])).includes(BEFORE_DONE));
 });
 
+test('stop sends the agent to an idle sweep when its final message defers named work to running work, even with nothing new since the sweep', async () => {
+  const swept = [request, commit, sweep, reply, stopped, request, reply];
+  const running = { background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: 'the #5860 gate' }] };
+  for (const message of [
+    'Running: the #5860 gate. Next after it: commit and push both.',
+    'Nothing new. Everything left waits on step 2b\'s subagent, whose report comes to this session.',
+    "Still running: shell b1. When it finishes, I'll close #5101, then start #5127.",
+    'Step 3, the skill text, starts once it is back, and this session gets its result.',
+  ]) {
+    const context = await stopContext({ ...running, last_assistant_message: message }, swept);
+
+    assert.ok(context.includes('[stop-feedback:housekeeping-due]\nBackground work is still running: shell b1 (the #5860 gate).'), message);
+  }
+});
+
+test('stop stays quiet on a final message that defers work when no background work runs, or that only reports running work', async () => {
+  const swept = [request, commit, sweep, reply, stopped, request, reply];
+  const running = { background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: 'the CI watch' }] };
+
+  assert.doesNotMatch(await stopContext({ last_assistant_message: 'Running: the gate. Next after it: commit and push.' }, swept), /housekeeping-due/);
+  for (const message of ['Still running: the CI watch on run 45873649473.', "I'm waiting for npm to serve 0.48.0."]) {
+    assert.doesNotMatch(await stopContext({ ...running, last_assistant_message: message }, swept), /housekeeping-due/, message);
+  }
+});
+
 test('a headless run gets neither Stop rule: it has no AskUserQuestion and no person to sweep for', async () => {
   const ask = 'Two questions for you:\n1. A?\n2. B?';
   const worked = [request, commit, reply];

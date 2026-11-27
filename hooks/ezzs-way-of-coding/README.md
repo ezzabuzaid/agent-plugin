@@ -110,7 +110,13 @@ commit or push counts only where a shell command starts `git commit` or
 `git push` (also `git -C <dir>`, after `&&`, `||`, `;`, `|` or a new line,
 under `timeout`, `caffeinate`, `nohup`, `if` and the like, or inside `bash -c`),
 never the words in a heredoc body, a quoted string or another command's
-arguments. With
+arguments. It also fires, with nothing new since the sweep, when `background_tasks` run
+and the final message defers named next work to them ("everything else waits on
+it", "next after it: commit and push", "when it finishes I'll … then start
+#5127"): after 5833640 those stops got nothing, and Ezz answered 13 of them with
+"don't idle" or "what are you waiting on?" (#6067). That wording matched 62 of
+1458 real final messages of 2026-11-13..27; any wait wording matched 562, which
+would bring back the noise 5833640 removed. With
 `background_tasks` running it asks for the skill's idle mode and names each
 task by kind, id and description; otherwise its before-done mode.
 `close-check-before-safe-to-close` sends a final message that claims "Safe to
