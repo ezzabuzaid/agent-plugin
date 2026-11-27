@@ -3,33 +3,21 @@ import type {
   GuardRule,
   ReminderRule,
 } from '@deepagents/experimental/coding-agent-reminders';
+import { ClaudeCodeSession, ClaudeCodeSubagent, type Step } from '@deepagents/trajectory';
 import { join } from 'node:path';
 
 import { stopEvents } from './events.ts';
-import { readTranscriptEntries, type TranscriptEntry } from './transcript.ts';
+import {
+  claudeCode,
+  transcriptSteps,
+  wholeTranscriptSteps,
+} from './transcript.ts';
 
 // A final message that hands a verification gap to the user instead of closing it.
 // A bare "unverified" counts only as a standalone word: not inside a hyphenated
 // name such as this rule's id, and not in talk about *calling* something unverified.
 const unverifiedClaim =
   /(?:(?<![-\w])(?<!call(?:ed|ing)? (?:it |them |this |something |anything |behavior )?)unverified(?![-\w])|\b(?:not (?:yet )?(?:been )?(?:verified|confirmed|tested|exercised) live|not (?:yet )?(?:been )?verified|could(?:n't| not) (?:verify|confirm|test)|did(?:n't| not) (?:verify|probe|test)(?: (?:it|this|them))? live|(?:synthetic|mock(?:ed)?) (?:tests?|fixtures?) only|covered (?:only )?by (?:synthetic|mock(?:ed)?) (?:tests?|fixtures?)(?: only)?|untested live|without (?:a )?live (?:check|verification|probe))\b)/i;
-
-function textOfContent(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content
-    .filter(
-      (block): block is { type: 'text'; text: string } =>
-        typeof block === 'object' &&
-        block !== null &&
-        'type' in block &&
-        block.type === 'text' &&
-        'text' in block &&
-        typeof block.text === 'string',
-    )
-    .map((block) => block.text)
-    .join('\n');
-}
 
 // Text that mentions a word does not claim it (the use–mention distinction).
 // Fenced code blocks quote output or messages, code spans name things (rule
@@ -54,17 +42,16 @@ export async function finalAssistantText(
     return prose(input.last_assistant_message);
   // On SubagentStop, transcript_path is the parent session's; the subagent's own
   // transcript is agent_transcript_path.
-  const transcriptPath =
-    input.hook_event_name === 'SubagentStop'
-      ? input.agent_transcript_path
-      : input.transcript_path;
-  if (typeof transcriptPath !== 'string' || !transcriptPath) return '';
+  const subagentStop = input.hook_event_name === 'SubagentStop';
+  const path = subagentStop ? input.agent_transcript_path : input.transcript_path;
+  if (typeof path !== 'string' || !path) return '';
+  const session = subagentStop
+    ? ClaudeCodeSubagent.fromTranscriptPath(path)
+    : ClaudeCodeSession.fromTranscriptPath(path);
   let last = '';
-  for await (const entry of readTranscriptEntries(transcriptPath)) {
-    if (entry.type !== 'assistant' || entry.message?.role !== 'assistant')
-      continue;
-    const text = textOfContent(entry.message.content);
-    if (text) last = text;
+  for (const step of await transcriptSteps(session)) {
+    if (step.source === 'agent' && typeof step.message === 'string' && step.message)
+      last = step.message;
   }
   return prose(last);
 }
@@ -87,26 +74,17 @@ export const verificationRules: ReminderRule[] = [
 // resume it. Claude Code also writes meta user entries in the middle of a turn
 // (system reminders, task notifications, peer messages, the hand-back nudge
 // after a stop), and those do not start a turn.
-function startsAgentTurn(entry: TranscriptEntry): boolean {
-  if (entry.type !== 'user' || entry.message?.role !== 'user') return false;
-  if (entry.isMeta === true) return entry.origin?.kind === 'coordinator';
-  const { content } = entry.message;
-  if (typeof content === 'string') return content.length > 0;
-  return (
-    Array.isArray(content) &&
-    content.some((block) => block?.type === 'text') &&
-    !content.some((block) => block?.type === 'tool_result')
-  );
+function startsAgentTurn(step: Step): boolean {
+  if (step.source !== 'user' || typeof step.message !== 'string') return false;
+  const { is_meta: isMeta, origin } = claudeCode(step.extra);
+  return isMeta === true ? origin === 'coordinator' : step.message.length > 0;
 }
 
-function handbackIds(entry: TranscriptEntry): string[] {
-  const content = entry.message?.content;
-  if (entry.type !== 'assistant' || !Array.isArray(content)) return [];
-  return content
-    .filter(
-      (block) => block?.type === 'tool_use' && block.name === 'SubagentHandback',
-    )
-    .map((block) => String(block.id));
+function handbackIds(step: Step): string[] {
+  if (step.source !== 'agent') return [];
+  return (step.tool_calls ?? [])
+    .filter((call) => call.function_name === 'SubagentHandback')
+    .map((call) => call.tool_call_id);
 }
 
 // True when the subagent already tried to hand back earlier in its current turn.
@@ -127,15 +105,17 @@ async function handedBackThisTurn(input: ClaudeHookInput): Promise<boolean> {
     'subagents',
     `agent-${agentId}.jsonl`,
   );
-  let read = false;
+  const steps = await wholeTranscriptSteps(
+    ClaudeCodeSubagent.fromTranscriptPath(agentPath),
+  );
+  if (!steps) return true;
   let earlier = false;
-  for await (const entry of readTranscriptEntries(agentPath)) {
-    read = true;
-    if (startsAgentTurn(entry)) earlier = false;
-    else if (handbackIds(entry).some((id) => id !== input.tool_use_id))
+  for (const step of steps) {
+    if (startsAgentTurn(step)) earlier = false;
+    else if (handbackIds(step).some((id) => id !== input.tool_use_id))
       earlier = true;
   }
-  return !read || earlier;
+  return earlier;
 }
 
 export const verificationGuards: GuardRule[] = [

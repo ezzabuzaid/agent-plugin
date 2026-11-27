@@ -1,59 +1,59 @@
-import { createReadStream } from 'node:fs';
-import { createInterface } from 'node:readline';
-
-export type TranscriptEntry = {
-  type?: string;
-  subtype?: string;
-  isMeta?: boolean;
-  origin?: {
-    kind?: string;
-  };
-  message?: {
-    role?: string;
-    content?: unknown;
-  };
-  // What a tool returned, beside its tool_result: AskUserQuestion writes its
-  // questions and the user's answers here.
-  toolUseResult?: unknown;
-  // A message the user sent while the turn ran is a `queued_command` attachment.
-  attachment?: {
-    type?: string;
-    prompt?: unknown;
-    origin?: {
-      kind?: string;
-    };
-  };
-};
+import {
+  ClaudeCodeAdapter,
+  type ClaudeCodeSession,
+  type ClaudeCodeSubagent,
+  SessionReadError,
+  type Step,
+} from '@deepagents/trajectory';
 
 /**
- * Streams one parsed entry per JSONL line. An unreadable transcript and an
- * unparsable line both yield nothing rather than throwing, so a caller can
- * treat "no transcript" and "no match" the same way. Consumers may stop early;
- * the file handle is released either way.
+ * The steps of a Claude Code transcript, read through @deepagents/trajectory
+ * (agent-plugin #6100). A transcript that is missing, unreadable or holds no
+ * step gives no steps, so a caller treats 'no transcript' and 'no match' the
+ * same way.
  */
-export async function* readTranscriptEntries(
-  transcriptPath: string,
-): AsyncGenerator<TranscriptEntry> {
-  const input = createReadStream(transcriptPath, { encoding: 'utf8' });
-
+export async function transcriptSteps(
+  session: ClaudeCodeSession | ClaudeCodeSubagent,
+): Promise<Step[]> {
   try {
-    const lines = createInterface({ input, crlfDelay: Infinity });
-
-    for await (const line of lines) {
-      if (line.length === 0) continue;
-
-      let entry: TranscriptEntry;
-      try {
-        entry = JSON.parse(line) as TranscriptEntry;
-      } catch {
-        continue;
-      }
-
-      yield entry;
-    }
-  } catch {
-    return;
-  } finally {
-    input.destroy();
+    const { trajectory } = await new ClaudeCodeAdapter().read(session, {
+      subagents: false,
+    });
+    return trajectory.steps;
+  } catch (error) {
+    if (error instanceof SessionReadError) return [];
+    throw error;
   }
+}
+
+/**
+ * The steps of a transcript whose every complete line parses, or undefined
+ * when it cannot be read or holds a malformed line. A half-written last line
+ * is tolerated: the agent may still be writing it.
+ */
+export async function wholeTranscriptSteps(
+  session: ClaudeCodeSession | ClaudeCodeSubagent,
+): Promise<Step[] | undefined> {
+  try {
+    const { trajectory, diagnostics } = await new ClaudeCodeAdapter().read(
+      session,
+      { subagents: false },
+    );
+    return diagnostics.some(({ code }) => code === 'invalid_json_line')
+      ? undefined
+      : trajectory.steps;
+  } catch (error) {
+    if (error instanceof SessionReadError) return undefined;
+    throw error;
+  }
+}
+
+/** The `extra.claude_code` record the adapter writes on each step and result. */
+export function claudeCode(
+  extra: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  const value = extra?.claude_code;
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value))
+    : {};
 }

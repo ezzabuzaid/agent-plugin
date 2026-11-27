@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@deepagents/experimental": "7.38.1"
+    "@deepagents/experimental": "7.38.1",
+    "@deepagents/trajectory": "7.53.0"
   },
   "scripts": {
     "test": "node --test --no-warnings rules.test.ts",

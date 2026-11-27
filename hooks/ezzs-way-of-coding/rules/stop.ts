@@ -2,9 +2,10 @@ import type {
   ClaudeHookInput,
   ReminderRule,
 } from '@deepagents/experimental/coding-agent-reminders';
+import { ClaudeCodeSession, type Step, type ToolCall } from '@deepagents/trajectory';
 
 import { asksAQuestion, RELAYED_PROMPT } from './intent.ts';
-import { readTranscriptEntries, type TranscriptEntry } from './transcript.ts';
+import { claudeCode, transcriptSteps } from './transcript.ts';
 import { finalAssistantText } from './verification.ts';
 
 // The user reads only AskUserQuestion, never prose, and AskUserQuestion answers
@@ -186,16 +187,6 @@ function asksInProse(text: string, raw: string): boolean {
     .some((para) => para.includes('?') && OFFER_LEAD_PATTERN.test(para));
 }
 
-type ContentBlock = { type?: unknown; name?: unknown; input?: unknown };
-
-function toolUses(content: unknown): ContentBlock[] {
-  if (!Array.isArray(content)) return [];
-  return content.filter(
-    (block): block is ContentBlock =>
-      typeof block === 'object' && block !== null && block.type === 'tool_use',
-  );
-}
-
 function field(value: unknown, key: string): unknown {
   if (typeof value !== 'object' || value === null) return undefined;
   return new Map(Object.entries(value)).get(key);
@@ -206,13 +197,13 @@ function stringField(value: unknown, key: string): string | undefined {
   return typeof found === 'string' ? found : undefined;
 }
 
-function isHousekeepingSweep(block: ContentBlock): boolean {
-  const skill = block.name === 'Skill' ? stringField(block.input, 'skill') : undefined;
+function isHousekeepingSweep(call: ToolCall): boolean {
+  const skill = call.function_name === 'Skill' ? stringField(call.arguments, 'skill') : undefined;
   return skill !== undefined && (skill === 'housekeeping' || skill.endsWith(':housekeeping'));
 }
 
-function bashCommand(block: ContentBlock): string {
-  return block.name === 'Bash' ? (stringField(block.input, 'command') ?? '') : '';
+function bashCommand(call: ToolCall): string {
+  return call.function_name === 'Bash' ? (stringField(call.arguments, 'command') ?? '') : '';
 }
 
 // A heredoc body, up to its delimiter line (or the end, when it has none); the
@@ -248,16 +239,16 @@ function runsGitCommitOrPush(command: string): boolean {
 }
 
 // A launch or a stop of background work changes the task set the session owns.
-function changesTasks(block: ContentBlock): boolean {
-  if (block.name === 'Agent' || block.name === 'Monitor' || block.name === 'TaskStop') return true;
-  return block.name === 'Bash' && field(block.input, 'run_in_background') === true;
+function changesTasks(call: ToolCall): boolean {
+  if (call.function_name === 'Agent' || call.function_name === 'Monitor' || call.function_name === 'TaskStop') return true;
+  return call.function_name === 'Bash' && field(call.arguments, 'run_in_background') === true;
 }
 
 // A real change since the last sweep: a commit or a push. Edits alone are not
 // one (forensics 2026-11-26, K1), and neither is a task-set change: the agent
 // that starts work is doing what idle mode asks (step 6c).
-function changesState(block: ContentBlock): boolean {
-  return runsGitCommitOrPush(bashCommand(block));
+function changesState(call: ToolCall): boolean {
+  return runsGitCommitOrPush(bashCommand(call));
 }
 
 const BACKLOG_WRITE = /\bagent-backlog (add|update|close|done|decide|note|edit|start|block)\b/;
@@ -267,10 +258,10 @@ const BASH_RECORD_WRITE =
 
 // Any write the turn made, so a turn with one is not an answer alone. A
 // message to a subagent or a peer acts too (the blind judge, 2026-11-26).
-function writes(block: ContentBlock): boolean {
-  if (block.name === 'Edit' || block.name === 'Write' || block.name === 'NotebookEdit' || block.name === 'SendMessage') return true;
-  const command = bashCommand(block);
-  return changesState(block) || changesTasks(block) || BACKLOG_WRITE.test(command) || BASH_RECORD_WRITE.test(command);
+function writes(call: ToolCall): boolean {
+  if (['Edit', 'Write', 'NotebookEdit', 'SendMessage'].includes(call.function_name)) return true;
+  const command = bashCommand(call);
+  return changesState(call) || changesTasks(call) || BACKLOG_WRITE.test(command) || BASH_RECORD_WRITE.test(command);
 }
 
 // The final message claims the session can close: the claims an inline sweep
@@ -292,15 +283,15 @@ async function housekeepingDue(input: ClaudeHookInput): Promise<boolean> {
   let sweptThisTurn = false;
   let changed = false;
 
-  for await (const entry of readTranscriptEntries(input.transcript_path)) {
-    if (entry.type === 'system' && entry.subtype === 'stop_hook_summary') {
+  for (const step of await transcriptSteps(ClaudeCodeSession.fromTranscriptPath(input.transcript_path))) {
+    if (step.source === 'system' && field(claudeCode(step.extra).system, 'subtype') === 'stop_hook_summary') {
       sweptThisTurn = false;
-    } else if (entry.type === 'assistant') {
-      for (const block of toolUses(entry.message?.content)) {
-        if (isHousekeepingSweep(block)) {
+    } else if (step.source === 'agent') {
+      for (const call of step.tool_calls ?? []) {
+        if (isHousekeepingSweep(call)) {
           sweptThisTurn = true;
           changed = false;
-        } else if (changesState(block) && !sweptThisTurn) {
+        } else if (changesState(call) && !sweptThisTurn) {
           changed = true;
         }
       }
@@ -312,14 +303,6 @@ async function housekeepingDue(input: ClaudeHookInput): Promise<boolean> {
 }
 
 type HumanInput = { text: string; startsTurn: boolean };
-
-function textOf(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content
-    .map((block: unknown) => (field(block, 'type') === 'text' ? (stringField(block, 'text') ?? '') : ''))
-    .join('\n');
-}
 
 // The words the user typed into an AskUserQuestion dialog: an answer that is
 // not a label of its question's options (a multi-select answer joins labels
@@ -341,26 +324,24 @@ function typedDialogAnswers(result: unknown): string {
     .join('\n');
 }
 
-// What the user said, by its transcript entry: a typed prompt (it starts a
-// turn), a message sent while the turn ran, or a dialog answer. A peer's
-// message, a task notification and a usage-limit continuation are not his.
-function humanInput(entry: TranscriptEntry): HumanInput | undefined {
-  const { attachment } = entry;
-  if (entry.type === 'attachment' && attachment?.type === 'queued_command') {
-    return attachment.origin?.kind === 'human' && typeof attachment.prompt === 'string'
-      ? { text: attachment.prompt, startsTurn: false }
-      : undefined;
-  }
-  if (entry.type !== 'user' || entry.message?.role !== 'user' || entry.isMeta === true) return undefined;
-  if (entry.origin?.kind !== undefined && entry.origin.kind !== 'human') return undefined;
-  const { content } = entry.message;
-  if (Array.isArray(content) && content.some((block: unknown) => field(block, 'type') === 'tool_result')) {
-    return field(entry.toolUseResult, 'answers') === undefined
-      ? undefined
-      : { text: typedDialogAnswers(entry.toolUseResult), startsTurn: false };
-  }
-  const text = textOf(content);
-  return text && !RELAYED_PROMPT.test(text) ? { text, startsTurn: true } : undefined;
+// What the user said, by its user step: a typed prompt (it starts a turn) or a
+// message sent while the turn ran (a queued prompt). A peer's message, a task
+// notification and a usage-limit continuation are not his; a step from a build
+// before origin counts as typed.
+function humanInput(step: Step): HumanInput | undefined {
+  if (step.source !== 'user' || typeof step.message !== 'string') return undefined;
+  const { origin, is_meta: isMeta, queued } = claudeCode(step.extra);
+  if (queued === true) return origin === 'human' ? { text: step.message, startsTurn: false } : undefined;
+  if (isMeta === true || (origin !== undefined && origin !== 'human')) return undefined;
+  return step.message && !RELAYED_PROMPT.test(step.message) ? { text: step.message, startsTurn: true } : undefined;
+}
+
+// The words the user typed into the step's AskUserQuestion dialogs.
+function dialogAnswers(step: Step): HumanInput[] {
+  return (step.observation?.results ?? []).flatMap((result) => {
+    const answered = claudeCode(result.extra).tool_use_result;
+    return field(answered, 'answers') === undefined ? [] : [{ text: typedDialogAnswers(answered), startsTurn: false }];
+  });
 }
 
 // A question that asks for the sweep itself, so the rules still fire. "remain"
@@ -369,19 +350,20 @@ function humanInput(entry: TranscriptEntry): HumanInput | undefined {
 const WRAP_UP_QUESTION =
   /\b(what(?:'|’)?s left|what is left|what(?:(?:'|’)?s| is)? rem[aeiou]{1,4}n(?:ing|s)?\b|anything (rem[aeiou]{1,4}ning|left)|can I close|are you sure|double[- ]check|what are you waiting (for|on)|what now|finished everything)\b/i;
 
-type Turn = { lastHumanInput?: HumanInput; blocks: ContentBlock[]; lastText: string };
+type Turn = { lastHumanInput?: HumanInput; blocks: ToolCall[]; lastText: string };
 
 // The current turn, from the last prompt the user typed: his last input, every
 // tool call since that prompt, and the last text the agent wrote.
 async function currentTurn(transcriptPath: string): Promise<Turn> {
   let turn: Turn = { blocks: [], lastText: '' };
-  for await (const entry of readTranscriptEntries(transcriptPath)) {
-    const human = humanInput(entry);
+  for (const step of await transcriptSteps(ClaudeCodeSession.fromTranscriptPath(transcriptPath))) {
+    const human = humanInput(step);
     if (human?.startsTurn) turn = { lastHumanInput: human, blocks: [], lastText: '' };
     else if (human) turn.lastHumanInput = human;
-    if (entry.type !== 'assistant') continue;
-    turn.blocks.push(...toolUses(entry.message?.content));
-    turn.lastText = textOf(entry.message?.content) || turn.lastText;
+    if (step.source !== 'agent') continue;
+    turn.blocks.push(...(step.tool_calls ?? []));
+    if (typeof step.message === 'string' && step.message) turn.lastText = step.message;
+    for (const answer of dialogAnswers(step)) turn.lastHumanInput = answer;
   }
   return turn;
 }

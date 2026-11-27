@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 
 import { type ClaudeHookInput, evaluateReminderHook } from '@deepagents/experimental/coding-agent-reminders';
@@ -750,7 +750,8 @@ test('subagent stop ignores an unverified gap in the parent session transcript',
   await using folder = await new TemporaryFiles().directory('ezzs-way-of-coding-verify-');
   const directory = folder.path;
   const parentTranscriptPath = join(directory, 'parent.jsonl');
-  const agentTranscriptPath = join(directory, 'agent.jsonl');
+  const agentTranscriptPath = join(directory, 'parent', 'subagents', 'agent-a1.jsonl');
+  await mkdir(dirname(agentTranscriptPath), { recursive: true });
   await writeFile(
     parentTranscriptPath,
     `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'The OAuth consent path remains unverified.' }] } })}\n`,
@@ -783,7 +784,8 @@ test('subagent stop pushes back on an unverified gap in its own transcript', asy
   await using folder = await new TemporaryFiles().directory('ezzs-way-of-coding-verify-');
   const directory = folder.path;
   const parentTranscriptPath = join(directory, 'parent.jsonl');
-  const agentTranscriptPath = join(directory, 'agent.jsonl');
+  const agentTranscriptPath = join(directory, 'parent', 'subagents', 'agent-a1.jsonl');
+  await mkdir(dirname(agentTranscriptPath), { recursive: true });
   await writeFile(
     parentTranscriptPath,
     `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Verified live against 960 real events.' }] } })}\n`,
@@ -838,7 +840,8 @@ test('subagent stop without its own transcript never judges the parent session t
 test('subagent stop judges its final message over its own transcript', async () => {
   await using folder = await new TemporaryFiles().directory('ezzs-way-of-coding-verify-');
   const directory = folder.path;
-  const agentTranscriptPath = join(directory, 'agent.jsonl');
+  const agentTranscriptPath = join(directory, 'parent', 'subagents', 'agent-a1.jsonl');
+  await mkdir(dirname(agentTranscriptPath), { recursive: true });
   await writeFile(
     agentTranscriptPath,
     `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Done, but the OAuth consent path remains unverified.' }] } })}\n`,
