@@ -5,7 +5,7 @@ An agent runs its Bash and Monitor commands in zsh. This folder holds the rules 
 | File | What it does |
 |---|---|
 | `agent-shell.zsh` | Sets zsh options before each command, through `CLAUDE_ENV_FILE`. These options remove three traps: word splitting, unmatched globs and `=word`. |
-| `block-git-mutation.ts` | The PreToolUse hook. It refuses a git command that changes history, refs or the shared index, and it calls the shell checks. |
+| `block-git-mutation.ts` | The PreToolUse hook. It refuses a git command that changes history, refs or the shared index, and it calls the shell checks. It allows `git tag` only in a throwaway repo under a session scratchpad or `~/.claude/scratch` whose every remote is a bare repo there (Ezz, 2026-11-20). |
 | `shell-traps.ts` | The shell checks. Each one refuses one type of bad command, and its message gives the fix. |
 | `shell-lex.ts` | Reads shell text. The hook and the checks both use it. |
 

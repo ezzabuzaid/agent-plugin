@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { stdin } from 'node:process';
 import type { Delimiter } from './shell-lex.ts';
 
@@ -477,6 +477,62 @@ function remoteRepositories(cwd: string): Set<string> {
 	);
 }
 
+// A tag in a real repo publishes a release, so `git tag` stays refused there. Ezz
+// allowed it on 2026-11-20 in a throwaway `git init` repo under a session
+// scratchpad (/tmp/claude-<uid>/<project>/<session>/scratchpad) or ~/.claude/scratch,
+// when every remote is a bare repo in such a folder: a test that arranges a tag then
+// runs locally. The repo is the one at the session cwd, or the one -C names from
+// there. A cd, pushd, popd, chdir or cwd anywhere in the Bash command, GIT_DIR,
+// GIT_WORK_TREE, --git-dir, --work-tree or a variable can move git to a repo the
+// hook does not read, so each one keeps the tag refused.
+function inThrowawayFolder(path: string): boolean {
+	try {
+		const real = realpathSync(path);
+		const inside = (root: string, rest: RegExp) => {
+			const rel = relative(realpathSync(root), real);
+			return !rel.startsWith('..') && !isAbsolute(rel) && rest.test(rel);
+		};
+		return (
+			inside(join('/tmp', `claude-${process.getuid?.()}`), /^[^/]+\/[^/]+\/scratchpad(?:\/|$)/) ||
+			inside(join(homedir(), '.claude', 'scratch'), /^[^/]/)
+		);
+	} catch {
+		return false;
+	}
+}
+
+function isBareRepository(path: string): boolean {
+	const { stdout } = spawnSync('git', ['-C', path, 'rev-parse', '--is-bare-repository'], { encoding: 'utf8' });
+	return stdout?.trim() === 'true';
+}
+
+function throwawayRepository(command: string, globalOptions: string[], cwd: string): boolean {
+	if (/\bGIT_(?:DIR|WORK_TREE)=|(?:^|[^\w-])(?:cd|pushd|popd|chdir)\b|\bcwd\b/.test(command)) return false;
+	let folder = cwd;
+	for (let i = 0; i < globalOptions.length; i += 1) {
+		const option = globalOptions[i] ?? '';
+		if (/^--(?:git-dir|work-tree)(?:=|$)/.test(option)) return false;
+		if (option !== '-C') continue;
+		const target = globalOptions[i + 1] ?? '';
+		if (/[$`]/.test(target)) return false;
+		folder = resolve(folder, target.replace(/^~(?=\/|$)/, homedir()));
+		i += 1;
+	}
+	const toplevel = spawnSync('git', ['-C', folder, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+	if (toplevel.status !== 0 || !inThrowawayFolder(toplevel.stdout.trim())) return false;
+	const { stdout, status } = spawnSync('git', ['-C', folder, 'remote', '-v'], { encoding: 'utf8' });
+	if (status !== 0) return false;
+	return stdout
+		.split('\n')
+		.filter(Boolean)
+		.every((line) => {
+			const url = line.split(/\s+/)[1] ?? '';
+			if (repositoryOf(url)) return false;
+			const remote = resolve(folder, url.replace(/^file:\/\//, ''));
+			return inThrowawayFolder(remote) && isBareRepository(remote);
+		});
+}
+
 function readOnlyReflog(tokens: string[]): boolean {
 	const first = tokens[0];
 	if (first === undefined) return true;
@@ -702,7 +758,8 @@ function stagesNothing(args: string[]): boolean {
 	return options.some((token) => token === '--dry-run' || /^-[A-Za-z]*n[A-Za-z]*$/.test(token));
 }
 
-function blockedGitCommands(command: string, cwd: string, depth = 0): Blocked[] {
+// `root` is the whole Bash command, which a git command nested in a shell or a script runs inside.
+function blockedGitCommands(command: string, cwd: string, depth = 0, root = command): Blocked[] {
 	const blocked: Blocked[] = [];
 	const guard = (subcommand: string) => blocked.push({ subcommand, reason: 'guard' });
 	const parts = splitWithDelimiters(withoutDataHeredocs(command));
@@ -725,7 +782,7 @@ function blockedGitCommands(command: string, cwd: string, depth = 0): Blocked[] 
 	if (depth <= 2) {
 		for (const match of command.matchAll(HEREDOC_SCRIPT)) {
 			for (const git of scriptGitCommands(match[3]))
-				blocked.push(...blockedGitCommands(git, cwd, depth + 1));
+				blocked.push(...blockedGitCommands(git, cwd, depth + 1, root));
 		}
 	}
 
@@ -735,12 +792,12 @@ function blockedGitCommands(command: string, cwd: string, depth = 0): Blocked[] 
 		for (let i = 0; i < tokens.length - 2; i += 1) {
 			if (!isShellExecutable(tokens[i])) continue;
 			if (!isShellCommandFlag(tokens[i + 1])) continue;
-			blocked.push(...blockedGitCommands(tokens[i + 2], cwd, depth + 1));
+			blocked.push(...blockedGitCommands(tokens[i + 2], cwd, depth + 1, root));
 		}
 
 		for (const script of inlineScripts(segment)) {
 			for (const git of scriptGitCommands(script))
-				blocked.push(...blockedGitCommands(git, cwd, depth + 1));
+				blocked.push(...blockedGitCommands(git, cwd, depth + 1, root));
 		}
 
 		const call = calls[at];
@@ -811,6 +868,11 @@ function blockedGitCommands(command: string, cwd: string, depth = 0): Blocked[] 
 			continue;
 		}
 
+		if (subcommand === 'tag') {
+			if (!throwawayRepository(root, globalOptions, cwd)) guard(subcommand);
+			continue;
+		}
+
 		if (subcommand === 'stash') {
 			if (!readOnlyStash(args)) guard(subcommand);
 			continue;
@@ -856,7 +918,7 @@ function deny(reason: string) {
 
 const REASONS: Record<Reason, string> = {
 	guard:
-		"User guardrail: agents may inspect git state and may init, commit, fetch, pull, push, and set up remotes and upstream branches, and point core.hooksPath at the repo's hook folder, but must not reset, checkout, switch, restore, merge, rebase, tag, or otherwise rewrite history, refs, or the working tree unless the user changes this hook. Also blocked: --no-verify, and -c core.hooksPath set to a path outside the repo (fix what the repo hook reports, or ask the user) and an attribution trailer in a commit message (Co-Authored-By:, Claude-Session:). The same rules apply to git that a node or python script runs.",
+		"User guardrail: agents may inspect git state and may init, commit, fetch, pull, push, and set up remotes and upstream branches, and point core.hooksPath at the repo's hook folder, but must not reset, checkout, switch, restore, merge, rebase, tag (allowed only in a throwaway repo under a session scratchpad or ~/.claude/scratch whose every remote is a bare repo there; name that repo with `git -C <repo> tag`, not with cd), or otherwise rewrite history, refs, or the working tree unless the user changes this hook. Also blocked: --no-verify, and -c core.hooksPath set to a path outside the repo (fix what the repo hook reports, or ask the user) and an attribution trailer in a commit message (Co-Authored-By:, Claude-Session:). The same rules apply to git that a node or python script runs.",
 	'shared-index':
 		'Every session in a checkout shares .git/index, and a commit without paths takes everything staged there. Stage only in the Bash command that commits those paths: `git add -- <paths> && git commit --only -m <msg> -- <paths>` (delete or move a file with plain rm or mv, then name the old and new paths).',
 	'whole-index':

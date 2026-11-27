@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, symlinkSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { TemporaryFiles } from '@zukhruf/fs';
@@ -268,6 +269,113 @@ test('blocks a clone that borrows the objects of a checkout through --reference,
   }
   const command = `git clone --reference ${bare} https://github.com/x/unrelated.git ${copy}`;
   assert.equal(runHook(command, dir.path), null, command);
+});
+
+// 2026-11-20: Ezz allowed a tag in a throwaway `git init` repo under the session scratchpad,
+// whose remote is a throwaway bare repo there, so a test that arranges a tag runs locally (#6176).
+const CLAUDE_TMP = join('/tmp', `claude-${process.getuid?.()}`);
+
+test('allows git tag in a scratchpad repo with no remote or with a bare remote in the scratchpad', () => {
+  mkdirSync(CLAUDE_TMP, { recursive: true });
+  using project = new TemporaryFiles().directorySync('-git-guard-tag-', { parent: CLAUDE_TMP });
+  const pad = join(project.path, 'session', 'scratchpad');
+  const lone = join(pad, 'lone');
+  const work = join(pad, 'work');
+  const bare = join(pad, 'remote.git');
+  assert.equal(spawnSync('git', ['init', '-q', lone]).status, 0);
+  assert.equal(spawnSync('git', ['init', '-q', work]).status, 0);
+  assert.equal(spawnSync('git', ['init', '-q', '--bare', bare]).status, 0);
+  assert.equal(spawnSync('git', ['-C', work, 'remote', 'add', 'origin', bare]).status, 0);
+  mkdirSync(join(work, 'src'));
+  const byFileUrl = join(pad, 'by-file-url');
+  const byRelativePath = join(pad, 'by-relative-path');
+  for (const [repo, url] of [[byFileUrl, `file://${bare}`], [byRelativePath, '../remote.git']]) {
+    assert.equal(spawnSync('git', ['init', '-q', repo]).status, 0);
+    assert.equal(spawnSync('git', ['-C', repo, 'remote', 'add', 'origin', url]).status, 0);
+  }
+  using outside = new TemporaryFiles().directorySync('git-guard-tag-');
+  for (const [command, cwd] of [
+    ['git tag v1', lone],
+    ['git tag -a v1 -m v1', work],
+    ['git tag -d v1', join(work, 'src')],
+    ['git tag v1', byFileUrl],
+    ['git tag v1', byRelativePath],
+    [`git -C ${work} tag v2`, outside.path],
+  ]) {
+    assert.equal(runHook(command, cwd), null, `${command} in ${cwd}`);
+  }
+});
+
+test('allows git tag in a repo under ~/.claude/scratch, also named by -C with a tilde', () => {
+  const home = join(homedir(), '.claude', 'scratch');
+  mkdirSync(home, { recursive: true });
+  using folder = new TemporaryFiles().directorySync('git-guard-tag-', { parent: home });
+  const repo = join(folder.path, 'work');
+  assert.equal(spawnSync('git', ['init', '-q', repo]).status, 0);
+  assert.equal(runHook('git tag v1', repo), null, repo);
+  const tilde = `~/${repo.slice(homedir().length + 1)}`;
+  assert.equal(runHook(`git -C ${tilde} tag v1`, process.cwd()), null, tilde);
+});
+
+test('blocks git tag in a scratchpad repo whose remote is a network URL, a checkout, or a bare repo outside the scratchpad', () => {
+  mkdirSync(CLAUDE_TMP, { recursive: true });
+  using project = new TemporaryFiles().directorySync('-git-guard-tag-', { parent: CLAUDE_TMP });
+  using outside = new TemporaryFiles().directorySync('git-guard-tag-');
+  const pad = join(project.path, 'session', 'scratchpad');
+  const bare = join(pad, 'remote.git');
+  const outsideBare = join(outside.path, 'remote.git');
+  const checkout = join(pad, 'checkout');
+  for (const repo of [bare, outsideBare]) assert.equal(spawnSync('git', ['init', '-q', '--bare', repo]).status, 0);
+  assert.equal(spawnSync('git', ['init', '-q', checkout]).status, 0);
+  const remotes: [string, string[][]][] = [
+    ['github', [['remote', 'add', 'origin', 'https://github.com/JanuaryLabs/zukhruf.git']]],
+    ['scp', [['remote', 'add', 'origin', 'git@github.com:JanuaryLabs/zukhruf.git']]],
+    ['second', [['remote', 'add', 'origin', bare], ['remote', 'add', 'upstream', 'https://github.com/JanuaryLabs/zukhruf.git']]],
+    ['pushurl', [['remote', 'add', 'origin', bare], ['remote', 'set-url', '--push', 'origin', 'https://github.com/JanuaryLabs/zukhruf.git']]],
+    ['checkout', [['remote', 'add', 'origin', checkout]]],
+    ['outside', [['remote', 'add', 'origin', outsideBare]]],
+  ];
+  for (const [name, setup] of remotes) {
+    const work = join(pad, name);
+    assert.equal(spawnSync('git', ['init', '-q', work]).status, 0);
+    for (const args of setup) assert.equal(spawnSync('git', ['-C', work, ...args]).status, 0);
+    // Git reads `git@github.com:…` as a host, even when a folder of that name exists.
+    if (name === 'scp') assert.equal(spawnSync('git', ['init', '-q', '--bare', join(work, 'git@github.com:JanuaryLabs', 'zukhruf.git')]).status, 0);
+    const reason = runHook('git tag v1', work)?.hookSpecificOutput?.permissionDecisionReason ?? '';
+    assert.match(reason, /Blocked git tag\b/, name);
+  }
+});
+
+test('blocks git tag in a repo outside the scratchpad, and on a repo that -C, GIT_DIR, cd or a script cwd names from a scratchpad', () => {
+  mkdirSync(CLAUDE_TMP, { recursive: true });
+  using project = new TemporaryFiles().directorySync('-git-guard-tag-', { parent: CLAUDE_TMP });
+  using outside = new TemporaryFiles().directorySync('git-guard-tag-');
+  const pad = join(project.path, 'session', 'scratchpad');
+  const scratch = join(pad, 'work');
+  const real = join(outside.path, 'work');
+  const notScratchpad = join(project.path, 'session', 'other', 'work');
+  const literalVariable = join(pad, '$REPO');
+  for (const repo of [scratch, real, notScratchpad, literalVariable]) assert.equal(spawnSync('git', ['init', '-q', repo]).status, 0);
+  const link = join(pad, 'link');
+  symlinkSync(real, link);
+  for (const [command, cwd] of [
+    ['git tag v1', real],
+    ['git tag v1', notScratchpad],
+    ['git tag v1', process.cwd()],
+    ['git tag v1', pad],
+    [`git -C ${real} tag v1`, scratch],
+    [`GIT_DIR=${join(real, '.git')} git tag v1`, scratch],
+    [`git --git-dir=${join(real, '.git')} tag v1`, scratch],
+    ['git -C $REPO tag v1', pad],
+    ['git tag v1', link],
+    [`cd ${real} && git tag v1`, scratch],
+    [`pushd ${real}; git tag v1`, scratch],
+    [`cd ${real} && bash -c 'git tag v1'`, scratch],
+    [`node -e "require('child_process').execSync('git tag v1', { cwd: '${real}' })"`, scratch],
+  ]) {
+    const reason = runHook(command, cwd)?.hookSpecificOutput?.permissionDecisionReason ?? '';
+    assert.match(reason, /Blocked git tag\b/, `${command} in ${cwd}`);
+  }
 });
 
 test('allows git remote -v', () => {
