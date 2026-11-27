@@ -159,8 +159,10 @@ Claude Code's `CLAUDE_CODE_ENTRYPOINT` (`cli` in a terminal, `sdk-cli` under
 Three PreToolUse guards refuse a call before it runs:
 `dialog-only-asks` refuses an AskUserQuestion whose question is over 150
 characters or whose option description is over 100;
-`memory-compaction-is-the-users` refuses an Agent brief that asks to shrink a
-`MEMORY.md` under a size, and a Write or Edit that drops more than max(1, 10%)
+`memory-compaction-is-the-users` refuses an Agent brief that names `MEMORY.md`
+and, in one sentence, asks to shrink something under a file size (KB, bytes) or
+to shrink the index or a memory file under any size (a count label such as
+"trimmed" beside a report length is not an order), and a Write or Edit that drops more than max(1, 10%)
 of a `MEMORY.md`'s index lines, comparing the index on disk with the file the
 call leaves (an Edit's `old_string` → `new_string`, or every match under
 `replace_all`), line by line;

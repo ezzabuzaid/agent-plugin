@@ -9,16 +9,27 @@ import { readFile } from 'node:fs/promises';
 
 // A brief that asks to make MEMORY.md smaller than a size: "Rewrite it to under
 // 17.1KB", "compact MEMORY.md to about 15 KB", "trim the index below 200 lines".
-// The verb and the size share one sentence, so "never rewrite history" and a
-// report "under 30 lines" in the same brief are not an order.
-const SHRINK_VERB = /\b(?:compact|compress|condense|shorten|shrink|trim|rewrite|consolidate)\w*\b/i;
-const SIZE_TARGET = /\b(?:under|below|to|within|at most|about|~)\s*~?\d+(?:\.\d+)?\s*(?:KB|kB|K|KiB|bytes|lines|chars|characters)\b/i;
+// The verb and the size share one sentence, and either the size is a file size
+// or the verb's object is the index or a memory file. So "never rewrite
+// history", a report "under 30 lines" and a report of counts "(trimmed, pruned,
+// kept) in under 25 lines" are not an order (#6171).
+const SHRINK = String.raw`\b(?:compact|compress|condense|shorten|shrink|trim|rewrite|consolidate)\w*`;
+const SHRINK_VERB = new RegExp(String.raw`${SHRINK}\b`, 'i');
+// The object follows the verb within four words, with no punctuation between.
+const SHRINKS_MEMORY = new RegExp(
+  String.raw`${SHRINK}\s+(?:[\w'-]+\s+){0,4}(?:[\x60"']?\S*(?:\bMEMORY\.md|/memory/\S+\.md)|index\b|memory files?\b)`,
+  'i',
+);
+const SIZE = String.raw`\b(?:under|below|to|within|at most|about|~)\s*~?\d+(?:\.\d+)?\s*`;
+const FILE_SIZE = new RegExp(String.raw`${SIZE}(?:KB|kB|K|KiB|bytes)\b`, 'i');
+const SIZE_TARGET = new RegExp(String.raw`${SIZE}(?:KB|kB|K|KiB|bytes|lines|chars|characters)\b`, 'i');
+
+function ordersAShrink(sentence: string): boolean {
+  return (SHRINK_VERB.test(sentence) && FILE_SIZE.test(sentence)) || (SHRINKS_MEMORY.test(sentence) && SIZE_TARGET.test(sentence));
+}
 
 function briefsACompaction(prompt: string): boolean {
-  return (
-    /\bMEMORY\.md\b/.test(prompt) &&
-    prompt.split(/(?<=[.!?])\s+|\n/).some((sentence) => SHRINK_VERB.test(sentence) && SIZE_TARGET.test(sentence))
-  );
+  return /\bMEMORY\.md\b/.test(prompt) && prompt.split(/(?<=[.!?])\s+|\n/).some(ordersAShrink);
 }
 
 // The index of an auto-memory folder: ~/.claude/projects/<project>/memory/MEMORY.md.

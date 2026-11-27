@@ -1884,6 +1884,9 @@ test('a one-line question with short labels goes through, and a malformed dialog
 // the 44 it lets through read, audit or name the index. Of the 2 Writes of an
 // auto-memory MEMORY.md on this machine, it refuses neither (one adds lines,
 // one drops the only entry of a one-entry index).
+// Replayed for #6171 on the 44 Agent briefs of the last 30 days that name
+// MEMORY.md: the old rule refused 9, this one 5; the 4 it lets through are the
+// 5adf314a consolidation briefs whose report line counts "trimmed" entries.
 const COMPACTION_IS_THE_USERS =
   "A MEMORY.md compaction is the user's to start (memory-compaction-needs-consent). Add your line above line ~190 and leave the rest.";
 const MUTEX_MEMORY = '/Users/ezzabuzaid/.claude/projects/-Users-ezzabuzaid-Desktop-experiments-mutex/memory/MEMORY.md';
@@ -1893,6 +1896,7 @@ test('an Agent brief that orders a MEMORY.md compaction under a size is refused'
     `Fix one file: \`${MUTEX_MEMORY}\`, the index of an auto-memory directory. It is 34.2KB (about 250 lines). Only the first 24.4KB loads into each session, so its last 62 lines are never read. Rewrite it to under 17.1KB, with about 15KB as the target.`,
     'Compact the Claude Code auto-memory index /Users/ezzabuzaid/.claude/projects/-Users-ezzabuzaid-Desktop-January-deepagents/memory/MEMORY.md from ~194 lines to UNDER 140 lines. It is loaded into every session and truncated past 200 lines.',
     'MEMORY.md is too long.\nTrim the index below 200 lines.',
+    `MEMORY.md points at it. Condense ${MUTEX_MEMORY.replace('MEMORY.md', 'feedback_docker.md')} to under 20 lines.`,
   ]) {
     assert.equal(await refusal('Agent', { prompt, effort: 'low' }), COMPACTION_IS_THE_USERS, prompt);
   }
@@ -1904,6 +1908,8 @@ test('an Agent brief that reads MEMORY.md, or asks for a shrink and a size in di
     'Never rewrite history. Fix the hook; the session-harvest rule names auto-memory/MEMORY.md. Report under 30 lines.',
     'Rewrite the README intro to under 100 lines.',
     `Lens: DUPLICATION. Corpus: the index at ${MUTEX_MEMORY}. Compact dump (no bodies) is attached. Goal context: the index must drop from 168 to under 140 lines.`,
+    // #6171: a report line whose count labels hold a shrink word, beside a report length.
+    `Apply the cluster's edits to ${MUTEX_MEMORY} and its memory files. Return counts (trimmed, pruned, kept) in under 25 lines.`,
   ]) {
     assert.equal(await refusal('Agent', { prompt, effort: 'low' }), undefined, prompt);
   }
