@@ -28,8 +28,23 @@ function ordersAShrink(sentence: string): boolean {
   return (SHRINK_VERB.test(sentence) && FILE_SIZE.test(sentence)) || (SHRINKS_MEMORY.test(sentence) && SIZE_TARGET.test(sentence));
 }
 
+// A quoted order that a framing phrase gives as an example or a test case is
+// not an order: 'keep tests that a real order (for example "<order>", "<order>")
+// is still refused' (#6233). A quoted order with no framing phrase still is.
+const QUOTED = String.raw`(?:"[^"\n]*"|\x60[^\x60\n]*\x60|“[^”\n]*”)`;
+const QUOTED_EXAMPLES = new RegExp(
+  String.raw`\b(?:for example|for instance|e\.g\.|such as|tests? that)[\s,:]*${QUOTED}(?:\s*(?:,|\bor\b|\band\b)\s*${QUOTED})*`,
+  'gi',
+);
+
 function briefsACompaction(prompt: string): boolean {
-  return /\bMEMORY\.md\b/.test(prompt) && prompt.split(/(?<=[.!?])\s+|\n/).some(ordersAShrink);
+  return (
+    /\bMEMORY\.md\b/.test(prompt) &&
+    prompt
+      .replace(QUOTED_EXAMPLES, '')
+      .split(/(?<=[.!?])\s+|\n/)
+      .some(ordersAShrink)
+  );
 }
 
 // The index of an auto-memory folder: ~/.claude/projects/<project>/memory/MEMORY.md.

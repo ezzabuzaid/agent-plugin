@@ -1914,6 +1914,9 @@ test('an Agent brief that orders a MEMORY.md compaction under a size is refused'
     'Compact the Claude Code auto-memory index /Users/ezzabuzaid/.claude/projects/-Users-ezzabuzaid-Desktop-January-deepagents/memory/MEMORY.md from ~194 lines to UNDER 140 lines. It is loaded into every session and truncated past 200 lines.',
     'MEMORY.md is too long.\nTrim the index below 200 lines.',
     `MEMORY.md points at it. Condense ${MUTEX_MEMORY.replace('MEMORY.md', 'feedback_docker.md')} to under 20 lines.`,
+    // #6233: quotes alone do not make an order an example.
+    'MEMORY.md is too long. Send the subagent this: "Compress MEMORY.md to under 200 lines."',
+    'The index is MEMORY.md. `Trim the index to 24 KB` is the task.',
   ]) {
     assert.equal(await refusal('Agent', { prompt, effort: 'low' }), COMPACTION_IS_THE_USERS, prompt);
   }
@@ -1927,6 +1930,9 @@ test('an Agent brief that reads MEMORY.md, or asks for a shrink and a size in di
     `Lens: DUPLICATION. Corpus: the index at ${MUTEX_MEMORY}. Compact dump (no bodies) is attached. Goal context: the index must drop from 168 to under 140 lines.`,
     // #6171: a report line whose count labels hold a shrink word, beside a report length.
     `Apply the cluster's edits to ${MUTEX_MEMORY} and its memory files. Return counts (trimmed, pruned, kept) in under 25 lines.`,
+    // #6233: quoted orders that a framing phrase gives as examples or test cases.
+    'The guard reads MEMORY.md briefs. Add the refused sentence as a near-miss test (must allow), and keep or add tests that a real compaction order (for example "compress MEMORY.md to under 200 lines", "trim the index to 24 KB") is still refused.',
+    'The guard reads MEMORY.md briefs. Add tests that `Shrink MEMORY.md to 15 KB.` is refused, with orders such as "condense the index below 180 lines" or "rewrite it to under 17.1KB".',
   ]) {
     assert.equal(await refusal('Agent', { prompt, effort: 'low' }), undefined, prompt);
   }
