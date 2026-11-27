@@ -2,6 +2,7 @@ import {
   always,
   and,
   type ClaudeHookInput,
+  not,
   type ReminderRule,
 } from '@deepagents/experimental/coding-agent-reminders';
 
@@ -9,30 +10,16 @@ import { sessionEvents } from './events.ts';
 import { typedByUser } from './intent.ts';
 import { readTranscriptEntries } from './transcript.ts';
 
-type Agent = 'claude' | 'codex';
+/** A session's first prompt can find its transcript missing or empty. */
+async function transcriptHasEntry(input: ClaudeHookInput): Promise<boolean> {
+  if (!input.transcript_path) return false;
 
-/**
- * A Codex rollout opens with a `session_meta` entry; a Claude transcript never
- * has one. Its `turn_context` entries come only
- * after the first user message, so they cannot name the agent on the first
- * prompt. A missing or empty transcript names no agent.
- */
-async function transcriptAgent(
-  input: ClaudeHookInput,
-): Promise<Agent | undefined> {
-  if (!input.transcript_path) return undefined;
-
-  for await (const entry of readTranscriptEntries(input.transcript_path)) {
-    return entry.type === 'session_meta' ? 'codex' : 'claude';
+  for await (const _entry of readTranscriptEntries(input.transcript_path)) {
+    return true;
   }
 
-  return undefined;
+  return false;
 }
-
-const agentIs =
-  (agent: Agent | undefined) =>
-  async (input: ClaudeHookInput): Promise<boolean> =>
-    (await transcriptAgent(input)) === agent;
 
 const HARVEST_SCAN =
   'SESSION HARVEST: Scan recent messages for unsaved user preferences, corrections, or clarifications.';
@@ -59,7 +46,7 @@ export const defaultsRules: ReminderRule[] = [
     id: 'session-harvest',
     target: 'prompt',
     events: ['UserPromptSubmit'],
-    when: and(typedByUser, agentIs('claude')),
+    when: and(typedByUser, transcriptHasEntry),
     message: [
       HARVEST_SCAN,
       HARVEST_ROUTE,
@@ -71,19 +58,7 @@ export const defaultsRules: ReminderRule[] = [
     id: 'session-harvest',
     target: 'prompt',
     events: ['UserPromptSubmit'],
-    when: and(typedByUser, agentIs('codex')),
-    message: [
-      HARVEST_SCAN,
-      HARVEST_ROUTE,
-      'If any, save each one as an ad-hoc memory note at ~/.codex/memories/extensions/ad_hoc/notes/<YYYYMMDDTHHMMSS>-<slug>.md; Codex consolidates those notes into its memories. If a skill was used and the user gave feedback on it, save that feedback as a note too and name the skill.',
-      HARVEST_QUIET,
-    ].join(' '),
-  },
-  {
-    id: 'session-harvest',
-    target: 'prompt',
-    events: ['UserPromptSubmit'],
-    when: and(typedByUser, agentIs(undefined)),
+    when: and(typedByUser, not(transcriptHasEntry)),
     message: [
       HARVEST_SCAN,
       HARVEST_ROUTE,

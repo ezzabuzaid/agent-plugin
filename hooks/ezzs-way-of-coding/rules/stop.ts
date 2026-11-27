@@ -284,9 +284,7 @@ const CLOSE_CLAIM =
  * claim. A change in the sweep's own turn, after the sweep, is the sweep's
  * close-out and counts only after a stop. Only a Skill call for housekeeping
  * resets it: a sweep written from memory leaves it due, so the next stop fires
- * again. Claude Code writes a `stop_hook_summary` entry each time a turn stops;
- * a Codex transcript (it has `turn_context` entries) has none, so the rule is
- * off there.
+ * again. Claude Code writes a `stop_hook_summary` entry each time a turn stops.
  */
 async function housekeepingDue(input: ClaudeHookInput): Promise<boolean> {
   if (!input.transcript_path) return false;
@@ -295,7 +293,6 @@ async function housekeepingDue(input: ClaudeHookInput): Promise<boolean> {
   let changed = false;
 
   for await (const entry of readTranscriptEntries(input.transcript_path)) {
-    if (entry.type === 'turn_context') return false;
     if (entry.type === 'system' && entry.subtype === 'stop_hook_summary') {
       sweptThisTurn = false;
     } else if (entry.type === 'assistant') {
@@ -461,8 +458,8 @@ function runningWork(input: ClaudeHookInput): string[] {
 // A headless run (`claude -p`, the Agent SDKs) has no AskUserQuestion and no
 // person to sweep for. Claude Code names how it started only in its
 // environment (CLAUDE_CODE_ENTRYPOINT: 'cli' in a terminal, 'sdk-cli' under
-// -p), so hook.ts copies it into the input. A host that sends none (Codex)
-// counts as interactive.
+// -p), so hook.ts copies it into the input. An input without it counts as
+// interactive.
 function runsHeadless(input: ClaudeHookInput): boolean {
   const entrypoint = input['claude_code_entrypoint'];
   return typeof entrypoint === 'string' && entrypoint.startsWith('sdk-');

@@ -69,7 +69,7 @@ A verdict comes from a check that ran, never from memory. When a check cannot ru
    - The package exports mechanism (classes, functions), never instances or `configure*` slots. A thing that owns a resource over time is a class with `[Symbol.asyncDispose]`.
 4. **Write the paper** in the doc shape of the repo; read a sibling's README, CONTEXT.md and `docs/adr` first. The README has task sections, the signature block, a call → what happens underneath table, the errors, "the same concepts in other systems", why each npm candidate failed, and who uses what. CONTEXT.md holds the glossary. Each decision gets an ADR whose name is a sentence. A port keeps `docs/ported-from-<upstream>.md`.
 5. **Commit the paper alone,** in a folder with no package.json and no tsconfig, with a "design for review" banner: `docs(<pkg>): the API on paper of …, for review before any code`.
-6. **Review it in chat,** not as a path. Show the now/later/never map, the layer diagram, and each decision with its precedent. Show each change that a caller can see (export, signature, option, default, error) as before/after with its cost. Say what you decided and why. Then get the user's ruling on each change with AskUserQuestion in the same turn (in Codex, ask in plain text).
+6. **Review it in chat,** not as a path. Show the now/later/never map, the layer diagram, and each decision with its precedent. Show each change that a caller can see (export, signature, option, default, error) as before/after with its cost. Say what you decided and why. Then get the user's ruling on each change with AskUserQuestion in the same turn.
 
 **Done when** the user has ruled on the paper. No code comes before that.
 

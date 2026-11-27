@@ -16,8 +16,8 @@ more places.
 - Hook + rules: `~/Desktop/January/agent-plugin/hooks/ezzs-way-of-coding/`
   (rules live in `rules/<theme>.ts` files — evidence, change-safety, testing,
   collaboration, frontend, infra, failures, defaults — assembled by
-  `rules/index.ts`; `rules.test.ts` is the black-box suite; both Claude and
-  Codex execute `hook.ts` on their hook events)
+  `rules/index.ts`; `rules.test.ts` is the black-box suite; Claude Code
+  executes `hook.ts` on its hook events)
 - Explorer CLI: `~/Desktop/January/agent-plugin/tools/explore-agents-md/cli.ts`
 - Predicate reference: the package types at
   `node_modules/@deepagents/experimental/dist/coding-agent-reminders/types.d.ts`

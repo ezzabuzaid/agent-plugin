@@ -9,7 +9,7 @@ argument-hint: '[<project> | next [<project>] | all | dry-run <project>]'
 
 You are the **lead**. You collect evidence, pick, claim, stamp, commit and finish. Three subagents do the reading and writing: `coding:docs-analyst` finds gaps, `coding:docs-writer` writes one file, `coding:docs-judge` approves or rejects drafts. A deterministic tool owns every state change in git and in the ledger. Below, `update-docs <command>` stands for `node <this skill's folder>/scripts/src/main.ts <command>`, run inside the repository; write the full command each time. Call the tool; do not re-implement what it does, because its refusals protect peer sessions that share this checkout.
 
-When an agent is not offered in this session (it was installed after the session started, or you run in Codex, whose plugins cannot ship agents), start a general subagent and give it the agent's file as its brief: `../../agents/<name>.md` from this skill's folder.
+When an agent is not offered in this session (it was installed after the session started), start a general subagent and give it the agent's file as its brief: `../../agents/<name>.md` from this skill's folder.
 
 ## The repository
 

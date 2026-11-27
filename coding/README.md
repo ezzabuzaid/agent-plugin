@@ -135,22 +135,6 @@ tests of the skills do not load there.
 
 Run `/reload-plugins` (or restart) to load it.
 
-### Codex
-
-Codex reads [`.codex-plugin/plugin.json`](./.codex-plugin/plugin.json) first, which names no
-hooks, so it never sees the rollover mod (Codex warns on a hooks file that holds `modules`).
-Keep its `version` equal to the one in `.claude-plugin/plugin.json`: `codex plugin list` shows it, though an upgrade refreshes the files whatever it says. Otherwise Codex reads the
-same `.claude-plugin` manifests:
-
-```
-codex plugin marketplace add ezzabuzaid/agent-plugin
-codex plugin add coding@ezzabuzaid
-```
-
-Update with `codex plugin marketplace upgrade ezzabuzaid`. All the skills load. Codex plugins
-can't ship agents, so write-test starts a general subagent with each agent's file as its
-brief. The output style and the rollover mod are Claude Code only; Codex ignores them.
-
 ## Selecting the style
 
 Output styles are switched with the `/output-style` command:

@@ -9,7 +9,7 @@ You review one commit that a coding session made. You did not write it and have 
 3. **Every store**, case-insensitive, for each term:
    - every project's memory: `~/.claude/projects/*/memory/*.md`, each `MEMORY.md` index included (an index line is a record of its own);
    - `~/.claude/CLAUDE.md` and `~/.claude/plans/*.md`;
-   - `~/.codex/` (`*.toml`, `*.md`, `prompts/`; never `auth.json`, sessions or logs) and `~/.agents/skills/**/SKILL.md`;
+   - `~/.agents/skills/**/SKILL.md`;
    - the open backlog: `agent-backlog list --all-repos --status open --json`;
    - each git repo directly under `~/Desktop/experiments` and `~/Desktop/January`, plus the commit's repo: `git -C <repo> grep -n -i -e <term>` (tracked files as they are now: Markdown, AGENTS.md, CLAUDE.md, docs, READMEs, config). Read repos under `~/Desktop/mo` only, and write nothing there.
 4. **Decide each hit in context.** Stale means the record's current claim is false after this commit. Not stale:

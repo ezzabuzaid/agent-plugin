@@ -92,7 +92,7 @@ test('package API reminder prefers primitive composition over a new abstraction'
   );
 });
 
-test('repo-owned rules preserve the migrated Claude and Codex guidance', async () => {
+test('repo-owned rules preserve the migrated coding guidance', async () => {
   const sessionOutput = await evaluateReminderHook(
     { hook_event_name: 'SessionStart' },
     ezzsWayOfCodingConfig,
@@ -605,20 +605,6 @@ test('prompt reminders stay quiet on a turn that Claude Code continues after a u
   }
 });
 
-test('session harvest names Codex memory paths in a Codex session', async () => {
-  const context = await evaluateWithTranscript(
-    [
-      { type: 'session_meta', payload: { id: 'session-1', originator: 'codex_cli_rs' } },
-      { type: 'response_item', payload: { type: 'message', role: 'user' } },
-    ],
-    'yes',
-  );
-
-  assert.match(context, /\[prompt:session-harvest\]/);
-  assert.match(context, /~\/\.codex\/memories\/extensions\/ad_hoc\/notes\//);
-  assert.doesNotMatch(context, /~\/\.claude|auto-memory/);
-});
-
 test('session harvest names Claude memory paths in a Claude session', async () => {
   const context = await evaluateWithTranscript(
     [{ type: 'user', message: { role: 'user', content: 'First request' } }],
@@ -627,17 +613,9 @@ test('session harvest names Claude memory paths in a Claude session', async () =
 
   assert.match(context, /\[prompt:session-harvest\]/);
   assert.match(context, /~\/\.claude\/skills-reflections\//);
-  assert.doesNotMatch(context, /~\/\.codex/);
 });
 
-test('session harvest sends a correction a machine could check to the guardrail skill in every agent', async () => {
-  const codexContext = await evaluateWithTranscript(
-    [
-      { type: 'session_meta', payload: { id: 'session-1', originator: 'codex_cli_rs' } },
-      { type: 'response_item', payload: { type: 'message', role: 'user' } },
-    ],
-    'yes',
-  );
+test('session harvest sends a correction a machine could check to the guardrail skill, with or without a transcript', async () => {
   const claudeContext = await evaluateWithTranscript(
     [{ type: 'user', message: { role: 'user', content: 'First request' } }],
     'yes',
@@ -649,7 +627,7 @@ test('session harvest sends a correction a machine could check to the guardrail 
   const noTranscriptContext =
     noTranscriptOutput?.hookSpecificOutput?.additionalContext ?? '';
 
-  for (const context of [codexContext, claudeContext, noTranscriptContext]) {
+  for (const context of [claudeContext, noTranscriptContext]) {
     assert.match(context, /\[prompt:session-harvest\]/);
     assert.match(context, /follow the guardrail skill/);
   }
@@ -664,7 +642,7 @@ test('session harvest names no agent paths without a readable transcript', async
 
     const context = output?.hookSpecificOutput?.additionalContext ?? '';
     assert.equal(context.match(/\[prompt:session-harvest\]/g)?.length, 1);
-    assert.doesNotMatch(context, /~\/\.claude|~\/\.codex/);
+    assert.doesNotMatch(context, /~\/\.claude/);
   }
 });
 
@@ -1448,7 +1426,7 @@ test('a headless run gets neither Stop rule: it has no AskUserQuestion and no pe
     const context = await stopContext({ claude_code_entrypoint: entrypoint, last_assistant_message: ask }, worked);
     assert.doesNotMatch(context, /ask-in-the-tool|housekeeping-due/, entrypoint);
   }
-  // An interactive session, and a host that sends no entrypoint (Codex), keep both rules.
+  // An interactive session, and an input with no entrypoint, keep both rules.
   for (const input of [{ claude_code_entrypoint: 'cli' }, {}]) {
     const context = await stopContext({ ...input, last_assistant_message: ask }, worked);
     assert.match(context, ASK_IN_THE_TOOL, JSON.stringify(input));
@@ -1456,13 +1434,7 @@ test('a headless run gets neither Stop rule: it has no AskUserQuestion and no pe
   }
 });
 
-test('stop stays quiet on housekeeping in a Codex session and without a transcript', async () => {
-  const codex = [
-    { type: 'turn_context', payload: { turn_id: 'turn-1' } },
-    toolCall('shell', { command: 'git commit -m x' }),
-    reply,
-  ];
-  assert.doesNotMatch(await stopContext({}, codex), /housekeeping-due/);
+test('stop stays quiet on housekeeping without a transcript', async () => {
   assert.doesNotMatch(await stopContext({ last_assistant_message: 'Done.' }), /housekeeping-due/);
 });
 

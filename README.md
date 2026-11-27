@@ -11,15 +11,6 @@ A Claude Code plugin marketplace by [@ezzabuzaid](https://github.com/ezzabuzaid)
 
 (Private clone? Use `git@github.com:ezzabuzaid/agent-plugin.git` in place of the shorthand.)
 
-In Codex:
-
-```
-codex plugin marketplace add ezzabuzaid/agent-plugin
-codex plugin add coding@ezzabuzaid
-```
-
-The skills work in both, except automations, which runs `claude -p` under launchd on macOS. The output style and the rollover mod are Claude Code only.
-
 ## Plugins
 
 ### coding

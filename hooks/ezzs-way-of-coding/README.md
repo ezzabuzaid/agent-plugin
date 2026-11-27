@@ -1,19 +1,16 @@
 # Ezz's Coding Reminders
 
-This is Ezz's global Claude Code and Codex application of
-`@deepagents/experimental/coding-agent-reminders`. Both agents execute
+This is Ezz's global Claude Code application of
+`@deepagents/experimental/coding-agent-reminders`. Claude Code executes
 `hook.ts` directly with Node — wired by absolute path in
-`~/.claude/settings.json` and `~/.codex/hooks.json` — backed by the pinned
+`~/.claude/settings.json` — backed by the pinned
 `7.38.1` package installed in this directory. It has no runtime dependency on a
 project checkout.
 
-Per-turn session harvesting and the shared Claude/Codex coding defaults also
-live in this rule set. Both agents use this one repo-owned hook; no separate
-`~/.claude/hooks/session-harvest.sh` or `~/.codex/hooks/session-harvest.sh`
-copy is required. The session harvest names the memory paths of the agent that
-runs it. A Codex transcript starts with a `session_meta` entry, so a Codex
-session gets the Codex ad-hoc memory note path. Any other transcript gets the
-Claude auto-memory and skill-reflection paths. Without a readable transcript,
+Per-turn session harvesting and the coding defaults also live in this rule
+set, so no separate `~/.claude/hooks/session-harvest.sh` copy is required. A
+transcript with an entry gets the Claude auto-memory and skill-reflection
+paths. A session's first prompt can find its transcript missing or empty; then
 the harvest names no paths.
 
 The reminder to look for a similar implementation first fires only on a prompt
@@ -129,8 +126,7 @@ misspelt, can I close, double check) still fires them.
 a stop hook already continued (`stop_hook_active`), at most once per chain
 (`continuedStops: 'once'` of `@deepagents/experimental` 7.38+): agents wrote
 about half of their "Safe to close" claims in that reply. Every other Stop rule
-skips such a stop. `housekeeping-due` is off in a Codex transcript and without
-one. All Stop rules are off in a headless run (`claude -p`, the Agent SDKs),
+skips such a stop. `housekeeping-due` is off without a transcript. All Stop rules are off in a headless run (`claude -p`, the Agent SDKs),
 which has no AskUserQuestion and no person to sweep for: `hook.ts` copies
 Claude Code's `CLAUDE_CODE_ENTRYPOINT` (`cli` in a terminal, `sdk-cli` under
 `-p`) into the input as `claude_code_entrypoint`.
