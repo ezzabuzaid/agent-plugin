@@ -25,7 +25,10 @@ export const defaultsRules: ReminderRule[] = [
     message: [
       "Ezz's coding defaults:",
       '- Start from the real implementation, call sites, generated artifacts, and current runtime state before answering or editing.',
-      '- Prefer full, long-term implementations over workarounds, compatibility shims, or hidden tech debt.',
+      '- Build the full, long-term implementation, never a workaround or hidden tech debt.',
+      "- No backward compatibility: break the API, migrate the data and force every host into the package's design; no aliases, shims, fallbacks or deprecated paths.",
+      "- Decide a design from the leading tools' source and a measurement, never from preference.",
+      '- Before changing a design, learn why it is so: the memories of every project (`node ~/.claude/skills/memory-curator/memory/cli.ts recall "<topic>"`), the ADRs and the git history.',
       '- Use the latest Node.js and JavaScript/TypeScript features; do not reach for legacy idioms or polyfills when a modern primitive exists.',
       '- Challenge contradictions and weak premises directly. Ask for clarification when intent is genuinely ambiguous, and prioritize truth over agreement.',
       '- When code or config you build calls an AI for auxiliary work (a prompt or agent hook, a script, a CI job), pin Claude Sonnet 5 for Claude and gpt-6.1-sol for OpenAI. Use a larger model only when that code documents a concrete capability gap.',

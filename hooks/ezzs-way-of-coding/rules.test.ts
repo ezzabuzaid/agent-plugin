@@ -101,6 +101,9 @@ test('repo-owned rules preserve the migrated coding guidance', async () => {
     sessionOutput?.hookSpecificOutput?.additionalContext ?? '';
 
   assert.match(sessionContext, /latest Node\.js and JavaScript\/TypeScript features/);
+  assert.match(sessionContext, /No backward compatibility: break the API, migrate the data and force every host into the package's design/);
+  assert.match(sessionContext, /Decide a design from the leading tools' source and a measurement/);
+  assert.match(sessionContext, /memories of every project \(`node ~\/\.claude\/skills\/memory-curator\/memory\/cli\.ts recall/);
   assert.match(sessionContext, /Challenge contradictions and weak premises directly/);
   assert.match(sessionContext, /prioritize truth over agreement/);
   assert.match(sessionContext, /code or config you build calls an AI/);
