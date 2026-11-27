@@ -13,12 +13,13 @@ only when every check holds. The child session and its pseudo-terminal are stopp
 the transcripts stay under ~/.claude/projects/ as evidence. Python, because Node has no
 pseudo-terminal of its own.
 """
-import argparse, glob, json, os, pty, select, signal, struct, sys, time, fcntl, termios
+import argparse, glob, json, os, pty, select, signal, struct, subprocess, sys, time, fcntl, termios
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CODING = f'{REPO}/coding'
 BIG_FILES = [f'{REPO}/hooks/ezzs-way-of-coding/rules.test.ts', f'{REPO}/coding/skills/node-native/surface.json']
 HOME = os.path.expanduser('~')
+TRAJECTORY = '7.62.0'  # the @deepagents/trajectory release whose bin this reads (its ADR 0010)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('work')
@@ -69,13 +70,19 @@ def transcripts():
     return sorted(glob.glob(f'{folders[0]}/*.jsonl'), key=os.path.getmtime) if folders else []
 
 
-def entries(path):
-    with open(path) as f:
-        return [json.loads(line) for line in f if line.strip()]
+def steps(path):
+    """The transcript's ATIF steps, read through @deepagents/trajectory's CLI (its ADR 0010)."""
+    out = subprocess.run(['npx', '--yes', f'--package=@deepagents/trajectory@{TRAJECTORY}', 'trajectory', 'read', 'claude-code', path],
+                         capture_output=True, text=True, check=True).stdout
+    return json.loads(out)['trajectory']['steps']
+
+
+def claude_code(step):
+    return (step.get('extra') or {}).get('claude_code') or {}
 
 
 def turn_ends(path):
-    return sum(1 for e in entries(path) if e.get('type') == 'system' and e.get('subtype') in ('stop_hook_summary', 'turn_duration'))
+    return sum(1 for s in steps(path) if s['source'] == 'system' and (claude_code(s).get('system') or {}).get('subtype') in ('stop_hook_summary', 'turn_duration'))
 
 
 def wait_for(predicate, seconds):
@@ -89,22 +96,11 @@ def wait_for(predicate, seconds):
 
 
 def first_text(path, needle):
-    for e in entries(path):
-        content = (e.get('message') or {}).get('content')
-        text = content if isinstance(content, str) else ' '.join(
-            b.get('text', '') for b in content or [] if isinstance(b, dict))
-        if needle in text:
-            return True
-    return False
+    return any(isinstance(s.get('message'), str) and needle in s['message'] for s in steps(path))
 
 
 def read_it(path, target):
-    for e in entries(path):
-        for b in (e.get('message') or {}).get('content') or []:
-            if isinstance(b, dict) and b.get('type') == 'tool_use':
-                if target in json.dumps(b.get('input', {})):
-                    return True
-    return False
+    return any(target in json.dumps(call['arguments']) for s in steps(path) for call in s.get('tool_calls') or [])
 
 
 def meter(session_id):
