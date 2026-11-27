@@ -163,7 +163,7 @@ characters or whose option description is over 100;
 and, in one sentence, asks to shrink something under a file size (KB, bytes) or
 to shrink the index or a memory file under any size (a count label such as
 "trimmed" beside a report length is not an order, nor is a quoted order that
-"for example", "e.g.", "such as" or "tests that" gives as an example or a test
+"for example", "for instance", "e.g.", "such as" or "tests that" gives as an example or a test
 case), and a Write or Edit that drops more than max(1, 10%)
 of a `MEMORY.md`'s index lines, comparing the index on disk with the file the
 call leaves (an Edit's `old_string` → `new_string`, or every match under
