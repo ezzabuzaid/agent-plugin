@@ -15,6 +15,9 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 
 import { TemporaryFiles } from '@zukhruf/fs';
+import { build } from 'esbuild';
+
+import { options } from '../build.ts';
 
 import {
   ClaimOvertaken,
@@ -2213,4 +2216,41 @@ test('the omitted record counts toward the 120,000 bytes, so a bundle cut among 
     'transcript:assistant-text': 0,
     'transcript:tool-input': 0,
   });
+});
+
+const BUNDLE = new URL('../dist/update-docs.mjs', import.meta.url).pathname;
+
+test('the committed bundle is what build.ts makes of the source', async () => {
+  const { outputFiles } = await build({
+    ...options,
+    write: false,
+    logLevel: 'silent',
+  });
+
+  assert.equal(
+    outputFiles[0]?.text,
+    await readFile(BUNDLE, 'utf8'),
+    'dist/update-docs.mjs is stale: run npm run build',
+  );
+});
+
+test('the bundle runs alone, with no node_modules beside it, as the plugin installs it', async () => {
+  await using dir = await new TemporaryFiles().directory('update-docs-alone-');
+  const alone = join(dir.path, 'plugin', 'update-docs.mjs');
+  await mkdir(dirname(alone));
+  await writeFile(alone, await readFile(BUNDLE));
+  const repo = join(dir.path, 'repo');
+  await mkdir(repo);
+  git(repo, ['init', '-q']);
+
+  const result = spawnSync(process.execPath, [alone, 'show', 'nothing'], {
+    cwd: repo,
+    encoding: 'utf8',
+    env: { HOME: dir.path, PATH: '/usr/bin:/bin' },
+  });
+
+  assert.match(
+    result.stdout + result.stderr,
+    /No library project is named "nothing"/,
+  );
 });

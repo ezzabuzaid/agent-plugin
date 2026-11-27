@@ -1,5 +1,7 @@
-import { glob, open, readFile, realpath } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
+
+import { ClaudeCodeStore } from '@deepagents/trajectory';
 
 import type { ClaudeHome } from '../claude-home.ts';
 import { type Git, GitFailed } from '../git.ts';
@@ -10,7 +12,6 @@ import { TEXT_EXCERPT, excerpt } from './excerpt.ts';
 import type { ConsumerCommitRecord, ConsumerSiteRecord } from './record.ts';
 
 const SITES_PER_REPO = 20;
-const CWD = /"cwd":"((?:[^"\\]|\\.)*)"/;
 const FIELD = '\u{1f}';
 
 /**
@@ -34,10 +35,10 @@ export class ConsumerRepos {
       !this.#claude.holds(path) &&
       !excluded.some((prefix) => under(path, prefix));
     const cwds = new Set<string>();
-    for await (const file of glob('*/*.jsonl', {
-      cwd: this.#claude.projects,
-    })) {
-      const cwd = await this.#cwd(join(this.#claude.projects, file));
+    const sessions = new ClaudeCodeStore({ root: this.#claude.root }).sessions({
+      since: new Date(0),
+    });
+    for await (const { cwd } of sessions) {
       if (cwd !== undefined && outside(cwd)) {
         cwds.add(cwd);
       }
@@ -87,25 +88,6 @@ export class ConsumerRepos {
       );
     }
     throw new TypeError(`${file} must be {"exclude": ["/absolute/prefix"]}`);
-  }
-
-  /** The first cwd a transcript records, read from its head only. */
-  async #cwd(file: string): Promise<string | undefined> {
-    await using handle = await open(file);
-    const chunk = Buffer.alloc(64 * 1024);
-    let head = '';
-    for (;;) {
-      const { bytesRead } = await handle.read(chunk, 0, chunk.length);
-      if (bytesRead === 0) {
-        return undefined;
-      }
-      head += chunk.toString('utf8', 0, bytesRead);
-      const match = CWD.exec(head);
-      if (match?.[1] !== undefined) {
-        const cwd: unknown = JSON.parse(`"${match[1]}"`);
-        return typeof cwd === 'string' ? cwd : undefined;
-      }
-    }
   }
 }
 

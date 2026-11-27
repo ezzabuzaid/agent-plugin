@@ -3,15 +3,21 @@
   "private": true,
   "type": "module",
   "bin": {
-    "update-docs": "./src/main.ts"
+    "update-docs": "./dist/update-docs.mjs"
   },
   "scripts": {
+    "build": "node build.ts",
     "test": "node --test --no-warnings src/update-docs.test.ts",
     "typecheck": "tsc -p ."
   },
   "devDependencies": {
+    "@deepagents/trajectory": "7.57.0",
     "@types/node": "^26.6.6",
     "@zukhruf/fs": "^0.8.39",
+    "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
+  },
+  "allowScripts": {
+    "esbuild": true
   }
 }

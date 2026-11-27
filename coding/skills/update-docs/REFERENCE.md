@@ -1,6 +1,6 @@
 # update-docs reference
 
-The parts of the run that only some modes reach. SKILL.md points to each section. `update-docs <command>` stands for `node <this skill's folder>/scripts/src/main.ts <command>`, as in SKILL.md, and `<state>` for the `state` that `update-docs repo` prints.
+The parts of the run that only some modes reach. SKILL.md points to each section. `update-docs <command>` stands for `node <this skill's folder>/scripts/dist/update-docs.mjs <command>`, as in SKILL.md, and `<state>` for the `state` that `update-docs repo` prints.
 
 ## Unattended
 
@@ -57,7 +57,7 @@ A candidate the owner does not pick is dropped; record it in `picked.json` as dr
 ```
 You are the lead of one update-docs run: mode `next <project>`, for project <project>, in the repository <repo root>.
 Skill folder: <folder>. Read <folder>/SKILL.md and <folder>/REFERENCE.md, then run that mode to the end of step 7.
-The tool is `node <folder>/scripts/src/main.ts`. The docs agents are coding:docs-analyst, coding:docs-writer and coding:docs-judge, each at effort "medium".
+The tool is `node <folder>/scripts/dist/update-docs.mjs`. The docs agents are coding:docs-analyst, coding:docs-writer and coding:docs-judge, each at effort "medium".
 You run unattended: ask no one, and push nothing.
 Hand back only this JSON:
 {"project": "<project>", "started": "<the run's started>", "workDir": "<work dir>",
