@@ -1,6 +1,6 @@
 ---
 name: rollover
-description: Rolls a session over to a fresh context when its context window is nearly full. The old context writes a short continuation (the live state and pointers to the records), the context is cleared, and the fresh context resumes from it as the same session. Use when the coding plugin's rollover message says the context reached its threshold; when a prompt says "Continue session <id> as if you were it" and names a continuation; and when the user asks for a handoff or a handoff prompt ("give me a handoff", "give me handoff prompt", "you are almost out of context", "store the handoff in a file and give me the path"). Not for session hygiene: that is housekeeping.
+description: Rolls a session over to a fresh context when its context window is nearly full. The old context writes a short continuation (the live state and pointers to the records), the context is cleared, and the fresh context resumes from it as the same session. Use when the coding plugin's rollover message says the context reached its threshold; when a prompt says "Continue session <id> as if you were it" and names a continuation; when the user names a session that died without one ("continue where <id> left off", "pick up that dead session"); and when the user asks for a handoff or a handoff prompt ("give me a handoff", "give me handoff prompt", "you are almost out of context", "store the handoff in a file and give me the path"). Not for session hygiene: that is housekeeping.
 ---
 
 # Rollover
@@ -35,6 +35,24 @@ Outcome: the work goes on from the continuation's next action, and its claims ar
 2. Check the live claims now: `ListAgents`, the output files, `git status`. A subagent can finish during the clear, and its notice can already be in this context.
 3. When a claim is unclear, read the old transcript, `<config root>/projects/<project>/<old session id>.jsonl`: the user's last typed requests (string user messages and `queued_command` attachments) and the last tool results.
 4. Continue. No recap, no "I'll continue", and no question about what to do next. The decisions in the continuation and the records stay closed.
+
+## Recover (a session that died without a continuation)
+
+Outcome: the continuation that the dead session never wrote exists, built from its transcript, and Resume runs from it.
+
+A session dies without one on an API error, a usage limit, a crash or a closed terminal. Its process is gone, so its subagents, shells and watches are gone too: only their output files remain.
+
+1. Find its transcript: `<config root>/projects/*/<id>.jsonl` (the folder is its working directory with `/` as `-`). It may continue an earlier session: after a `/clear` its `{"type":"derived-from","sessions":[{"id":"<old id>","via":"clear"}]}` entry names it, and a session started from a pasted handoff or continuation names it in its first user message. Read that one too.
+2. Read it in a subagent when it is long (more than about 2 MB; with no subagent tool, read it yourself with `jq`), and give the subagent this list. Collect state, not a story:
+   - the user's typed requests in order (string user messages, `queued_command` attachments whose origin is human, and typed dialog answers), the last few in full;
+   - each AskUserQuestion it asked, with the answers;
+   - the plan files and backlog items it read or wrote. `agent-backlog list --session <id> --all-repos` records writes only since 2026-11-26; for an older session, take the `agent-backlog` commands from its Bash calls;
+   - its commits and pushes: `<config root>/ledger/<id>.jsonl` for a session that began after the ledger install (`<config root>/ledger/installed-at`), else `git log` over its time span in each repo it worked in;
+   - each subagent, background shell and watch it started, with its output file and how far that output got. Files under the temp folder can be gone after a reboot or a few days; then read the logs its commands wrote elsewhere (the paths in its commands);
+   - its last tool calls and results, and how it ended (the last entries: an API error, a limit message, or nothing).
+3. Check what is live now, and what changed after it died: `git status` and `git log --since=<its last entry>` in its working directory and in each repo it touched (another session may have finished its step), the current status of its backlog items, and the output files.
+4. Write the continuation at `<config root>/continuations/<id>.md`, in the sections of Write, with **Running now** listing the dead work and what each output shows.
+5. Follow Resume from step 2, as that session: no recap and no question about where it was.
 
 ## Manual
 
