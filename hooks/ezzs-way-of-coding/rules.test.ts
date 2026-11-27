@@ -249,6 +249,23 @@ test('mined reminders fire on matching prompts', async () => {
   }
 });
 
+test('surface reminder forbids removal beyond the ask without asking to keep or stub unwired surface', async () => {
+  const output = await evaluateReminderHook(
+    {
+      hook_event_name: 'UserPromptSubmit',
+      prompt: 'Rename the export options component and remove the legacy settings route.',
+    },
+    ezzsWayOfCodingConfig,
+  );
+  const reminder =
+    (output?.hookSpecificOutput?.additionalContext ?? '')
+      .split('\n\n')
+      .find((block) => block.startsWith('[prompt:preserve-existing-surface]\n')) ?? '';
+
+  assert.match(reminder, /Do not remove\b[^.]*\bbeyond\b/);
+  assert.doesNotMatch(reminder, /keep the surface|\bstub|annotate/i);
+});
+
 test('mined reminders stay quiet on near-miss prompts', async () => {
   const cases = [
     ['preserve-existing-surface', 'Refactor the date parsing helper for clarity.'],

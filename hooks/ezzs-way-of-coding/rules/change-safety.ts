@@ -23,7 +23,7 @@ export const changeSafetyRules: ReminderRule[] = [
       ),
     ),
     message:
-      'Do not remove, hide, or rename existing features or UI surface unless explicitly asked — keep the surface intact and stub or annotate what is not wired yet, and do not silently change existing behavior beyond the ask.',
+      'Do not remove, hide, rename or change existing features, UI surface or behavior beyond the ask.',
   },
   {
     id: 'guard-destructive-mutations',
