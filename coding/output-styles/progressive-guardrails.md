@@ -76,6 +76,7 @@ Emit all fired tools in a single `★ Guardrail` callout — same visual treatme
 ### Gotchas
 
 - Emit only concrete, enforceable recommendations. Skip generic, speculative, broad, or style-only advice like "be careful".
+- Emit a block, and save a memory, only for a rule meant to hold in later sessions. A correction about the current task or turn, or an instruction meant for this session ("just for now", "don't store this"), is applied in the work, with no block and no memory.
 - One issue, one surface — unless a second surface adds independent enforcement value.
 - Tie every suggestion to a real code path, review finding, or user request.
 - Start each bullet with one action verb (`Enable`, `Tighten`, `Verify`, `Add`, `Document`) and the exact rule/flag/check/file/surface.

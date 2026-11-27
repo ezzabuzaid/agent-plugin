@@ -8,10 +8,11 @@ This is Ezz's global Claude Code application of
 project checkout.
 
 Per-turn session harvesting and the coding defaults also live in this rule
-set, so no separate `~/.claude/hooks/session-harvest.sh` copy is required. A
-transcript with an entry gets the Claude auto-memory and skill-reflection
-paths. A session's first prompt can find its transcript missing or empty; then
-the harvest names no paths.
+set, so no separate `~/.claude/hooks/session-harvest.sh` copy is required. The
+harvest names the Claude auto-memory and skill-reflection paths on every typed
+prompt, the first one too. It saves only a rule meant to hold in later
+sessions: the 6 of 1060 saves Ezz rejected in four weeks each made a correction
+about one task or one session into a standing rule (#6073).
 
 The reminder to look for a similar implementation first fires only on a prompt
 that asks to build or change behavior. A reply such as "yes" or "commit it"

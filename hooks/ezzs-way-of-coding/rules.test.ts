@@ -657,7 +657,7 @@ test('session harvest sends a correction a machine could check to the guardrail 
   }
 });
 
-test('session harvest names no agent paths without a readable transcript', async () => {
+test('session harvest names the Claude memory paths on a first prompt, whose transcript is missing or empty', async () => {
   for (const transcriptPath of [undefined, '/missing/transcript.jsonl']) {
     const output = await evaluateReminderHook(
       { hook_event_name: 'UserPromptSubmit', transcript_path: transcriptPath, prompt: 'yes' },
@@ -666,8 +666,14 @@ test('session harvest names no agent paths without a readable transcript', async
 
     const context = output?.hookSpecificOutput?.additionalContext ?? '';
     assert.equal(context.match(/\[prompt:session-harvest\]/g)?.length, 1);
-    assert.doesNotMatch(context, /~\/\.claude/);
+    assert.match(context, /~\/\.claude\/skills-reflections\//);
   }
+});
+
+test('session harvest saves only a rule meant to hold in later sessions', async () => {
+  const output = await evaluateReminderHook({ hook_event_name: 'UserPromptSubmit', prompt: 'yes' }, ezzsWayOfCodingConfig);
+
+  assert.match(output?.hookSpecificOutput?.additionalContext ?? '', /Save only a rule meant to hold in later sessions\. A correction about the current task or turn, or an instruction meant for this session/);
 });
 
 test('stop pushes back on a final message that hands over an unverified gap', async () => {
