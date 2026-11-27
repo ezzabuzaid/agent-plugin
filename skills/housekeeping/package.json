@@ -1,0 +1,11 @@
+{
+  "name": "housekeeping-skill",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test scripts/close-check.test.mjs scripts/records-check.test.mjs"
+  },
+  "dependencies": {
+    "@deepagents/trajectory": "7.55.0"
+  }
+}

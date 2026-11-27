@@ -7,4 +7,4 @@ Two pieces are copied between `close-check.mjs` and `records-check.mjs` on purpo
 | `agent-backlog` call (`execFileSync('agent-backlog', …, { maxBuffer })` read as JSON, the ENOENT message as an open item) | `close-check.mjs` (`backlog`, `backlogFailure`) | `records-check.mjs` (`openBacklog`) | the subcommands and their arguments (`list --session`, `show` / `list --status open`) |
 | Start and end: `parseArgs` + `UsageError`, the exit-code wrapper (0 nothing open, 1 open, 2 usage or read error) | `close-check.mjs` | `records-check.mjs` | the option names |
 
-The session chain, transcript and ledger reading both scripts share is not copied: it lives once in `lib/session.mjs`.
+The session chain, transcript and ledger reading both scripts share is not copied: it lives once in `lib/session.mjs`, which reads the transcripts through `@deepagents/trajectory`. The exit-code wrapper's copies treat that package's `SessionReadError` as a read error (exit 2) in both scripts.

@@ -120,6 +120,9 @@ function sandbox({ installedAt = '2026-11-26T09:00:00Z', hooks = Object.keys(LED
   //   { bash, result }             a Bash call
   //   { tool, input, detail }      another tool call; detail is the result's toolUseResult
   //   { prompt, origin }           a user prompt (origin kind, default 'human')
+  //   { prompt, image: true }      a user prompt sent with a pasted image: a text block, then an image block
+  //   { queued, origin }           a prompt that arrived while the agent worked: Claude Code writes it as a
+  //                                queued_command attachment (origin kind, default 'human')
   //   { meta }                     a meta user entry (a loaded skill's text)
   //   { say }                      the agent's text
   //   { derivedFrom }              the entry Claude Code writes after a /clear, naming the old session id
@@ -141,7 +144,18 @@ function sandbox({ installedAt = '2026-11-26T09:00:00Z', hooks = Object.keys(LED
             { ...base, type: 'user', toolUseResult: event.detail, message: { content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text: event.result ?? 'ok' }] }] } },
           ];
         }
+        if ('prompt' in event && event.image) {
+          const content = [{ type: 'text', text: event.prompt }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }];
+          return [{ ...base, type: 'user', origin: { kind: 'human' }, message: { role: 'user', content } }];
+        }
         if ('prompt' in event) return [{ ...base, type: 'user', origin: { kind: event.origin ?? 'human' }, message: { role: 'user', content: event.prompt } }];
+        if ('queued' in event) {
+          const kind = event.origin ?? 'human';
+          const attachment = kind === 'human'
+            ? { type: 'queued_command', prompt: event.queued, commandMode: 'prompt', origin: { kind }, timestamp, humanTurn: true }
+            : { type: 'queued_command', prompt: event.queued, commandMode: kind, origin: { kind }, timestamp };
+          return [{ ...base, type: 'attachment', attachment }];
+        }
         if ('meta' in event) return [{ ...base, type: 'user', isMeta: true, message: { role: 'user', content: [{ type: 'text', text: event.meta }] } }];
         return [{ ...base, type: 'assistant', message: { content: [{ type: 'text', text: event.say }] } }];
       }).map((e) => JSON.stringify(e)).join('\n');
@@ -539,7 +553,20 @@ test('a transcript that does not exist is a read error, exit 2', () => {
 
   const r = s.check(join(s.root, 'missing.jsonl'));
 
-  assert.match(r.stderr, /transcript not found/);
+  assert.equal(r.stderr, `close-check: could not read the transcript: ${join(s.root, 'missing.jsonl')}\n`);
+  assert.equal(r.status, 2);
+});
+
+// A subagent's calls are the session's work: a duty list that skipped them would hide its edits and test runs.
+test('a subagent transcript that cannot be read is a read error, exit 2', () => {
+  using s = sandbox();
+  const file = s.session([{ bash: 'ls', result: 'README.md' }], [{ bash: 'ls', result: 'README.md' }]);
+  const subagent = join(s.root, 'session', 'subagents', 'agent-1.jsonl');
+  chmodSync(subagent, 0o000);
+
+  const r = s.check(file);
+
+  assert.match(r.stderr, new RegExp(RegExp.escape(subagent)));
   assert.equal(r.status, 2);
 });
 
@@ -630,6 +657,28 @@ function assertRunClosesEdit(command) {
 test('a test run that names the package as an nx project closes its edit', () => assertRunClosesEdit('npx nx run @x/p:test --skip-nx-cache'));
 test('nx affected with the test target closes the edit of every package in its repo', () => assertRunClosesEdit('npx nx affected -t lint test --base=HEAD~1'));
 
+// One message with several calls, as Claude Code wrote one on 2026-11-27: an entry per call under the message's id,
+// streamed 1.7 s apart, then the calls run in order, so the Edit's result comes back 37 s before the test's.
+test('an edit and a test run made in one message: the test ran after the edit, and closes it', () => {
+  using s = sandbox();
+  s.commitFiles({ 'packages/p/package.json': '{"name":"@x/p"}', 'packages/p/src/a.ts': '1' });
+  const file = join(s.root, 'session.jsonl');
+  const at = (ms) => new Date(Date.UTC(2026, 10, 26, 10, 0, 0) + ms).toISOString();
+  const call = (id, name, input, ms) => ({ type: 'assistant', cwd: s.work, timestamp: at(ms), message: { id: 'msg_01', role: 'assistant', content: [{ type: 'tool_use', id, name, input }] } });
+  const result = (id, detail, ms) => ({ type: 'user', cwd: s.work, timestamp: at(ms), toolUseResult: detail, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] } });
+  const edited = join(s.work, 'packages/p/src/a.ts');
+  writeFileSync(file, [
+    call('toolu_edit', 'Edit', { file_path: edited, old_string: '1', new_string: '2' }, 720),
+    call('toolu_test', 'Bash', { command: `cd ${s.work} && npx nx run @x/p:test` }, 2424),
+    result('toolu_edit', { filePath: edited, oldString: '1', newString: '2' }, 8795),
+    result('toolu_test', { stdout: 'pass', stderr: '', interrupted: false }, 46190),
+  ].map((entry) => JSON.stringify(entry)).join('\n'));
+
+  const r = s.check(file);
+
+  assert.equal(section(r.stdout, 'Tests of touched packages'), `  ${join(s.work, 'packages/p')}: a test ran after the last edit`);
+});
+
 // #5833: a test run is a child process, so the folders it leaves are in no tool call; an empty one is not in
 // git status either (agent-plugin skills/scripts-scratch, 2026-11-26).
 test('an untracked folder born after the session started, in a repo where the session ran a test, is listed to mark', () => {
@@ -712,6 +761,27 @@ test("each prompt the user typed is listed to mark; slash commands, notification
   ]));
 
   assert.equal(section(r.stdout, 'Requests'), `  CHECK ${long.replace(/\s+/g, ' ').slice(0, 159)}…\n  CHECK Are you sure?`);
+});
+
+test('a prompt the user typed while the agent worked is listed to mark; a notification delivered the same way is not', () => {
+  using s = sandbox();
+
+  const r = s.check(s.session([
+    { prompt: 'fix the README' },
+    { bash: 'ls', result: 'README.md' },
+    { queued: 'side note: and the CHANGELOG' },
+    { queued: '<task-notification>done</task-notification>', origin: 'task-notification' },
+  ]));
+
+  assert.equal(section(r.stdout, 'Requests'), '  CHECK fix the README\n  CHECK side note: and the CHANGELOG');
+});
+
+test('a typed prompt sent with an image is listed to mark by its text', () => {
+  using s = sandbox();
+
+  const r = s.check(s.session([{ prompt: 'why is this button cut off?', image: true }]));
+
+  assert.equal(section(r.stdout, 'Requests'), '  CHECK why is this button cut off?');
 });
 
 test('each skill the user ran or the agent loaded is listed once to mark, but housekeeping and built-in commands', () => {

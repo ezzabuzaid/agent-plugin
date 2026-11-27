@@ -8,7 +8,9 @@
 //   was derived from through a `derived-from` entry of its transcripts, recursively, as Claude Code writes one after a
 //   /clear (lib/session.mjs sessionChain). Each section reads the whole chain.
 //   The transcripts of every id of the chain, ~/.claude/projects/*/<id>.jsonl (--transcript <path> for the first),
-//   plus every subagent transcript beside each (<id>/subagents/*.jsonl): a subagent's work is the session's work.
+//   plus every subagent transcript beside each (<id>/subagents/agent-*.jsonl): a subagent's work is the session's work.
+//   They are read through @deepagents/trajectory as ATIF trajectories (lib/session.mjs); a transcript, a subagent's
+//   too, that cannot be read is a read error.
 //   A command counts by the simple commands the shell runs (lib/session.mjs commandsIn): text in quotes, heredocs,
 //   comments or another command's output never makes one, so a session that reads other sessions' transcripts
 //   (grep, node -e) does not take on their test runs or the folders they made.
@@ -81,8 +83,9 @@
 //                is open as an unreadable review.
 //   Tests of touched packages
 //                for each package (as above, in a git repo) that holds a file the session's Edit, Write or
-//                NotebookEdit calls changed: OPEN when no test command ran for it after the last such change, by
-//                transcript time (main and subagent transcripts). A test command: nx with a `test` target
+//                NotebookEdit calls changed: OPEN when no test command ran for it after the last such change, by the
+//                time each call's result came back (main and subagent transcripts): the calls of one message share
+//                its time, and Claude Code runs them one after another. A test command: nx with a `test` target
 //                (`nx test`, `nx run <p>:test`, `-t test`, `--targets=lint,test`), npm, pnpm, yarn or bun with a word
 //                `test`, node with --test or a `*.test.*` file, vitest, jest, mocha. It is for the package when it runs
 //                inside the package, names the package (its package.json or project.json name, or its folder name,
@@ -102,8 +105,9 @@
 //   Plans        for each ~/.claude/plans/*.md the session wrote or edited, as it is on disk: each numbered step
 //                (`<n>. ` at the start of a line) CHECK, each ticked box `- [x]` CHECK, each empty box `- [ ]` OPEN.
 //                A plan that is gone is printed without a mark.
-//   Requests     each prompt the user typed (main transcripts of the chain, origin human, not a slash command),
-//                first 160 characters: CHECK.
+//   Requests     each prompt the user typed (main transcripts of the chain, origin human, not a slash command), at the
+//                prompt or while the agent worked (a queued_command attachment), and the text of one sent with an
+//                image, first 160 characters: CHECK.
 //   Skills       each skill the user ran as a `/command` and each skill the agent loaded with the Skill tool (main
 //                transcripts of the chain), once by name, but housekeeping itself: CHECK (its closing report given).
 //   Promises     each sentence with "I'll", "I will", "I promise" or "next I" in the agent's closing text of a turn
@@ -129,19 +133,20 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, relative, sep } from 'node:path';
-import { UsageError, NO_LEDGER, uncoveredLine, sessionChain, sessionLedger, toolCalls, bashCalls, entries, entryText, commandsIn, repoRoot, git, firstLine, expand } from './lib/session.mjs';
+import { SessionReadError } from '@deepagents/trajectory';
+import { UsageError, NO_LEDGER, uncoveredLine, sessionChain, sessionLedger, toolCalls, bashCalls, commandsIn, repoRoot, git, firstLine, expand } from './lib/session.mjs';
 
-function main() {
+async function main() {
   let options;
   try {
     ({ values: options } = parseArgs({ options: { transcript: { type: 'string' } } }));
   } catch (error) {
     throw new UsageError(error.message);
   }
-  const chain = sessionChain(options.transcript);
-  const { ids, files, missing } = chain;
-  const tools = toolCalls(files);
-  const calls = bashCalls(files);
+  const chain = await sessionChain(options.transcript, { subagents: true });
+  const { ids, trajectories, missing } = chain;
+  const tools = toolCalls(trajectories);
+  const calls = bashCalls(tools);
   let open = 0;
   let toMark = 0;
   const out = [];
@@ -264,7 +269,7 @@ function main() {
   print('Plans');
   sayLines(planLines(tools));
 
-  const main = files.filter((f) => f.main).flatMap(({ file }) => [...entries(file)]);
+  const main = trajectories.flatMap((trajectory) => trajectory.steps);
   print('Requests');
   sayChecks(typedPrompts(main));
 
@@ -434,12 +439,12 @@ function untestedPackages(tools, calls) {
     const pkg = repo && packageOf(dir, repo);
     if (!pkg) continue;
     const last = touched.get(pkg);
-    if (!last || !(last.at > call.at)) touched.set(pkg, { repo, at: call.at, file });
+    if (!last || !(last.done > call.done)) touched.set(pkg, { repo, done: call.done, file });
   }
-  const runs = calls.flatMap((call) => commandsIn(call.command, call.cwd).filter((c) => isTestCommand(c.words)).map((c) => ({ ...c, at: call.at })));
+  const runs = calls.flatMap((call) => commandsIn(call.command, call.cwd).filter((c) => isTestCommand(c.words)).map((c) => ({ ...c, done: call.done })));
   const lines = [];
-  for (const [pkg, { repo, at, file }] of [...touched].sort(([a], [b]) => a.localeCompare(b))) {
-    const ran = runs.some((run) => run.at > at && testsPackage(run.words, run.dir, pkg, repo));
+  for (const [pkg, { repo, done, file }] of [...touched].sort(([a], [b]) => a.localeCompare(b))) {
+    const ran = runs.some((run) => run.done > done && testsPackage(run.words, run.dir, pkg, repo));
     lines.push(ran
       ? { text: `${pkg}: a test ran after the last edit`, mark: false }
       : { text: `${pkg}: no test ran after the last edit (${relative(pkg, file)})`, mark: 'open' });
@@ -540,20 +545,27 @@ function planLines(tools) {
 }
 
 const isCommand = (text) => /^\s*<command-(name|message)>/.test(text);
+const isMeta = (step) => step.extra.claude_code.is_meta === true;
+// A step from a user line or a prompt: a user step (typed, queued while the agent worked, a notification), or text
+// Claude Code injected as one (isMeta: a skill body, a command expansion). Tool results are not steps.
+const fromUser = (step) => step.source === 'user' || isMeta(step);
 
+// A prompt typed while the agent worked is a user step too (a queued_command attachment), and an image's prompt keeps
+// its text; an image alone has none.
 function typedPrompts(main) {
-  return main.filter((e) => e.type === 'user' && e.origin?.kind === 'human')
-    .map(entryText).filter((text) => text !== null && !isCommand(text)).map(clip);
+  return main.filter((step) => step.source === 'user' && step.extra.claude_code.origin === 'human')
+    .map((step) => step.message).filter((text) => text !== '' && !isCommand(text)).map(clip);
 }
 
 function invokedSkills(main, tools) {
   const skills = new Map();
-  main.forEach((entry, k) => {
-    if (entry.type !== 'user' || entry.isMeta) return;
-    const name = entryText(entry)?.match(/<command-name>\/?([^<\s]+)<\/command-name>/)?.[1];
+  const said = main.filter(fromUser);
+  said.forEach((step, k) => {
+    if (isMeta(step)) return;
+    const name = step.message.match(/<command-name>\/?([^<\s]+)<\/command-name>/)?.[1];
     if (!name) return;
-    const next = main.slice(k + 1).find((e) => e.type === 'user');
-    if (next?.isMeta && /^Base directory for this skill:/.test(entryText(next) ?? '')) skills.set(name, `/${name} (you ran it)`);
+    const next = said[k + 1];
+    if (next && isMeta(next) && /^Base directory for this skill:/.test(next.message)) skills.set(name, `/${name} (you ran it)`);
   });
   for (const call of tools) {
     if (call.main && call.name === 'Skill' && typeof call.input.skill === 'string' && !skills.has(call.input.skill)) skills.set(call.input.skill, `${call.input.skill} (loaded)`);
@@ -564,7 +576,8 @@ function invokedSkills(main, tools) {
 const PROMISE = /\b(I['’]ll|I will|I promise)\b|\bnext,? I\b/i;
 
 // Text the agent wrote after its turn's last tool call: what the user reads at the end of a turn. Narration before a
-// tool call ("Next I'll read X") is kept by that call; a promise in the closing text has no call to keep it.
+// tool call ("Next I'll read X") is kept by that call; a promise in the closing text has no call to keep it. One
+// message is one agent step, so the text of a step that makes a call is that call's narration.
 function ownPromises(main) {
   const found = new Set();
   let closing = [];
@@ -572,14 +585,11 @@ function ownPromises(main) {
     for (const text of closing) for (const sentence of text.split(/(?<=[.!?])\s+|\n+/)) if (PROMISE.test(sentence)) found.add(clip(sentence));
     closing = [];
   };
-  for (const entry of main) {
-    const content = entry.message?.content;
-    if (entry.type === 'user' && !(Array.isArray(content) && content.some((b) => b.type === 'tool_result'))) flush();
-    if (entry.type !== 'assistant' || !Array.isArray(content)) continue;
-    for (const block of content) {
-      if (block.type === 'tool_use') closing = [];
-      else if (block.type === 'text') closing.push(block.text);
-    }
+  for (const step of main) {
+    if (fromUser(step)) flush();
+    if (step.source !== 'agent') continue;
+    if (step.tool_calls) closing = [];
+    else if (step.message !== '') closing.push(step.message);
   }
   flush();
   return [...found];
@@ -591,9 +601,9 @@ function dialogAnswers(tools) {
 }
 
 try {
-  process.exitCode = main();
+  process.exitCode = await main();
 } catch (error) {
-  if (!(error instanceof UsageError) && error.code !== 'ENOENT' && error.code !== 'EACCES') throw error;
+  if (!(error instanceof UsageError || error instanceof SessionReadError) && error.code !== 'ENOENT' && error.code !== 'EACCES') throw error;
   console.error(`close-check: ${error.message}`);
   process.exitCode = 2;
 }

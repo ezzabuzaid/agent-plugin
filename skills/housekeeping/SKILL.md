@@ -21,6 +21,8 @@ Each script's header comment holds its full contract.
 | `scripts/close-check.mjs` | The session's duty list from its own record: the chain of session ids across a `/clear` (each transcript's `derived-from`), commits and pushes from the session ledger (`~/.claude/ledger`, written by git itself) and their runs, items from the backlog's session events, each commit's stale records from its review, docs, tests, created files, folders a test run left, plan steps, requests, skills, promises. An `OPEN` line is not done; a `CHECK` line is yours to mark. Running work is not in it: take that from `ListAgents` and the Stop reminder. |
 | `scripts/records-check.mjs` | The paths, exported names, rule ids and flags this session's commits renamed or removed, and each doc, memory and open backlog line that still names them. |
 
+The scripts read the transcripts through `@deepagents/trajectory`, pinned in `package.json`: run `npm install --prefix ~/.agents/skills/housekeeping` once after a checkout or a pin change.
+
 ## Modes
 
 Every mode has the same jobs. The mode sets their order.

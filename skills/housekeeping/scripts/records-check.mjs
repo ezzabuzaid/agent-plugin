@@ -58,9 +58,10 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { SessionReadError } from '@deepagents/trajectory';
 import { UsageError, NO_LEDGER, uncoveredLine, sessionChain, sessionLedger, repoRoot, git, firstLine } from './lib/session.mjs';
 
-function main() {
+async function main() {
   let options;
   try {
     ({ values: options } = parseArgs({ options: { transcript: { type: 'string' }, repo: { type: 'string' }, since: { type: 'string' } } }));
@@ -76,7 +77,7 @@ function main() {
     if (!repo) throw new UsageError(`not a git repo: ${options.repo}`);
     commitsByRepo.set(repo, gitOrUsage(repo, ['rev-list', `${options.since}..HEAD`]).split('\n').filter(Boolean));
   } else {
-    ledger = sessionLedger(sessionChain(options.transcript));
+    ledger = sessionLedger(await sessionChain(options.transcript, { subagents: false }));
     for (const { repo, sha } of ledger?.commits ?? []) {
       if (existsSync(repo)) commitsByRepo.set(repo, [...(commitsByRepo.get(repo) ?? []), sha]);
     }
@@ -286,9 +287,9 @@ function openBacklog() {
 }
 
 try {
-  process.exitCode = main();
+  process.exitCode = await main();
 } catch (error) {
-  if (!(error instanceof UsageError) && error.code !== 'ENOENT' && error.code !== 'EACCES') throw error;
+  if (!(error instanceof UsageError || error instanceof SessionReadError) && error.code !== 'ENOENT' && error.code !== 'EACCES') throw error;
   console.error(`records-check: ${error.message}`);
   process.exitCode = 2;
 }

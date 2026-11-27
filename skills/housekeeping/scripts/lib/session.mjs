@@ -1,93 +1,62 @@
 // Reads what this session did from its Claude Code transcripts and its session ledger. Shared by close-check.mjs and
-// records-check.mjs; their header comments hold the contract.
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+// records-check.mjs; their header comments hold the contract. The transcripts are read through @deepagents/trajectory
+// (its README maps each Claude Code entry to an ATIF step), pinned in ../../package.json.
+import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { homedir } from 'node:os';
-import { join, dirname, basename, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ClaudeCodeAdapter, ClaudeCodeSession, ClaudeCodeStore, SessionReadError } from '@deepagents/trajectory';
 
 export class UsageError extends Error {}
 
-// The session: its own id plus every id it was derived from, recursively. After a /clear, Claude Code starts a new
-// transcript whose `derived-from` entry names the old id
-// (`{"type":"derived-from","sessions":[{"type":"claude_code_session","id":"<old id>","via":"clear"}]}`), and the new
-// context gets a new CLAUDE_CODE_SESSION_ID, while subagents started before the clear keep the old one. An id's transcript is `<id>.jsonl` beside the transcript that
-// names it, else under ~/.claude/projects/*/. Returns the ids (the session's own first), each transcript found with its
-// subagents' transcripts (<id>/subagents/*.jsonl), oldest session first, the ids whose transcript is not found, and
-// when each found id began: the time of the first entry of its transcript that has one (NaN when none has).
-export function sessionChain(transcriptOption) {
-  let first = transcriptOption;
-  if (!first) {
+// The session: its own id plus every id it was derived from. After a /clear, Claude Code starts a new transcript whose
+// `derived-from` entry names the old id, and the new context gets a new CLAUDE_CODE_SESSION_ID, while subagents started
+// before the clear keep the old one; ClaudeCodeStore.chain follows those entries, to `<id>.jsonl` beside the transcript
+// that names an id, else under ~/.claude/projects/*/. Returns the ids (the session's own first, then each older one),
+// the ATIF trajectory of each id found, oldest session first, each with its subagents' trajectories
+// (<id>/subagents/agent-*.jsonl) when `subagents` is true, the ids whose transcript is not found, and when each found id
+// began: the time of its first step that has one (NaN when none has). A transcript that cannot be read throws
+// SessionReadError, a subagent's too: its calls are the session's work.
+export async function sessionChain(transcriptOption, { subagents }) {
+  const store = new ClaudeCodeStore({ root: join(homedir(), '.claude') });
+  let session;
+  if (transcriptOption) {
+    session = ClaudeCodeSession.fromTranscriptPath(transcriptOption);
+  } else {
     const id = process.env.CLAUDE_CODE_SESSION_ID;
     if (!id) throw new UsageError('no session: CLAUDE_CODE_SESSION_ID is not set and no --transcript was given');
-    first = projectTranscript(id);
-    if (!first) throw new UsageError(`no transcript for session ${id} under ${join(homedir(), '.claude', 'projects')}`);
+    session = await store.session(id);
+    if (!session) throw new UsageError(`no transcript for session ${id} under ${join(homedir(), '.claude', 'projects')}`);
   }
-  if (!existsSync(first)) throw new UsageError(`transcript not found: ${first}`);
-  const ids = [];
-  const mains = [];
-  const missing = [];
-  const started = new Map();
-  const queue = [{ id: basename(first, '.jsonl'), file: first }];
-  while (queue.length > 0) {
-    const { id, file } = queue.shift();
-    if (ids.includes(id)) continue;
-    ids.push(id);
-    if (!file) {
-      missing.push(id);
-      continue;
-    }
-    mains.push(file);
-    let start = Number.NaN;
-    for (const entry of entries(file)) {
-      if (Number.isNaN(start) && typeof entry.timestamp === 'string') start = Date.parse(entry.timestamp);
-      if (entry.type !== 'derived-from' || !Array.isArray(entry.sessions)) continue;
-      for (const { type, id: from } of entry.sessions) {
-        if (type !== 'claude_code_session' || typeof from !== 'string') continue;
-        const beside = join(dirname(file), `${from}.jsonl`);
-        queue.push({ id: from, file: existsSync(beside) ? beside : projectTranscript(from) });
-      }
-    }
-    started.set(id, start);
+  const { sessions, missing } = await store.chain(session);
+  const adapter = new ClaudeCodeAdapter();
+  const trajectories = [];
+  for (const segment of sessions) {
+    const { trajectory, diagnostics } = await adapter.read(segment, { subagents });
+    const unreadable = diagnostics.find((diagnostic) => diagnostic.code === 'unreadable_subagent');
+    if (unreadable) throw new SessionReadError(unreadable.path, 'could not read the subagent transcript');
+    trajectories.push(trajectory);
   }
-  const files = mains.reverse().flatMap((main) => {
-    const subDir = join(dirname(main), basename(main, '.jsonl'), 'subagents');
-    const subs = existsSync(subDir) ? readdirSync(subDir).filter((f) => f.endsWith('.jsonl')).map((f) => join(subDir, f)) : [];
-    return [{ file: main, main: true }, ...subs.map((file) => ({ file, main: false }))];
-  });
-  return { ids, files, missing, started };
+  const started = new Map(sessions.map(({ sessionId }, k) => [sessionId, Date.parse(trajectories[k].steps.find((step) => step.timestamp)?.timestamp)]));
+  return { ids: [...sessions.map(({ sessionId }) => sessionId).toReversed(), ...missing], trajectories, missing, started };
 }
 
-// `<id>.jsonl` in a project folder of ~/.claude/projects, or null when none holds it (or there is no such folder).
-function projectTranscript(id) {
-  const projects = join(homedir(), '.claude', 'projects');
-  let folders;
-  try {
-    folders = readdirSync(projects);
-  } catch (error) {
-    if (error.code === 'ENOENT') return null;
-    throw error;
-  }
-  return folders.map((p) => join(projects, p, `${id}.jsonl`)).find((f) => existsSync(f)) ?? null;
-}
-
-// Every tool call with its input, the result's structured detail (toolUseResult), working directory, time (ms since
-// the epoch, NaN when the entry has none) and whether it is in a main transcript, in transcript order.
-export function toolCalls(files) {
+// Every tool call that has its result, in transcript order: its name, input, the result's structured detail
+// (toolUseResult), working directory, whether it is in a main transcript, and two times in ms since the epoch (NaN
+// when the entry has none): `at`, when the agent's message that holds it began, and `done`, when its result came back.
+// The calls of one message share `at`; Claude Code runs them one after another, so `done` orders them.
+export function toolCalls(trajectories) {
   const calls = [];
-  for (const { file, main } of files) {
-    const pending = new Map();
-    for (const entry of entries(file)) {
-      const content = entry.message?.content;
-      if (!Array.isArray(content)) continue;
-      if (entry.type === 'assistant') {
-        for (const b of content) if (b.type === 'tool_use') {
-          pending.set(b.id, { name: b.name, input: b.input ?? {}, cwd: entry.cwd, at: Date.parse(entry.timestamp), main });
-        }
-      } else if (entry.type === 'user') {
-        for (const r of content) if (r.type === 'tool_result' && pending.has(r.tool_use_id)) {
-          const call = pending.get(r.tool_use_id);
-          calls.push({ ...call, cwd: call.cwd ?? entry.cwd, detail: entry.toolUseResult });
+  for (const trajectory of trajectories) {
+    const transcripts = [{ steps: trajectory.steps, main: true }, ...(trajectory.subagent_trajectories ?? []).map(({ steps }) => ({ steps, main: false }))];
+    for (const { steps, main } of transcripts) {
+      for (const step of steps) {
+        for (const call of step.tool_calls ?? []) {
+          const result = step.observation?.results.find((r) => r.source_call_id === call.tool_call_id);
+          if (!result) continue;
+          const back = result.extra.claude_code;
+          calls.push({ name: call.function_name, input: call.arguments, cwd: step.extra.claude_code.cwd, at: Date.parse(step.timestamp), done: Date.parse(back.timestamp), main, detail: back.tool_use_result });
         }
       }
     }
@@ -95,27 +64,11 @@ export function toolCalls(files) {
   return calls;
 }
 
-// Every Bash call with its working directory and time, in transcript order.
-export function bashCalls(files) {
-  return toolCalls(files)
+// Every Bash call of `calls` (a toolCalls result) with its working directory and times, in transcript order.
+export function bashCalls(calls) {
+  return calls
     .filter((call) => call.name === 'Bash' && typeof call.input.command === 'string')
-    .map(({ input, cwd, at }) => ({ command: input.command, cwd, at }));
-}
-
-// The parsed JSONL entries of one transcript; a line that is not JSON is skipped.
-export function* entries(file) {
-  for (const line of readFileSync(file, 'utf8').split('\n')) {
-    if (!line.trim()) continue;
-    try { yield JSON.parse(line); } catch { /* a torn last line */ }
-  }
-}
-
-// The text of a user or assistant entry: a string content, or its text blocks; null when it has a block of another kind.
-export function entryText(entry) {
-  const content = entry.message?.content;
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content) || !content.every((b) => b.type === 'text')) return null;
-  return content.map((b) => b.text).join('');
+    .map(({ input, cwd, at, done }) => ({ command: input.command, cwd, at, done }));
 }
 
 // Where `text` next occurs at or after `from`, or the end of the line when it does not (an unclosed quote runs to the end).
