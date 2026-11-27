@@ -137,7 +137,9 @@ misspelt, can I close, double check) still fires them.
 a stop hook already continued (`stop_hook_active`), at most once per chain
 (`continuedStops: 'once'` of `@deepagents/experimental` 7.38+): agents wrote
 about half of their "Safe to close" claims in that reply. Every other Stop rule
-skips such a stop. `housekeeping-due` is off without a transcript. All Stop rules are off in a headless run (`claude -p`, the Agent SDKs),
+skips such a stop. Without a transcript, `housekeeping-due` fires only on its
+deferred-wait half, which reads the hook input alone (`background_tasks` and the
+final message). All Stop rules are off in a headless run (`claude -p`, the Agent SDKs),
 which has no AskUserQuestion and no person to sweep for: `hook.ts` copies
 Claude Code's `CLAUDE_CODE_ENTRYPOINT` (`cli` in a terminal, `sdk-cli` under
 `-p`) into the input as `claude_code_entrypoint`.
