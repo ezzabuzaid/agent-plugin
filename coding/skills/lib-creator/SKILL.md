@@ -99,7 +99,7 @@ Before the first code commit, ask the user whether the package is public or priv
 
 In a shared checkout, a commit on main ships with the next push of any session. Thus the gate (step 6) runs before the commit. Commit verified work without asking. Push when the repo's own `.claude/settings.json` allows `git push`; otherwise ask the user, because step 8 waits for that push. Never write `type!:` or a `BREAKING CHANGE:` footer; describe a break in plain words.
 
-Before a push, run `git fetch origin`, list `git log origin/main..HEAD` with the authors, and ask each session that owns a commit in that range before you push. Push the whole of main (`git push origin main`), never a chosen commit.
+Before a push, run `git fetch origin` and list `git log --format='%h %ar %s' origin/main..HEAD`: every session commits as the same author, so only the subject and time tell whose a commit is. Do not ask peers for holds: a commit in a shared checkout is already published, so a session that wants a hold keeps its work as a patch outside the repo. Push the whole of main (`git push origin main`), never a chosen commit.
 
 Read the repo's release section and workflow before the first push, and follow them:
 
