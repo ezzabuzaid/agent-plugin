@@ -518,88 +518,17 @@ async function evaluateWithTranscript(entries: object[], prompt: string) {
   return output?.hookSpecificOutput?.additionalContext ?? '';
 }
 
-const commandEntry = (commandName: string) => ({
-  type: 'user',
-  message: {
-    role: 'user',
-    content: `<command-message>${commandName.slice(1)}</command-message>\n<command-name>${commandName}</command-name>`,
-  },
-});
-
-test('the /wait-what register stays active on every turn after it was invoked', async () => {
-  for (const commandName of ['/wait-what', '/some-plugin:wait-what']) {
-    const context = await evaluateWithTranscript(
-      [
-        { type: 'user', message: { role: 'user', content: 'First request' } },
-        commandEntry(commandName),
-        { type: 'user', message: { role: 'user', content: 'Second request' } },
-      ],
-      'Now build the connector',
+test('the /wait-what register starts every session, with no /wait-what typed, and names the industry term first', async () => {
+  for (const source of ['startup', 'resume', 'clear', 'compact']) {
+    const output = await evaluateReminderHook(
+      { hook_event_name: 'SessionStart', source },
+      ezzsWayOfCodingConfig,
     );
+    const context = output?.hookSpecificOutput?.additionalContext ?? '';
 
-    assert.match(context, /\[prompt:wait-what-register\]/, commandName);
-    assert.match(context, /wait-what skill/);
-    assert.doesNotMatch(context, /Limerence|text2sql|Space/);
+    assert.match(context, /\[session:wait-what-register\]/, source);
+    assert.match(context, /industry term first/, source);
   }
-});
-
-test('the /wait-what register ignores a command whose name only contains wait-what', async () => {
-  for (const commandName of ['/wait-what-notes', '/not-wait-what']) {
-    const context = await evaluateWithTranscript(
-      [commandEntry(commandName)],
-      'Carry on',
-    );
-
-    assert.doesNotMatch(context, /wait-what-register/, commandName);
-  }
-});
-
-test('the /wait-what register ignores a transcript that only quotes the skill', async () => {
-  await using folder = await new TemporaryFiles().directory('ezzs-way-of-coding-register-quote-');
-  const transcriptDirectory = folder.path;
-  const transcriptPath = join(transcriptDirectory, 'transcript.jsonl');
-  const entries = [
-    { type: 'user', message: { role: 'user', content: 'Read that skill' } },
-    {
-      type: 'user',
-      message: {
-        role: 'user',
-        content: [
-          {
-            type: 'tool_result',
-            tool_use_id: 'toolu_1',
-            content:
-              'grep hit: <command-name>/mattpocock-skills:wait-what</command-name>',
-          },
-        ],
-      },
-    },
-    {
-      type: 'assistant',
-      message: {
-        role: 'assistant',
-        content: [{ type: 'text', text: 'The wait-what skill sets it.' }],
-      },
-    },
-  ];
-  await writeFile(
-    transcriptPath,
-    `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`,
-  );
-
-  const output = await evaluateReminderHook(
-    {
-      hook_event_name: 'UserPromptSubmit',
-      transcript_path: transcriptPath,
-      prompt: 'Carry on',
-    },
-    ezzsWayOfCodingConfig,
-  );
-
-  assert.doesNotMatch(
-    output?.hookSpecificOutput?.additionalContext ?? '',
-    /wait-what-register/,
-  );
 });
 
 // A body that asks for UI, dependency, test and fix work, so that the prompt
@@ -736,24 +665,6 @@ test('session harvest names no agent paths without a readable transcript', async
     const context = output?.hookSpecificOutput?.additionalContext ?? '';
     assert.equal(context.match(/\[prompt:session-harvest\]/g)?.length, 1);
     assert.doesNotMatch(context, /~\/\.claude|~\/\.codex/);
-  }
-});
-
-test('the /wait-what register stays quiet without a readable transcript', async () => {
-  for (const transcriptPath of [undefined, '/missing/transcript.jsonl']) {
-    const output = await evaluateReminderHook(
-      {
-        hook_event_name: 'UserPromptSubmit',
-        transcript_path: transcriptPath,
-        prompt: 'Carry on',
-      },
-      ezzsWayOfCodingConfig,
-    );
-
-    assert.doesNotMatch(
-      output?.hookSpecificOutput?.additionalContext ?? '',
-      /wait-what-register/,
-    );
   }
 });
 

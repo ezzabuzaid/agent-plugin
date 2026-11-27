@@ -1,6 +1,6 @@
 import {
+  always,
   and,
-  type ClaudeHookInput,
   contentPattern,
   or,
   type ReminderRule,
@@ -8,48 +8,6 @@ import {
 
 import { promptEvents } from './events.ts';
 import { asksToBuild, typedByUser } from './intent.ts';
-import { readTranscriptEntries, type TranscriptEntry } from './transcript.ts';
-
-/**
- * A slash command is recorded as a user entry whose `message.content` is a
- * plain string carrying the `<command-name>` tag. Tool results and injected
- * skill bodies use array content, so the string check alone keeps a transcript
- * that merely quotes the skill from arming the register. The skill is the
- * user-level `~/.claude/skills/wait-what/SKILL.md`, so the command is
- * `/wait-what`; a plugin copy adds a `<plugin>:` prefix. The pattern matches
- * that command name and nothing else, so a command such as `/wait-what-notes`
- * does not arm the register.
- */
-const WAIT_WHAT_INVOCATION =
-  /<command-name>\/(?:[\w-]+:)?wait-what<\/command-name>/;
-
-function invokesWaitWhat(entry: TranscriptEntry): boolean {
-  const content = entry.message?.content;
-  return (
-    entry.type === 'user' &&
-    typeof content === 'string' &&
-    WAIT_WHAT_INVOCATION.test(content)
-  );
-}
-
-/**
- * The model can invoke the skill too, but only when its description matches
- * the turn. A user who runs `/wait-what` asks for the register for the whole
- * session. Only the transcript records that request, so the rule reads it on
- * every prompt. The register has no off switch: once the command ran, it stays
- * on for the rest of the session. A new session starts with it off.
- */
-async function waitWhatRegisterIsActive(
-  input: ClaudeHookInput,
-): Promise<boolean> {
-  if (!input.transcript_path) return false;
-
-  for await (const entry of readTranscriptEntries(input.transcript_path)) {
-    if (invokesWaitWhat(entry)) return true;
-  }
-
-  return false;
-}
 
 export const collaborationRules: ReminderRule[] = [
   {
@@ -82,10 +40,10 @@ export const collaborationRules: ReminderRule[] = [
   },
   {
     id: 'wait-what-register',
-    target: 'prompt',
-    events: ['UserPromptSubmit'],
-    when: waitWhatRegisterIsActive,
+    target: 'session',
+    events: ['SessionStart'],
+    when: always,
     message:
-      'The /wait-what register stays on for the rest of this session, not only the turn it was invoked on. Write every reply as the wait-what skill says: ASD-STE100 Simplified Technical English with the project’s ubiquitous language. Follow that skill for where the terms come from.',
+      'Write every reply in the /wait-what register: a little context first, then ASD-STE100 Simplified Technical English. Name each concept by its standard industry term first, then the project’s own term from GLOSSARY.md where the two differ.',
   },
 ];

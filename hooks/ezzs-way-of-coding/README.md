@@ -27,8 +27,7 @@ these prompts (`<agent-message …>`, `<cross-session-message …>`,
 `<task-notification>`). When a usage limit resets, Claude Code also starts a
 turn by itself with a fixed prompt, such as "Your claude.ai usage limit has
 reset. Continue the task you were working on…". The prompt rules and the
-session harvest read only a prompt that the user typed. The `/wait-what` register does not read the prompt
-text, so it stays on for every turn. The UI and dependency reminders fire on a
+session harvest read only a prompt that the user typed. The UI and dependency reminders fire on a
 phrase, such as "build a dashboard page" or "update the packages", not on two
 words anywhere in a long prompt.
 
@@ -69,21 +68,15 @@ investment categories — what the item is) and `--work-type
 business|internal|change|unplanned` (Phoenix Project four types — how the
 work entered the system).
 
-The `/wait-what` register stays on for the rest of the session. The skill is
-the user-level `~/.claude/skills/wait-what/SKILL.md`. The model can invoke it,
-but only on a turn that matches its description. Without help, the register
-reaches one reply only. The `wait-what-register` rule reads the session
-transcript to keep it on. The rule arms when a user entry carries a
-`<command-name>` tag for `/wait-what`, with or without a plugin prefix. A
-command whose name only contains `wait-what`, such as `/wait-what-notes`, does
-not arm it. Entries whose content is an array — tool results and injected skill
-bodies — do not arm it either, so a transcript that only quotes the skill stays
-quiet. After the rule arms, it tells the agent on every later
-`UserPromptSubmit` to follow the wait-what skill. The rule does not repeat the
-skill's terms or its `CONTEXT.md` guidance. The skill is the one place for them.
-The register has no off switch. An off switch needs a command that does not
-exist. The transcript is the session state, so a new session starts with the
-register off and a resumed session keeps it on.
+The `/wait-what` register is on in every session (Ezz, 2026-11-27, after 86
+sessions in four weeks asked for plain explanations and `/wait-what` was typed
+48 times). The `wait-what-register` session rule fires on every `SessionStart`
+(startup, resume, `/clear`, compaction), not on subagents, whose reports go to
+the main agent. It names each concept by its standard industry term first and
+the project's GLOSSARY.md term after it, which differs from the wait-what skill:
+that skill is synced from mattpocock/skills (`~/.agents/.skill-lock.json`), so
+its text stays upstream's and this rule holds Ezz's term order. `/wait-what`
+stays the command to re-pitch one reply.
 
 Three Stop rules (root sessions only) keep a turn from ending on the user or on
 an unproven claim. The user reads only AskUserQuestion, and AskUserQuestion
