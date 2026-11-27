@@ -35,6 +35,13 @@ export class Since {
     return earliest === 'none' ? Since.ever : Since.from(earliest);
   }
 
+  /** The start as a Date, for a listing that takes one: the epoch for "ever". */
+  toDate(): Date {
+    return new Date(
+      this.#window.kind === 'ever' ? 0 : this.#window.instant.epochMilliseconds,
+    );
+  }
+
   includes(instant: Temporal.Instant): boolean {
     return (
       this.#window.kind === 'ever' ||

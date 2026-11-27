@@ -132,6 +132,20 @@ function session(cwd: string) {
         promptSource: 'typed',
         message: { role: 'user', content },
       }),
+    // A prompt typed while the agent works, as Claude Code 2.1.332 writes it.
+    queued: (timestamp: string, prompt: string) =>
+      JSON.stringify({
+        ...common(timestamp),
+        type: 'attachment',
+        attachment: {
+          type: 'queued_command',
+          prompt,
+          commandMode: 'prompt',
+          origin: { kind: 'human' },
+          timestamp,
+          humanTurn: true,
+        },
+      }),
     notification: (timestamp: string, content: string) =>
       JSON.stringify({
         ...common(timestamp),
@@ -402,8 +416,54 @@ test('a transcript bundle keeps the prompt, tool input and assistant text that n
       },
     ],
   );
-  assert.match(String(found[0]?.ref), /^-work\/[\da-f-]+\.jsonl:2$/);
+  const [file = '', uuid] = String(found[0]?.ref).split('#');
+  assert.match(file, /^-work\/[\da-f-]+\.jsonl$/);
+  const cited = (
+    await readFile(join(home.path, '.claude', 'projects', file), 'utf8')
+  )
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as { uuid?: string; message?: unknown })
+    .find((entry) => entry.uuid === uuid);
+  assert.deepEqual(cited?.message, {
+    role: 'user',
+    content: 'why does @zukhruf/pool drop a job?',
+  });
   assert.equal(found[0]?.cwd, app.path);
+});
+
+test('a prompt the user typed while the agent worked, naming the package, is a prompt record', async () => {
+  // Arrange
+  await using home = await new TemporaryFiles().directory('update-docs-home-');
+  await using repo = await new TemporaryFiles().directory('update-docs-repo-');
+  await using app = await new TemporaryFiles().directory('update-docs-app-');
+  await workspace(repo.path);
+  const work = session(app.path);
+  await transcript(home.path, '-work', [
+    work.prompt('2026-03-01T10:00:00Z', 'fix the build'),
+    work.toolUse('2026-03-01T10:00:01Z', { command: 'npm test' }),
+    work.toolResult('2026-03-01T10:00:02Z', 'ok'),
+    work.queued(
+      '2026-03-01T10:00:03Z',
+      'side note: does @zukhruf/pool retry a job?',
+    ),
+  ]);
+  const tool = new UpdateDocs({
+    home: home.path,
+    repoRoot: repo.path,
+    variables: process.env,
+  });
+
+  // Act
+  const { stdout } = await tool.run(['evidence', 'pool']);
+
+  // Assert
+  assert.deepEqual(
+    records(stdout)
+      .filter(({ source }) => source === 'transcript')
+      .map(({ kind, text }) => ({ kind, text })),
+    [{ kind: 'prompt', text: 'side note: does @zukhruf/pool retry a job?' }],
+  );
 });
 
 test('--since drops the transcript lines and files older than the start', async () => {

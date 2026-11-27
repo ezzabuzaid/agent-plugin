@@ -1,6 +1,14 @@
-import { glob, readFile, stat } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { availableParallelism } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname } from 'node:path';
+
+import {
+  ClaudeCodeAdapter,
+  type ClaudeCodeSessionInfo,
+  ClaudeCodeStore,
+  SessionReadError,
+  type Step,
+} from '@deepagents/trajectory';
 
 import type { ClaudeHome } from '../claude-home.ts';
 import { under } from '../paths.ts';
@@ -18,20 +26,8 @@ export interface Watch {
 
 type Found = Pick<TranscriptRecord, 'kind' | 'text'>;
 
-/**
- * A session the evidence reads, up to the line `end` (exclusive): its lines
- * from the first /update-docs command on are that run's own work. A session in
- * the workspace gives no tool input, since git history holds the package's own
- * development; a consumer's tool inputs show how it uses the package.
- */
-type Session =
-  | {
-      readonly kind: 'kept';
-      readonly cwd: string;
-      readonly end: number;
-      readonly origin: 'workspace' | 'consumer';
-    }
-  | { readonly kind: 'dropped' };
+/** A listed session with a working folder outside ~/.claude. */
+type Listed = ClaudeCodeSessionInfo & { readonly cwd: string };
 
 // This skill's own runs start with /update-docs, under a plugin's name or
 // none, typed (<command-name>) or passed to a headless run as the prompt.
@@ -40,13 +36,15 @@ const UPDATE_DOCS =
 
 /**
  * The Claude Code transcripts of the user's sessions, read once for every
- * watched project. Only what the user said and what the assistant did or
- * wrote is evidence; tool results echo files, and attachments echo context.
+ * watched project through @deepagents/trajectory. Only what the user said
+ * and what the assistant did or wrote is evidence; tool results echo files,
+ * and attachments echo context.
  */
 export class TranscriptArchive {
   readonly #claude: ClaudeHome;
   readonly #repoRoot: string;
   readonly #selection = new TranscriptSelection();
+  readonly #adapter = new ClaudeCodeAdapter();
 
   constructor(claude: ClaudeHome, repoRoot: string) {
     this.#claude = claude;
@@ -59,18 +57,18 @@ export class TranscriptArchive {
     const found = new Map<string, TranscriptRecord[]>(
       watches.map(({ project }) => [project.name, []]),
     );
-    const files = await this.#files(
+    const sessions = await this.#sessions(
       Since.earliest(watches.map(({ since }) => since)),
     );
     const needles = [
       ...new Set(watches.flatMap(({ project }) => project.needles)),
     ].map((needle) => Buffer.from(needle));
-    const next = files[Symbol.iterator]();
+    const next = sessions[Symbol.iterator]();
     const worker = async () => {
-      for (const file of next) {
-        const buffer = await readFile(join(this.#claude.projects, file));
+      for (const listed of next) {
+        const buffer = await readFile(listed.session.transcriptPath);
         if (needles.some((needle) => buffer.includes(needle))) {
-          for (const record of this.#records(file, buffer, watches)) {
+          for (const record of await this.#records(listed, watches)) {
             found.get(record.project)?.push(record.record);
           }
         }
@@ -87,174 +85,126 @@ export class TranscriptArchive {
     );
   }
 
-  /** The top-level transcripts changed since the start, relative paths. */
-  async #files(since: Since): Promise<string[]> {
-    const files: string[] = [];
-    for await (const file of glob('*/*.jsonl', {
-      cwd: this.#claude.projects,
-    })) {
-      const { mtime } = await stat(join(this.#claude.projects, file));
-      if (
-        since.includes(Temporal.Instant.fromEpochMilliseconds(mtime.getTime()))
-      ) {
-        files.push(file);
+  /**
+   * The sessions changed since the start. One that ran under ~/.claude (a
+   * tool or hook run), or that records no working folder, is dropped before
+   * it is read.
+   */
+  async #sessions(since: Since): Promise<Listed[]> {
+    const listed: Listed[] = [];
+    const store = new ClaudeCodeStore({ root: this.#claude.root });
+    for await (const info of store.sessions({ since: since.toDate() })) {
+      const { cwd } = info;
+      if (cwd !== undefined && !this.#claude.holds(cwd)) {
+        listed.push({ ...info, cwd });
       }
     }
-    return files;
+    return listed;
   }
 
-  *#records(
-    file: string,
-    buffer: Buffer,
+  /**
+   * The records of the steps before the session's first /update-docs prompt:
+   * from that prompt on, the steps are that run's own work. A session with no
+   * prompt before it is dropped. A session in the workspace gives no tool
+   * input, since git history holds the package's own development; a
+   * consumer's tool inputs show how it uses the package.
+   */
+  async #records(
+    { session, cwd }: Listed,
     watches: readonly Watch[],
-  ): Generator<{ project: string; record: TranscriptRecord }> {
-    const lines = buffer.toString('utf8').split('\n');
-    const session = this.#session(lines);
-    if (session.kind === 'dropped') {
-      return;
+  ): Promise<{ project: string; record: TranscriptRecord }[]> {
+    let steps: readonly Step[];
+    try {
+      ({ steps } = (await this.#adapter.read(session, { subagents: false }))
+        .trajectory);
+    } catch (error) {
+      // ADR 0009 of the package: a miner skips a session it cannot read.
+      if (error instanceof SessionReadError) return [];
+      throw error;
     }
-    const folder = basename(dirname(file));
-    for (const [index, line] of lines.slice(0, session.end).entries()) {
-      const watching = watches.filter(({ project }) => project.names(line));
-      if (watching.length === 0) {
+    const before: Step[] = [];
+    let prompted = false;
+    for (const step of steps) {
+      const prompt = typedPrompt(step);
+      if (prompt !== undefined && UPDATE_DOCS.test(prompt)) break;
+      prompted ||= prompt !== undefined;
+      before.push(step);
+    }
+    if (!prompted) return [];
+    const origin = under(cwd, this.#repoRoot) ? 'workspace' : 'consumer';
+    const file = `${basename(dirname(session.transcriptPath))}/${basename(session.transcriptPath)}`;
+    const records: { project: string; record: TranscriptRecord }[] = [];
+    for (const step of before) {
+      const uuid = claudeCodeOf(step)?.uuid;
+      if (typeof step.timestamp !== 'string' || typeof uuid !== 'string') {
         continue;
       }
-      const entry = parse(line);
-      if (entry === 'unparsable' || typeof entry.timestamp !== 'string') {
-        continue;
-      }
-      for (const { kind, text } of found(entry)) {
-        if (kind === 'tool-input' && session.origin === 'workspace') {
-          continue;
-        }
-        for (const { project, since } of watching) {
-          if (project.names(text) && since.includesText(entry.timestamp)) {
-            yield {
+      for (const { kind, text } of found(step)) {
+        if (kind === 'tool-input' && origin === 'workspace') continue;
+        for (const { project, since } of watches) {
+          if (project.names(text) && since.includesText(step.timestamp)) {
+            records.push({
               project: project.name,
               record: {
                 source: 'transcript',
                 kind,
-                ts: entry.timestamp,
-                ref: `${folder}/${basename(file)}:${index + 1}`,
+                ts: step.timestamp,
+                ref: `${file}#${uuid}`,
                 text: excerpt(
                   text,
                   project.needles,
                   kind === 'tool-input' ? TOOL_INPUT_EXCERPT : TEXT_EXCERPT,
                 ),
-                session: basename(file, '.jsonl'),
-                cwd: session.cwd,
+                session: session.sessionId,
+                cwd,
               },
-            };
+            });
           }
         }
       }
     }
+    return records;
   }
-
-  /**
-   * A session is dropped when it ran under ~/.claude (a tool or hook run), or
-   * when it records no cwd or no prompt before its first /update-docs.
-   */
-  #session(lines: readonly string[]): Session {
-    let cwd: string | undefined;
-    let prompted = false;
-    let end = lines.length;
-    for (const [index, line] of lines.entries()) {
-      if (cwd === undefined && line.includes('"cwd":')) {
-        const entry = parse(line);
-        if (entry !== 'unparsable' && typeof entry.cwd === 'string') {
-          cwd = entry.cwd;
-          if (this.#claude.holds(cwd)) {
-            return { kind: 'dropped' };
-          }
-        }
-      }
-      // After the first prompt, only a line naming the command can end it.
-      if (
-        line.includes('"type":"user"') &&
-        (!prompted || line.includes('update-docs'))
-      ) {
-        const entry = parse(line);
-        const prompt = entry === 'unparsable' ? undefined : userPrompt(entry);
-        if (prompt !== undefined && UPDATE_DOCS.test(prompt)) {
-          end = index;
-          break;
-        }
-        prompted ||= prompt !== undefined;
-      }
-    }
-    return cwd === undefined || !prompted
-      ? { kind: 'dropped' }
-      : {
-          kind: 'kept',
-          cwd,
-          end,
-          origin: under(cwd, this.#repoRoot) ? 'workspace' : 'consumer',
-        };
-  }
-}
-
-type Entry = Readonly<Record<string, unknown>>;
-
-function parse(line: string): Entry | 'unparsable' {
-  try {
-    const value: unknown = JSON.parse(line);
-    return isEntry(value) ? value : 'unparsable';
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      return 'unparsable';
-    }
-    throw error;
-  }
-}
-
-function isEntry(value: unknown): value is Entry {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
- * The text of a prompt the user typed. Meta lines are hook or skill text, and
- * an origin other than human (a task notification) is the harness talking.
- * Transcripts older than the origin field record none, so those are kept.
+ * The text of a prompt the user typed, at the prompt or while the agent
+ * worked (a queued_command attachment). Injected context (isMeta) is no
+ * prompt, and an origin other than human (a task notification) is the
+ * harness talking. Transcripts older than the origin field record none, so
+ * those are kept.
  */
-function userPrompt(entry: Entry): string | undefined {
+function typedPrompt(step: Step): string | undefined {
+  const claudeCode = claudeCodeOf(step);
   if (
-    entry.type !== 'user' ||
-    entry.isMeta === true ||
-    (isEntry(entry.origin) && entry.origin.kind !== 'human')
+    step.source !== 'user' ||
+    claudeCode?.is_meta === true ||
+    (claudeCode?.origin !== undefined && claudeCode.origin !== 'human')
   ) {
     return undefined;
   }
-  const message = entry.message;
-  return isEntry(message) && typeof message.content === 'string'
-    ? message.content
+  return typeof step.message === 'string' ? step.message : undefined;
+}
+
+/** The Claude Code fields the adapter keeps beside a step (its README, "Claude Code entry → ATIF"). */
+function claudeCodeOf(step: Step): Readonly<Record<string, unknown>> | undefined {
+  const claudeCode: unknown = step.extra?.claude_code;
+  return typeof claudeCode === 'object' && claudeCode !== null
+    ? (claudeCode as Readonly<Record<string, unknown>>)
     : undefined;
 }
 
-function* found(entry: Entry): Generator<Found> {
-  const prompt = userPrompt(entry);
+function* found(step: Step): Generator<Found> {
+  const prompt = typedPrompt(step);
   if (prompt !== undefined) {
     yield { kind: 'prompt', text: prompt };
     return;
   }
-  const message = entry.message;
-  if (
-    entry.type !== 'assistant' ||
-    !isEntry(message) ||
-    !Array.isArray(message.content)
-  ) {
-    return;
+  if (step.source !== 'agent') return;
+  if (typeof step.message === 'string' && step.message !== '') {
+    yield { kind: 'assistant-text', text: step.message };
   }
-  const items: readonly unknown[] = message.content;
-  for (const item of items) {
-    if (isEntry(item) && item.type === 'tool_use') {
-      yield { kind: 'tool-input', text: JSON.stringify(item.input ?? {}) };
-    } else if (
-      isEntry(item) &&
-      item.type === 'text' &&
-      typeof item.text === 'string'
-    ) {
-      yield { kind: 'assistant-text', text: item.text };
-    }
+  for (const call of step.tool_calls ?? []) {
+    yield { kind: 'tool-input', text: JSON.stringify(call.arguments) };
   }
 }
