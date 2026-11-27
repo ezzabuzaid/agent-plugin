@@ -16,7 +16,7 @@ Each entry gives the rule, the user's words with their date, what happened, and 
 - 4 waited on background work or a peer, with the user's decisions not asked: _"The study lockfile retry and commit B's test gate are both running in the background. I'll pick up each one when it finishes."_; _"Commit B hasn't landed. … It will message me when B is on HEAD."_; _"The tool commit is waiting on Docker Desktop."_
 - 2 ended on open items: _"Still to do after commit B lands: Phase 3 …, then Phase 4"_; a table whose rows said _"needs a design choice"_.
 
-These are the four Ask gotchas: idle, a task is a question, open items are questions, remaining phases hide decisions.
+These are the four Ask gotchas: idle, a hands-on step ends the turn in the chat (it was "a task is a question" until 2026-11-27), open items are questions, remaining phases hide decisions.
 
 **A hands-on step ends the turn in the chat; the dialog asks only decisions (2026-11-27, supersedes "a task is a question").** On 2026-11-26, during the Docker server's first boot, a dialog after the steps hid them: Ezz answered "what steps", rejected the dialog twice, then picked "Done, it said Saved" and asked "what command?", with the file untouched (`Projects-study/feedback_hands_on_no_dialogs.md`). His ruling of 2026-11-27 (ruling 6 of `~/.claude/plans/user-repeats-2026-11-27/consolidation/plan.md`, with #6152, a `/kickoff …` line he had to type): a manual step, a command or a slash command for him to type ends the turn in the chat with what to report back, like a `!` command; ask-in-the-tool fires only on a decision held in prose.
 
