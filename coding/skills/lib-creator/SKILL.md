@@ -11,14 +11,14 @@ Most rules that this skill applies have a home elsewhere. The skill points to th
 
 - The user's CLAUDE.md: the Rule of Three, the Stable Dependencies Principle, Make Illegal States Unrepresentable, EAFP, the testing rules.
 - Skills: `coding:node-native`, `coding:write-test`, `coding:remove-code`, `coding:guardrail`.
-- The target repo: its README, CONTEXT-MAP, ADRs and CI workflow. Its ADRs win over this skill. In zukhruf, root ADR 0001 gives the layers and the rules for what enters a package (tiny helpers and test helpers stay copied), ADRs 0002 and 0003 the package families, ADR 0004 the clock, and the README the `@zukhruf/source` condition and the release.
+- The target repo: its README, GLOSSARY-MAP, ADRs and CI workflow. Its ADRs win over this skill. In zukhruf, root ADR 0001 gives the layers and the rules for what enters a package (tiny helpers and test helpers stay copied), ADRs 0002 and 0003 the package families, ADR 0004 the clock, and the README the `@zukhruf/source` condition and the release.
 
 Copy this checklist into your response and tick it off as you go:
 
 ```
 - [ ] 1 Decide: verdicts for own packages, Node and npm; strike; owner table; home (or the exit: adopt)
 - [ ] 2 Name: Go and .NET survey; name with a precedent; now/later/never map
-- [ ] 3 Paper: leaders table; README, CONTEXT.md and ADRs committed alone; user ruled on each change
+- [ ] 3 Paper: leaders table; README, GLOSSARY.md and ADRs committed alone; user ruled on each change
 - [ ] 4 Visibility: user said public or private
 - [ ] 5 Scaffold: copied from the newest package of the same kind; lockfile and root reference in the same commit
 - [ ] 6 Build: write-test; every CI step green, the workspace-wide ones too
@@ -42,7 +42,7 @@ Do this step before the first design message.
    - A host that must decide something a package's concept implies is a gap of that package, at any strike.
 6. **Split the request into jobs.** Trace each real caller. Make an owner table: job → who can know it → owner. The library takes only the jobs that a stranger who installs it from npm needs. Host words, wiring, storage and display stay in the host.
 7. **Pick the home.** Domain-free code goes to the user's stdlib repo, and the origin keeps no copy beyond what the repo's ADRs keep copied. A concept of one product stays in that product's repo. In a layered repo, the layer comes from its ADR, before the first import. Name each rejected home and why; the size of the work never decides a home or a design. When code moves out of an origin repo, first sweep that repo for code of the same concept and fold it in while the package is still local.
-8. **Read the history** of what the library replaces: the backlog items and their links (each item's own fix direction too), `git log --all -S <term>`, the ADRs, CONTEXT.md, the user's memory and past session transcripts. Each earlier decision that the library reverses goes on the paper.
+8. **Read the history** of what the library replaces: the backlog items and their links (each item's own fix direction too), `git log --all -S <term>`, the ADRs, GLOSSARY.md, the user's memory and past session transcripts. Each earlier decision that the library reverses goes on the paper.
 
 **Done when** the plan opens with these verdicts: package / Node / npm (or the adoption), the strike, the owner table and the home.
 
@@ -63,11 +63,11 @@ A verdict comes from a check that ran, never from memory. When a check cannot ru
 
 1. **Survey the leaders.** For each design choice, read the source of the leading tools and show a table: tool → choice → link. Use what they ship. Use your own judgment only where no leader covers the case, and say that it is yours. When the choice is push or pull, put a real push option in the table and measure it beside the pull ones.
 2. **Ports copy the upstream exactly:** names, defaults, errors and the upstream's own types, without its legacy aliases. Each divergence is a decision on the paper. A missing upstream feature goes to the user; do not port it unasked.
-3. **Design from the domain, at full strength.** Consumers follow the package (Stable Dependencies). A call site is evidence, never the source of an API. Apply Make Illegal States Unrepresentable to each type.
+3. **Design from the domain, at full strength.** Design the API as classes; name the GoF, Fowler or Evans pattern each responsibility follows. Consumers follow the package (Stable Dependencies). A call site is evidence, never the source of an API. Apply Make Illegal States Unrepresentable to each type.
    - The clock, env and paths are required inputs with no default (zukhruf ADR 0004). A port keeps its upstream's signature.
    - The package exports and throws its own error classes, with a class only where the caller's next step differs. It never takes a host's error class.
    - The package exports mechanism (classes, functions), never instances or `configure*` slots. A thing that owns a resource over time is a class with `[Symbol.asyncDispose]`.
-4. **Write the paper** in the doc shape of the repo; read a sibling's README, CONTEXT.md and `docs/adr` first. The README has task sections, the signature block, a call → what happens underneath table, the errors, "the same concepts in other systems", why each npm candidate failed, and who uses what. CONTEXT.md holds the glossary. Each decision gets an ADR whose name is a sentence. A port keeps `docs/ported-from-<upstream>.md`.
+4. **Write the paper** in the doc shape of the repo; read a sibling's README, GLOSSARY.md and `docs/adr` first. The README has task sections, the signature block, a call → what happens underneath table, the errors, "the same concepts in other systems", why each npm candidate failed, and who uses what. GLOSSARY.md holds the glossary. Each decision gets an ADR whose name is a sentence. A port keeps `docs/ported-from-<upstream>.md`.
 5. **Commit the paper alone,** in a folder with no package.json and no tsconfig, with a "design for review" banner: `docs(<pkg>): the API on paper of …, for review before any code`.
 6. **Review it in chat,** not as a path. Show the now/later/never map, the layer diagram, and each decision with its precedent. Show each change that a caller can see (export, signature, option, default, error) as before/after with its cost. Say what you decided and why. Then get the user's ruling on each change with AskUserQuestion in the same turn.
 
