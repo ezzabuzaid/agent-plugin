@@ -11,6 +11,8 @@ import { join } from 'node:path';
 import { Memory, Project } from '../domain.ts';
 import { FrontmatterParser } from './frontmatter.ts';
 
+const isIndex = (name: string) => /^MEMORY.*\.md$/.test(name);
+
 export interface CorpusRepositoryOptions {
   root?: string;
   parser?: FrontmatterParser;
@@ -42,7 +44,7 @@ export class CorpusRepository {
       }
 
       const label = this.#labelFor(entry.name);
-      const mdFiles = files.filter((f) => f.endsWith('.md') && f !== 'MEMORY.md');
+      const mdFiles = files.filter((f) => f.endsWith('.md') && !isIndex(f));
       const memories = await Promise.all(
         mdFiles.map((f) => this.#read(memDir, f, entry.name, label)),
       );
