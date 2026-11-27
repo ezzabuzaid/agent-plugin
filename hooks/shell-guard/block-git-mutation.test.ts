@@ -464,6 +464,44 @@ test('still allows git status', () => {
   assertAllowed('git status');
 });
 
+test('blocks a refused git command behind a wrapper option that takes a value', () => {
+  assertBlocked('env -C /tmp git reset --hard', 'reset', GUARD);
+  assertBlocked('env -u FOO git rebase main', 'rebase', GUARD);
+  assertBlocked('env -P /usr/bin git reset --hard', 'reset', GUARD);
+  assertBlocked('env -iC /tmp git reset --hard', 'reset', GUARD);
+  assertBlocked('sudo -u root git reset --hard', 'reset', GUARD);
+  assertBlocked('sudo --user root git reset --hard', 'reset', GUARD);
+  assertBlocked('nice -n 5 git reset --hard', 'reset', GUARD);
+  assertBlocked('xargs -I {} git branch -D {}', 'branch', GUARD);
+  assertBlocked('time -o times.txt git reset --hard', 'reset', GUARD);
+  assertBlocked('exec -a name git reset --hard', 'reset', GUARD);
+});
+
+test('blocks a refused git command that env -S splits out of its string', () => {
+  assertBlocked("env -S 'git reset --hard'", 'reset', GUARD);
+  assertBlocked("env -iS 'git reset --hard'", 'reset', GUARD);
+  assertBlocked("env '-Sgit reset --hard'", 'reset', GUARD);
+  assertBlocked("env -S '-C /tmp git stash'", 'stash', GUARD);
+  assertBlocked("env -u FOO -S 'git reset --hard'", 'reset', GUARD);
+  assertBlocked(`env -S "-u FOO -S 'git reset --hard'"`, 'reset', GUARD);
+});
+
+test('blocks a refused git command behind a wrapper named by its path', () => {
+  assertBlocked('/usr/bin/env -C /tmp git reset --hard', 'reset', GUARD);
+});
+
+test('reads a heredoc as commands when a wrapper with an option value runs a shell on it', () => {
+  assertBlocked(["env -C /tmp bash <<'EOF'", 'git reset --hard', 'EOF'].join('\n'), 'reset', GUARD);
+});
+
+test('allows read-only git behind wrapper options, and git as an argument of the wrapped command', () => {
+  assertAllowed('env -C /tmp git status');
+  assertAllowed('env FOO=1 git log');
+  assertAllowed("env -S 'git status'");
+  assertAllowed('sudo -u root git log');
+  assertAllowed('env -u FOO echo git reset --hard');
+});
+
 test('allows git fetch of a remote branch', () => {
   assertAllowed('git fetch origin main --quiet');
 });

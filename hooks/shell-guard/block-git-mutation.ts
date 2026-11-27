@@ -20,8 +20,9 @@ const LOG_PATH = join(homedir(), '.claude', 'hooks', 'block-git-mutation.log');
 // The guard cannot read a command without this parser. A failed static import
 // exits 1, which lets the command run; only exit 2 blocks a PreToolUse call.
 const {
-	COMMAND_PREFIXES,
+	commandIndex,
 	redirection,
+	splitEnvStrings,
 	splitSegments,
 	splitWithDelimiters,
 	tokenizeSegment,
@@ -577,22 +578,13 @@ function hooksPathConfig(tokens: string[]): boolean {
 	return values.length === (unset ? 0 : 1);
 }
 
-// `git` is a git command only when it is in COMMAND position — the first real
-// token of the segment, after env assignments (FOO=bar), command prefixes
-// (sudo/env/xargs/...), shell keywords (do/then/...), and their flags. If the
+// `git` is a git command only when it is the segment's command word. If the
 // segment's command is something else (type git, which git, echo "use git",
 // man git), `git` is just an argument and must NOT be treated as a mutation.
 function findGitCommandIndex(tokens: string[]): number {
-	for (let i = 0; i < tokens.length; i += 1) {
-		const token = trimQuotes(tokens[i]);
-		if (token === 'git' || token.endsWith('/git')) return i;
-		if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(token)) continue; // env assignment
-		if (COMMAND_PREFIXES.has(token)) continue;
-		if (token.startsWith('-')) continue; // flag of a prefix command
-		if (token === '{' || token === '(' || token === '!') continue;
-		return -1; // the segment's command is not git
-	}
-	return -1;
+	const at = commandIndex(tokens);
+	const token = tokens[at];
+	return token === 'git' || token?.endsWith('/git') ? at : -1;
 }
 
 function isShellExecutable(token: string): boolean {
@@ -765,7 +757,7 @@ function blockedGitCommands(command: string, cwd: string, depth = 0, root = comm
 	const parts = splitWithDelimiters(withoutDataHeredocs(command));
 	const segments = parts.map(({ segment }) => ({
 		segment,
-		tokens: tokenizeSegment(segment).map(trimQuotes),
+		tokens: splitEnvStrings(tokenizeSegment(segment).map(trimQuotes)),
 	}));
 
 	// Each segment's git call, with whether it uses a private index: its own

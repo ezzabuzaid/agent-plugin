@@ -73,7 +73,7 @@ export function redirection(token: string): { target: boolean } | null {
 }
 
 // Tokens that may legitimately precede the actual command in a segment.
-export const COMMAND_PREFIXES = new Set([
+const COMMAND_PREFIXES = new Set([
 	'command',
 	'exec',
 	'sudo',
@@ -101,15 +101,104 @@ export const HEREDOC_BODY = /(<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2[^\n]*)\n[
 // commands; a node or python body is still read for process calls.
 export const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'fish', 'ssh']);
 
+// The options of a command prefix that take a value, from macOS `man env`,
+// `man sudo`, `man nice`, `man time`, `man xargs` and zsh's `exec -a`. The value
+// is a word of its own, so it is not the segment's command.
+const ENV_VALUE_OPTIONS = new Set(['-C', '-P', '-S', '-u']);
+const PREFIX_VALUE_OPTIONS = new Map<string, ReadonlySet<string>>([
+	['env', ENV_VALUE_OPTIONS],
+	[
+		'sudo',
+		new Set([
+			'-C', '-D', '-g', '-h', '-p', '-R', '-T', '-U', '-u',
+			'--close-from', '--chdir', '--group', '--host', '--prompt', '--chroot',
+			'--command-timeout', '--other-user', '--user',
+		]),
+	],
+	['nice', new Set(['-n'])],
+	['time', new Set(['-o'])],
+	['xargs', new Set(['-E', '-I', '-J', '-L', '-n', '-P', '-R', '-S', '-s'])],
+	['exec', new Set(['-a'])],
+]);
+
+interface OptionValue {
+	option: string;
+	// The value inside the word (`-C/tmp`, `--user=root`); undefined when it is the next word.
+	value: string | undefined;
+}
+
+function optionValue(options: ReadonlySet<string>, word: string): OptionValue | null {
+	if (options.has(word)) return { option: word, value: undefined };
+	if (word.startsWith('--')) {
+		const equals = word.indexOf('=');
+		const option = word.slice(0, equals);
+		return equals > 0 && options.has(option) ? { option, value: word.slice(equals + 1) } : null;
+	}
+	if (!word.startsWith('-')) return null;
+	const letters = word.slice(1);
+	const at = [...letters].findIndex((letter) => options.has(`-${letter}`));
+	if (at === -1) return null;
+	return {
+		option: `-${letters[at]}`,
+		value: at === letters.length - 1 ? undefined : letters.slice(at + 1),
+	};
+}
+
+const commandName = (word: string) => word.split('/').pop() ?? word;
+
+// `env -S '<string>'` splits its string into words that env reads as its own
+// arguments, so `env -S 'git reset --hard'` runs git: the string's words take
+// its place, and env's options among them are read in turn.
+export function splitEnvStrings(words: string[]): string[] {
+	const split = [...words];
+	for (let i = 0; i < split.length; i += 1) {
+		if (commandName(split[i]) !== 'env') continue;
+		let j = i + 1;
+		while (j < split.length && split[j].startsWith('-') && split[j] !== '--') {
+			const found = optionValue(ENV_VALUE_OPTIONS, split[j]);
+			if (found?.option !== '-S') {
+				j += found && found.value === undefined ? 2 : 1;
+				continue;
+			}
+			const string = found.value ?? split[j + 1] ?? '';
+			split.splice(j, found.value === undefined ? 2 : 1, ...tokenizeSegment(string).map(trimQuotes));
+		}
+	}
+	return split;
+}
+
+// Where a segment's command word is: past assignments (FOO=bar), command
+// prefixes (sudo, /usr/bin/env, xargs…) with their options and option values,
+// shell keywords (do, then…) and grouping. -1 when the segment has none.
+export function commandIndex(words: string[]): number {
+	let options: ReadonlySet<string> = new Set();
+	for (let i = 0; i < words.length; i += 1) {
+		const word = words[i];
+		if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) continue;
+		const name = commandName(word);
+		if (COMMAND_PREFIXES.has(name)) {
+			options = PREFIX_VALUE_OPTIONS.get(name) ?? new Set();
+			continue;
+		}
+		if (word.startsWith('-')) {
+			const found = optionValue(options, word);
+			if (found && found.value === undefined) i += 1;
+			continue;
+		}
+		if (word === '{' || word === '(' || word === '!') continue;
+		return i;
+	}
+	return -1;
+}
+
 export function withoutDataHeredocs(command: string): string {
 	return command.replace(
 		HEREDOC_BODY,
 		(whole: string, operatorLine: string, _quote: string, _delimiter: string, offset: number) => {
 			const before = command.slice(command.lastIndexOf('\n', offset) + 1, offset);
-			const word = tokenizeSegment(splitSegments(before).at(-1) ?? '')
-				.map(trimQuotes)
-				.find((token) => !/^[A-Za-z_]\w*=/.test(token) && !COMMAND_PREFIXES.has(token) && !token.startsWith('-'));
-			return SHELLS.has(word?.split('/').pop() ?? '') ? whole : operatorLine;
+			const words = splitEnvStrings(tokenizeSegment(splitSegments(before).at(-1) ?? '').map(trimQuotes));
+			const word = words[commandIndex(words)];
+			return SHELLS.has(commandName(word ?? '')) ? whole : operatorLine;
 		},
 	);
 }
