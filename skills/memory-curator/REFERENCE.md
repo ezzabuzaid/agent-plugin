@@ -33,13 +33,15 @@ Filters compose: `--project <id>`, `--type user|feedback|project|reference`, `--
 
 ## Memory mechanics + pruning
 
-Each memory is one `<type>_<slug>.md` under `~/.claude/projects/<encoded>/memory/`, with a one-line pointer in the sibling `MEMORY.md`. Canonical frontmatter is `name` / `description` / `metadata:{node_type, type, …}` (the reader tolerates the older flat shape).
+Each memory is one `<type>_<slug>.md` under `~/.claude/projects/<encoded>/memory/`, linked from the folder's `MEMORY.md` index (some folders split it into more `MEMORY-*.md` files, and one index line can link several memories). Canonical frontmatter is `name` / `description` / `metadata:{node_type, type, …}` (the reader tolerates the older flat shape).
 
-Prune with the helper — it deletes the file AND removes its `MEMORY.md` index line atomically:
+Prune with the helper. It deletes the file, removes its link from every `MEMORY*.md` index in the folder (a line that linked only that memory goes; a line that links others keeps them), and prints each edited index line and each `[[wikilink]]` to it that now dangles in the folder's other memories:
 ```
 node ~/.claude/skills/memory-curator/scripts/prune-memory.ts <abs-path-to-memory.md>
 ```
-Never hand-edit `MEMORY.md` for deletions (you'll desync the index). The helper refuses to touch `MEMORY.md` itself.
+Never hand-edit an index for deletions (you'll desync it). Repoint each dangling `[[wikilink]]` the helper prints: to the canonical's slug when it is in the same folder, else to a plain-text pointer `<slug> (<project> memory)`, because a `[[wikilink]]` resolves only in its own folder. The helper refuses to prune an index file itself.
+
+The encoded folder names start with `-` (`-Users-…`). From `~/.claude/projects`, a glob such as `grep -rl <text> */memory/*.md` hands them to grep as options, and the search finds nothing and prints no error. Write `./*/memory/*.md`, or put `--` before the paths.
 
 ## Apply protocol (Mode A, after the single approval)
 

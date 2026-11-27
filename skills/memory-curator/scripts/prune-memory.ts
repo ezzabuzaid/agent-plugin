@@ -1,15 +1,18 @@
 /**
- * prune-memory.ts — remove a memory file AND its MEMORY.md index line, atomically.
+ * prune-memory.ts — remove a memory file and its links from every MEMORY*.md index in its folder.
  *
- * The auto-memory index (MEMORY.md) links each memory by basename, e.g.
+ * An index links each memory by basename, one per line or several in a list:
  *   - [Title](feedback_foo.md) — hook
- * Deleting a memory means removing both the file and that line; hand-editing MEMORY.md
- * desyncs the index, so the curator skill always goes through here.
+ *   - Topic: [A](a.md) (note), [B](feedback_foo.md); [C](c.md)
+ * A line that links only the pruned memory is deleted. A line that links others loses only the pruned link, the
+ * note in parentheses right after it, and one separator. Hand-editing an index desyncs it, so the curator skill
+ * always goes through here. Each [[wikilink]] to the pruned memory left in the folder's other memories is reported,
+ * for the curator to repoint.
  *
  *   node ~/.claude/skills/memory-curator/scripts/prune-memory.ts <abs-path-to-memory.md>
  */
 
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
 const target = process.argv[2];
@@ -19,20 +22,61 @@ if (!target?.endsWith('.md')) {
 }
 
 const file = basename(target);
-if (file === 'MEMORY.md') {
-  process.stderr.write('refusing to prune MEMORY.md itself\n');
+const isIndex = (name: string) => /^MEMORY.*\.md$/.test(name);
+if (isIndex(file)) {
+  process.stderr.write(`refusing to prune the index ${file} itself\n`);
   process.exit(1);
 }
 
-await rm(target); // throws loudly if the file is missing — no silent no-op
+const folder = dirname(target);
+const name = /^name:\s*(.+)$/m.exec(await readFile(target, 'utf8'))?.[1]?.trim();
+await rm(target);
 
-const indexPath = join(dirname(target), 'MEMORY.md');
-try {
-  const lines = (await readFile(indexPath, 'utf8')).split('\n');
-  const kept = lines.filter((line) => !line.includes(`(${file})`));
-  await writeFile(indexPath, kept.join('\n'));
-  process.stdout.write(`pruned ${file}  (removed ${lines.length - kept.length} index line)\n`);
-} catch (err) {
-  // File removed, but MEMORY.md was absent/unreadable — surface it, don't fail the prune.
-  process.stdout.write(`pruned ${file}; MEMORY.md not updated (${err instanceof Error ? err.message : String(err)})\n`);
+const escaped = RegExp.escape(file);
+const anyLink = /\[[^\]]*\]\([^)\s]+\.md\)/g;
+const prunedLink = new RegExp(`\\[[^\\]]*\\]\\(${escaped}\\)(?: \\([^()]*\\))?`);
+const separator = /^(?:, |; | — )/;
+const trailingSeparator = /(?:, |; | — )$/;
+
+function unlink(line: string): string | null {
+  const links = line.match(anyLink) ?? [];
+  if (links.every((link) => link.endsWith(`(${file})`))) return null;
+  let rest = line;
+  for (let match = prunedLink.exec(rest); match; match = prunedLink.exec(rest)) {
+    const before = rest.slice(0, match.index);
+    const after = rest.slice(match.index + match[0].length);
+    rest = separator.test(after) ? before + after.replace(separator, '') : before.replace(trailingSeparator, '') + after;
+  }
+  return rest.replace(/ \(\)/g, '');
 }
+
+const names = await readdir(folder);
+const report = [`pruned ${file}`];
+for (const index of names.filter(isIndex)) {
+  const path = join(folder, index);
+  const lines = (await readFile(path, 'utf8')).split('\n');
+  const changes: string[] = [];
+  const kept = lines.flatMap((line, i) => {
+    if (!line.includes(`](${file})`)) return [line];
+    const edited = unlink(line);
+    if (edited === null) {
+      changes.push(`  ${index}:${i + 1} line removed`);
+      return [];
+    }
+    changes.push(`  ${index}:${i + 1} link removed: ${edited}`);
+    return [edited];
+  });
+  if (changes.length === 0) continue;
+  await writeFile(path, kept.join('\n'));
+  report.push(...changes);
+}
+
+const slugs = new Set([file, file.replace(/\.md$/, ''), ...(name ? [name] : [])]);
+for (const other of names.filter((n) => n.endsWith('.md') && n !== file)) {
+  const text = await readFile(join(folder, other), 'utf8').catch(() => '');
+  for (const [wikilink, slug] of text.matchAll(/\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g)) {
+    if (slugs.has(slug.trim())) report.push(`  dangling: ${other} links ${wikilink}`);
+  }
+}
+
+process.stdout.write(`${report.join('\n')}\n`);
