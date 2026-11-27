@@ -22,7 +22,13 @@ The hook fails open: when it cannot run, it writes the error to stderr and lets 
 
 ## Install
 
-Add this to `~/.claude/settings.json`, with your own path, once for `Stop` and once for `SubagentStop`:
+The hook reads transcripts through `@deepagents/trajectory`, pinned in `package.json`, so install it first, and again after a pin change; without it the hook cannot load and guards nothing:
+
+```
+npm install --prefix hooks/compile-guard
+```
+
+Then add this to `~/.claude/settings.json`, with your own path, once for `Stop` and once for `SubagentStop`:
 
 ```json
 { "hooks": [{ "type": "command", "command": "node <repo>/hooks/compile-guard/compile-guard.ts", "timeout": 60 }] }
