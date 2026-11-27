@@ -10,6 +10,6 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@deepagents/trajectory": "7.53.0"
+    "@deepagents/trajectory": "7.58.1"
   }
 }

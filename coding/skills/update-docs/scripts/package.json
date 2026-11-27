@@ -11,7 +11,7 @@
     "typecheck": "tsc -p ."
   },
   "devDependencies": {
-    "@deepagents/trajectory": "7.57.0",
+    "@deepagents/trajectory": "7.58.1",
     "@types/node": "^26.6.6",
     "@zukhruf/fs": "^0.8.39",
     "esbuild": "^0.28.2",

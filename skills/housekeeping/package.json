@@ -6,6 +6,6 @@
     "test": "node --test scripts/close-check.test.mjs scripts/records-check.test.mjs"
   },
   "dependencies": {
-    "@deepagents/trajectory": "7.55.0"
+    "@deepagents/trajectory": "7.58.1"
   }
 }
