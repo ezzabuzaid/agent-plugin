@@ -7,6 +7,8 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { stdin } from 'node:process';
 
+import { ClaudeCodeAdapter, ClaudeCodeSession, ClaudeCodeSubagent, SessionReadError } from '@deepagents/trajectory';
+
 interface HookInput {
 	hook_event_name?: string;
 	cwd?: string;
@@ -38,25 +40,33 @@ async function readInput(): Promise<HookInput> {
 
 // A subagent's own transcript holds only its own tool calls; the session's
 // transcript holds the session's, without its subagents'.
-function transcriptOf(input: HookInput): string | undefined {
-	const path = input.hook_event_name === 'SubagentStop' ? input.agent_transcript_path : input.transcript_path;
-	return path ? path : undefined;
+function sessionOf(input: HookInput): ClaudeCodeSession | ClaudeCodeSubagent | undefined {
+	if (input.hook_event_name === 'SubagentStop') {
+		return input.agent_transcript_path ? ClaudeCodeSubagent.fromTranscriptPath(input.agent_transcript_path) : undefined;
+	}
+	return input.transcript_path ? ClaudeCodeSession.fromTranscriptPath(input.transcript_path) : undefined;
 }
 
-function writtenFiles(transcript: string, cwd: string): Set<string> {
+// A transcript that is not there yet, or holds no step, has no steps; any other
+// read error goes to the fail-open catch below, which logs it.
+async function stepsOf(session: ClaudeCodeSession | ClaudeCodeSubagent) {
+	try {
+		const { trajectory } = await new ClaudeCodeAdapter().read(session, { subagents: false });
+		return trajectory.steps;
+	} catch (error) {
+		if (error instanceof SessionReadError && (error.cause === undefined || errnoCode(error.cause) === 'ENOENT')) return [];
+		throw error;
+	}
+}
+
+// The TypeScript files the agent's Edit, Write, MultiEdit and NotebookEdit calls named.
+async function writtenFiles(session: ClaudeCodeSession | ClaudeCodeSubagent, cwd: string): Promise<Set<string>> {
 	const files = new Set<string>();
-	for (const line of readFileSync(transcript, 'utf8').split('\n')) {
-		if (!line.includes('"tool_use"')) continue;
-		let entry: { type?: string; message?: { content?: unknown } };
-		try {
-			entry = JSON.parse(line);
-		} catch {
-			continue;
-		}
-		if (entry.type !== 'assistant' || !Array.isArray(entry.message?.content)) continue;
-		for (const block of entry.message.content as { type?: string; name?: string; input?: Record<string, unknown> }[]) {
-			if (block?.type !== 'tool_use' || !WRITE_TOOLS.has(block.name ?? '')) continue;
-			const path = block.input?.['file_path'] ?? block.input?.['notebook_path'];
+	for (const step of await stepsOf(session)) {
+		if (step.source !== 'agent') continue;
+		for (const call of step.tool_calls ?? []) {
+			if (!WRITE_TOOLS.has(call.function_name)) continue;
+			const path = call.arguments['file_path'] ?? call.arguments['notebook_path'];
 			if (typeof path !== 'string' || !TYPESCRIPT_FILE.test(path)) continue;
 			// A file that is gone cannot fail to compile; git names the rest by their real path.
 			const file = resolve(cwd, path);
@@ -64,6 +74,10 @@ function writtenFiles(transcript: string, cwd: string): Set<string> {
 		}
 	}
 	return files;
+}
+
+function errnoCode(error: unknown): unknown {
+	return typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined;
 }
 
 function git(cwd: string, args: string[]) {
@@ -159,11 +173,11 @@ function refusal(root: string, files: string[], errors: CompileError[]): string 
 	].join('\n');
 }
 
-function check(input: HookInput): string | undefined {
-	const transcript = transcriptOf(input);
-	if (!transcript || !existsSync(transcript)) return undefined;
+async function check(input: HookInput): Promise<string | undefined> {
+	const session = sessionOf(input);
+	if (!session) return undefined;
 	const byRoot = new Map<string, string[]>();
-	for (const file of writtenFiles(transcript, input.cwd ?? process.cwd())) {
+	for (const file of await writtenFiles(session, input.cwd ?? process.cwd())) {
 		const root = repoRoot(file);
 		if (root) byRoot.set(root, [...(byRoot.get(root) ?? []), file]);
 	}
@@ -191,7 +205,7 @@ function check(input: HookInput): string | undefined {
 }
 
 try {
-	const reason = check(await readInput());
+	const reason = await check(await readInput());
 	if (reason) process.stdout.write(JSON.stringify({ decision: 'block', reason }));
 } catch (error) {
 	// Fail open: a broken guard must not trap an agent in its stop.

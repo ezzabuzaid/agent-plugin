@@ -6,7 +6,7 @@ In a shared checkout, many sessions build from the same files on disk. A draft t
 
 At `Stop` and `SubagentStop`, `compile-guard.ts`:
 
-1. Reads the agent's own transcript: `agent_transcript_path` for a subagent, `transcript_path` for a session. It collects the `.ts`, `.tsx`, `.mts` and `.cts` files of each `Edit`, `Write`, `MultiEdit` and `NotebookEdit` call.
+1. Reads the agent's own transcript through [`@deepagents/trajectory`](https://www.npmjs.com/package/@deepagents/trajectory) (pinned in `package.json`): `agent_transcript_path` for a subagent, `transcript_path` for a session. It collects the `.ts`, `.tsx`, `.mts` and `.cts` files of each `Edit`, `Write`, `MultiEdit` and `NotebookEdit` call of the agent's steps. A transcript that is not there yet, or that holds no step, names no file.
 2. Keeps the files in a repo whose committed `.claude/settings.json` sets `"env": { "SHARED_CHECKOUT": "1" }`. The repo opts in by its own settings, so no shared file lists repos.
 3. Keeps the files that `git status` shows as changed or new. A committed file is not a draft.
 4. Runs the repo's own `node_modules/.bin/tsc --noEmit` on the package of each file: the nearest `tsconfig.json`, or each program that a solution-style `tsconfig.json` (`files: []`) references inside the package, such as `tsconfig.lib.json` and `tsconfig.spec.json`. The flags `--composite false --incremental false` keep tsc from reading or writing a `.tsbuildinfo` file.

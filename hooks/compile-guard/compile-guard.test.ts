@@ -39,9 +39,11 @@ function sharedCheckout(root: string, { shared = true } = {}) {
 	git(root, 'commit', '-q', '-m', 'init');
 }
 
-// The transcript records each Edit and Write as a tool_use of an assistant entry.
+// The transcript records each Edit and Write as a tool_use of an assistant entry. A subagent's
+// transcript sits where Claude Code writes it: <session>/subagents/agent-<id>.jsonl.
 function transcript(dir: string, name: string, files: string[]) {
 	const path = join(dir, `${name}.jsonl`);
+	mkdirSync(dirname(path), { recursive: true });
 	const lines = files.map((file_path, i) =>
 		JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: `t${i}`, name: i % 2 ? 'Write' : 'Edit', input: { file_path } }] } }),
 	);
@@ -84,7 +86,7 @@ test("refuses a subagent's stop from its own transcript (TS2304, Cannot find nam
 		hook_event_name: 'SubagentStop',
 		cwd: root,
 		transcript_path: transcript(dir.path, 'parent', []),
-		agent_transcript_path: transcript(dir.path, 'agent', [msw]),
+		agent_transcript_path: transcript(dir.path, 'parent/subagents/agent-a1', [msw]),
 	});
 
 	assert.equal(output?.decision, 'block');
@@ -166,7 +168,7 @@ test("reads a subagent's own transcript at SubagentStop, so the session's broken
 		hook_event_name: 'SubagentStop',
 		cwd: root,
 		transcript_path: transcript(dir.path, 'parent', [msw]),
-		agent_transcript_path: transcript(dir.path, 'agent', []),
+		agent_transcript_path: transcript(dir.path, 'parent/subagents/agent-a1', []),
 	});
 
 	assert.equal(output, null);

@@ -8,5 +8,8 @@
   "devDependencies": {
     "@zukhruf/fs": "^0.8.22",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@deepagents/trajectory": "7.53.0"
   }
 }
