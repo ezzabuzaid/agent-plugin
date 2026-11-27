@@ -10,9 +10,9 @@
   "plugins": [
     {
       "name": "coding",
-      "description": "Progressive Guardrails output style, the write-test skill and its four test agents, the test-speed skill (finds what makes a test suite slow, one test case at a time, measured on the host with community tools: hyperfine, the Nx profile in Perfetto, JUnit, psrecord, docker events), the remove-code skill, the guardrail skill, the node-native skill, the lib-creator skill, the update-docs skill and its three docs agents, the automations skill, and the rollover skill with its mod.",
+      "description": "Progressive Guardrails output style, the write-test skill and its four test agents, the remove-code skill, the guardrail skill, the node-native skill, the lib-creator skill, the update-docs skill and its three docs agents, the automations skill, and the rollover skill with its mod.",
       "source": "./coding",
-      "version": "1.8.0",
+      "version": "1.7.3",
       "category": "development"
     }
   ]

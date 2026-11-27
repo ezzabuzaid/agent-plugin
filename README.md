@@ -27,8 +27,7 @@ component. Three layers on top of normal coding work:
   exists.
 
 It also ships the **write-test** skill and its four test agents (discoverer, claim
-comparator, mutation prover, gotcha reviewer), the **test-speed** skill, which finds what makes a
-test suite slow and fixes it one test case at a time with community tools, the **remove-code** skill, the
+comparator, mutation prover, gotcha reviewer), the **remove-code** skill, the
 **guardrail** skill, which turns a rule stated in words into a check that a machine runs,
 the **node-native** skill, which reports what the current Node LTS already does for a
 codebase, each claim proved by a probe, the **lib-creator** skill, which creates a library
