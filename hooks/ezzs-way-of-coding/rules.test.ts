@@ -531,6 +531,30 @@ test('the /wait-what register starts every session, with no /wait-what typed, an
   }
 });
 
+test('answer-first tells the agent to answer a question the user typed before other work', async () => {
+  for (const prompt of ['what are you waiting on?', 'Why is it so slow?', 'is the devbox ready', 'Push everything. Also, did the release land?']) {
+    const output = await evaluateReminderHook({ hook_event_name: 'UserPromptSubmit', prompt }, ezzsWayOfCodingConfig);
+
+    assert.match(output?.hookSpecificOutput?.additionalContext ?? '', /\[prompt:answer-first\]/, prompt);
+  }
+});
+
+test('answer-first stays quiet on a relayed prompt, even one whose last line is a question', async () => {
+  const prompt = '<task-notification>\n<task-id>bz14iaw6i</task-id>\n<status>completed</status>\n</task-notification>\nAnything else?';
+
+  const output = await evaluateReminderHook({ hook_event_name: 'UserPromptSubmit', prompt }, ezzsWayOfCodingConfig);
+
+  assert.doesNotMatch(output?.hookSpecificOutput?.additionalContext ?? '', /answer-first/);
+});
+
+test('answer-first stays quiet on a prompt that asks no question', async () => {
+  for (const prompt of ['Fix the crash when uploading large files.', 'push everything', 'Do the filed ones.']) {
+    const output = await evaluateReminderHook({ hook_event_name: 'UserPromptSubmit', prompt }, ezzsWayOfCodingConfig);
+
+    assert.doesNotMatch(output?.hookSpecificOutput?.additionalContext ?? '', /answer-first/, prompt);
+  }
+});
+
 // A body that asks for UI, dependency, test and fix work, so that the prompt
 // rules fire on it when the user types it.
 const RELAYED_BODY =

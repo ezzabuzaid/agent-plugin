@@ -27,6 +27,19 @@ export const RELAYED_PROMPT =
 
 export const typedByUser = not(contentPattern(RELAYED_PROMPT));
 
+// Read as a question: a question mark in its last line, an interrogative with
+// no sentence end, a /wait-what, or a bare link.
+export function asksAQuestion(text: string): boolean {
+  if (/<command-name>\/(?:[\w-]+:)?wait-what<\/command-name>/.test(text)) return true;
+  const words = text.replaceAll(/<[^>]+>[^<]*<\/[^>]+>/g, ' ').trim();
+  if (/^https?:\/\/\S+$/.test(words)) return true;
+  const lastLine = words.split('\n').filter(Boolean).at(-1) ?? '';
+  return (
+    lastLine.includes('?') ||
+    /^(what|why|how|is|are|can|do|does|did|where|which|who|should|could|would|will|have|has)\b[^.!]*$/i.test(words)
+  );
+}
+
 /**
  * The prompt asks the agent to build or change behavior. These are the verbs
  * that package-api-first and source-before-new-implementation share; each rule

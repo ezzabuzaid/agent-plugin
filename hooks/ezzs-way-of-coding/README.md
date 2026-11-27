@@ -26,7 +26,11 @@ turn by itself with a fixed prompt, such as "Your claude.ai usage limit has
 reset. Continue the task you were working on…". The prompt rules and the
 session harvest read only a prompt that the user typed. The UI and dependency reminders fire on a
 phrase, such as "build a dashboard page" or "update the packages", not on two
-words anywhere in a long prompt.
+words anywhere in a long prompt. `answer-first` fires when the typed prompt
+asks a question (`asksAQuestion` in `rules/intent.ts`, the same test the Stop
+rules use for a question-only turn) and tells the agent to answer it in the
+chat before other work: in four weeks, "answer my question first" rose from 2
+to 13 sessions a week (#6069).
 
 ```sh
 printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Build a custom executor."}' \

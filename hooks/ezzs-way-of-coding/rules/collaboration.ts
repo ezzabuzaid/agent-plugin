@@ -7,7 +7,7 @@ import {
 } from '@deepagents/experimental/coding-agent-reminders';
 
 import { promptEvents } from './events.ts';
-import { asksToBuild, typedByUser } from './intent.ts';
+import { asksAQuestion, asksToBuild, typedByUser } from './intent.ts';
 
 export const collaborationRules: ReminderRule[] = [
   {
@@ -37,6 +37,14 @@ export const collaborationRules: ReminderRule[] = [
     ),
     message:
       'Look for a similar implementation in the codebase first. If none exists, probe the relevant behavior and read its source code before implementing it.',
+  },
+  {
+    id: 'answer-first',
+    target: 'prompt',
+    events: promptEvents,
+    when: and(typedByUser, (input) => typeof input.prompt === 'string' && asksAQuestion(input.prompt)),
+    message:
+      'The prompt asks a question. Answer it first, in the chat, before other work: run only the reads the answer needs, then answer, then go on.',
   },
   {
     id: 'wait-what-register',

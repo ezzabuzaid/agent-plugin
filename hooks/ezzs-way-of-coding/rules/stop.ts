@@ -3,7 +3,7 @@ import type {
   ReminderRule,
 } from '@deepagents/experimental/coding-agent-reminders';
 
-import { RELAYED_PROMPT } from './intent.ts';
+import { asksAQuestion, RELAYED_PROMPT } from './intent.ts';
 import { readTranscriptEntries, type TranscriptEntry } from './transcript.ts';
 import { finalAssistantText } from './verification.ts';
 
@@ -361,19 +361,6 @@ function humanInput(entry: TranscriptEntry): HumanInput | undefined {
   }
   const text = textOf(content);
   return text && !RELAYED_PROMPT.test(text) ? { text, startsTurn: true } : undefined;
-}
-
-// Read as a question: a question mark in its last line, an interrogative with
-// no sentence end, a /wait-what, or a bare link.
-function asksAQuestion(text: string): boolean {
-  if (/<command-name>\/(?:[\w-]+:)?wait-what<\/command-name>/.test(text)) return true;
-  const words = text.replaceAll(/<[^>]+>[^<]*<\/[^>]+>/g, ' ').trim();
-  if (/^https?:\/\/\S+$/.test(words)) return true;
-  const lastLine = words.split('\n').filter(Boolean).at(-1) ?? '';
-  return (
-    lastLine.includes('?') ||
-    /^(what|why|how|is|are|can|do|does|did|where|which|who|should|could|would|will|have|has)\b[^.!]*$/i.test(words)
-  );
 }
 
 // A question that asks for the sweep itself, so the rules still fire. "remain"
