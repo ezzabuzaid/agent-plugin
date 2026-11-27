@@ -122,7 +122,24 @@ and `claude -p` runs. [`skills/rollover`](./skills/rollover/SKILL.md) says what 
 holds, how the fresh context resumes, and how a typed "give me a handoff" works. Claude Code
 only: no settings hook can run `/clear`, so this is a plugin hooks module (a mod).
 
-The mod has its own tests: `claude plugin test coding/mods` from the repo root. Run it on
+## resume mod
+
+The mod [`mods/hooks/resume.ts`](./mods/hooks/resume.ts) resumes a main-loop turn that died on
+a transient API error, so nobody has to type "continue": it submits one prompt that names the
+error and asks the agent to continue the task, after 30 s, then 2 min, then 5 min for failures
+in a row. A fourth failure in a row gets a toast that it gave up; a main-loop answer starts the
+count again, and a prompt the person types (or sends from Remote Control) during the wait
+cancels the resume. It acts only on `server_error` (an overload, status 529, and a dropped
+connection arrive as this) and `overloaded`. It leaves a usage limit (`rate_limit`) to Claude
+Code, which resumes those itself, "Prompt is too long" (`invalid_request`) to the rollover mod,
+and authentication, billing and `unknown` errors to the person; it skips subagents and `claude
+-p` runs. It hooks `classic.StopFailure` and not `turn.complete`, because only StopFailure
+carries the error's kind: `turn.complete` says `reason: 'error'` and nothing more.
+
+The engine loads one hooks module per plugin, so `mods/hooks/hooks.json` names
+[`mods/hooks/register.ts`](./mods/hooks/register.ts), which registers both mods.
+
+The mods have their own tests: `claude plugin test coding/mods` from the repo root. Run it on
 `coding/mods`, not `coding`: the runner loads every `*.test.ts` under the folder, and the Node
 tests of the skills do not load there.
 

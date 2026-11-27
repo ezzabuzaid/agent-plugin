@@ -1,1 +1,1 @@
-{ "modules": ["./rollover.ts"] }
+{ "modules": ["./register.ts"] }

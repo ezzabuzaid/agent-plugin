@@ -1,6 +1,6 @@
 {
   "name": "coding",
-  "version": "1.7.3",
+  "version": "1.8.0",
   "description": "Progressive Guardrails output style, the write-test skill with its four test agents (black-box tests gated on the break they catch, proved by mutation), the remove-code skill, the guardrail skill (turns a rule stated in words into a lint rule, type, git hook, CI step, agent hook or permission rule), the node-native skill (what the current Node LTS replaces in a codebase, each claim proved by a probe), the lib-creator skill (a library package from the decision that it should exist to the last consumer that moves onto it), and the update-docs skill with its docs-analyst, docs-writer and docs-judge agents (each library project's docs kept current from evidence, every draft judged blind before its commit), and the automations skill (Claude Code prompts that run headless on a schedule on this Mac, through launchd and claude -p), and the rollover skill with its mod (at 93% context use the agent writes a continuation, the mod runs /clear, and the session resumes from it).",
   "author": {
     "name": "ezzabuzaid",
