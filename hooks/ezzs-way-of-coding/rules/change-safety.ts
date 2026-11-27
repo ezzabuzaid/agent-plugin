@@ -57,6 +57,6 @@ export const changeSafetyRules: ReminderRule[] = [
       ),
     ),
     message:
-      'Read the current manifests, lockfile, and installed versions before changing dependencies. Prefer the smallest viable safe upgrade lane and separate breaking or migration work explicitly.',
+      'Read the manifests, lockfile and installed versions, then take the newest stable release and fix what it breaks.',
   },
 ];

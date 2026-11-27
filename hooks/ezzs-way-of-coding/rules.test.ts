@@ -558,6 +558,54 @@ test('answer-first stays quiet on a prompt that asks no question', async () => {
   }
 });
 
+// Section 2b of ~/.claude/plans/user-repeats-2026-11-27/consolidation/plan.md,
+// approved by Ezz on 2026-11-27.
+test("every session's defaults carry the newest-release, maintained-dependency, own-packages and probe-first rules", async () => {
+  const output = await evaluateReminderHook({ hook_event_name: 'SessionStart', source: 'startup' }, ezzsWayOfCodingConfig);
+  const context = output?.hookSpecificOutput?.additionalContext ?? '';
+  const afterLearnWhy = context.slice(context.indexOf('\n- Before changing a design, learn why'));
+
+  for (const line of [
+    '- Take the newest stable release when you add or bump a dependency, not the smallest lane, and fix what it breaks; when a package misbehaves, move it to latest first.',
+    "- Use a maintained dependency, the framework's own feature or a standard tool before writing our own; install size is no argument on the server.",
+    "- Before building, list Ezz's own packages (zukhruf, deepagents, elt, sdk-it) and use them; report every gap you meet in them, with evidence, in the owning repo, and fix it there, never around it in the host.",
+    "- State a cause, gap, cost or speed only after a probe or measurement, at the scope of that evidence; a subagent's claim is not evidence.",
+  ]) {
+    assert.ok(afterLearnWhy.includes(`\n${line}`), line);
+  }
+});
+
+test('the register tells the agent to show the problem before a choice, define new terms and answer the one question', async () => {
+  const output = await evaluateReminderHook({ hook_event_name: 'SessionStart', source: 'startup' }, ezzsWayOfCodingConfig);
+
+  assert.ok(
+    (output?.hookSpecificOutput?.additionalContext ?? '').includes(
+      'Before a choice, show the problem as the user meets it, today and after; define each new term; answer the one question asked.',
+    ),
+  );
+});
+
+test('answer-first says a question typed as a dialog answer is no consent', async () => {
+  const output = await evaluateReminderHook({ hook_event_name: 'UserPromptSubmit', prompt: 'Why is it so slow?' }, ezzsWayOfCodingConfig);
+
+  assert.ok(
+    (output?.hookSpecificOutput?.additionalContext ?? '').includes(
+      'A question he types as the answer to a dialog is not consent: leave the decision pending and do not re-ask it.',
+    ),
+  );
+});
+
+test('an upgrade prompt is told to take the newest stable release, not the smallest lane', async () => {
+  const output = await evaluateReminderHook({ hook_event_name: 'UserPromptSubmit', prompt: 'Bump zod to the latest version.' }, ezzsWayOfCodingConfig);
+  const context = output?.hookSpecificOutput?.additionalContext ?? '';
+
+  assert.ok(
+    context.includes('Read the manifests, lockfile and installed versions, then take the newest stable release and fix what it breaks.'),
+    context,
+  );
+  assert.doesNotMatch(context, /smallest viable/);
+});
+
 // A body that asks for UI, dependency, test and fix work, so that the prompt
 // rules fire on it when the user types it.
 const RELAYED_BODY =
@@ -1177,13 +1225,12 @@ async function stopContext(input: Record<string, unknown>, entries?: object[]) {
   return output?.hookSpecificOutput?.additionalContext ?? '';
 }
 
-const ASK_IN_THE_TOOL = /\[stop-feedback:ask-in-the-tool\]\nYour final message asks the user something, gives him a task, or waits on him in prose\. He reads only AskUserQuestion\./;
+const ASK_IN_THE_TOOL = /\[stop-feedback:ask-in-the-tool\]\nYour final message asks the user something or waits on him in prose\. He reads only AskUserQuestion\./;
 
 test('stop sends a prose ask to AskUserQuestion when the final message waits on the user', async () => {
   for (const message of [
     // Real stalls that ended a turn with work for the user in prose.
     'Still waiting on you at the mini:\n- **The four System Settings toggles:** Privacy, Login Items, Full Disk Access, Accessibility.\n- **One run in Terminal** of the setup script.',
-    "**Cleanup that's yours, through Mole:**\n- The 50 untracked files under `~/Desktop`.",
     '| Gap | State |\n| --- | --- |\n| Restart storm | launchd has no restart limit; needs a design choice |',
     '#3966 (the restart storm) is filed and needs your decision.',
   ]) {
@@ -1653,7 +1700,7 @@ test('a continued stop sends a prose ask to AskUserQuestion once per human turn'
   );
 });
 
-test('stop sends the asks it used to miss to AskUserQuestion: your go, waits on you, asks in the chat, a slash command to type', async () => {
+test('stop sends the asks it used to miss to AskUserQuestion: your go, waits on you, asks in the chat', async () => {
   for (const message of [
     '**Yours, when you choose**\n- **mac-mini back** (#5048).',
     'The deploy needs your go when they are committed.',
@@ -1662,7 +1709,6 @@ test('stop sends the asks it used to miss to AskUserQuestion: your go, waits on 
     '#5463 waits on you.',
     'Waiting on you: the zukhruf push for #5682.',
     'The questions are above.',
-    'To resume, type `/housekeeping` when you are back.',
     'The next step is your review of the paper.',
   ]) {
     assert.match(await stopContext({ last_assistant_message: message }), ASK_IN_THE_TOOL, message);
@@ -1718,20 +1764,32 @@ test('stop stays quiet on a sentence that only describes what is yours', async (
   }
 });
 
-test('stop still sends a task handed over now to AskUserQuestion', async () => {
+// Ezz's ruling of 2026-11-27 (#6152, Projects-study/feedback_hands_on_no_dialogs.md):
+// a hands-on step ends the turn in the chat, with what to report back; an open
+// dialog hides it. The first two are the messages that ended in a dialog.
+test('stop lets a final message that hands the user a hands-on step end the turn in the chat', async () => {
   for (const message of [
-    // A heading over a task list is a label, not a description (881553d1:5780).
+    "**Cleanup that's yours, through Mole:**\n- The 50 untracked files under `~/Desktop`.",
+    'The skill starts only from your prompt. To start it, type `/kickoff #6149` in this session:\n\n```\n/kickoff #6149\n```',
+    'Run this in your terminal, then tell me the output. The tag itself is yours to cut.\n\n```\nnode probe.mjs --tag v3.2.1\n```',
     '**Next, two things that are yours:**\n- **A production tag** for this fix: v3.2.1.',
-    // "that" after a conjunction points at a task; it starts no relative clause.
     'Step 3 is the push, and that is yours.',
-    'That one is yours.',
     'The push is yours.',
-    'The next step is yours.',
     'Not pushed; pushes are yours.',
-    'The tag itself is yours to cut.',
-    // A later word before the clause that is not a condition on it.
     'Pushing it, running the migration after deploy (#5533) and the plugin upload (#5506) are yours.',
+  ]) {
+    assert.doesNotMatch(await stopContext({ last_assistant_message: message }), /ask-in-the-tool/, message);
+  }
+});
+
+test('stop still sends a decision held in prose to AskUserQuestion, also beside a hands-on step', async () => {
+  for (const message of [
+    'Which one do you want, A or B?',
+    'This needs your decision.',
+    'The choice is yours.',
     'The release is ready. Your go?',
+    'The next step is yours.',
+    'Type `/kickoff #6149` to start it. The scope needs your decision first.',
   ]) {
     assert.match(await stopContext({ last_assistant_message: message }), ASK_IN_THE_TOOL, message);
   }
@@ -1740,8 +1798,9 @@ test('stop still sends a task handed over now to AskUserQuestion', async () => {
 test('ask-in-the-tool says to explain in the chat and ask briefly in the dialog', async () => {
   const context = await stopContext({ last_assistant_message: 'Pushing main is your call.' });
   assert.match(context, /Explain in the chat in plain words, then ask in AskUserQuestion with a one-line question and short labels, your pick first, 2-4 options each\./);
-  assert.match(context, /A task for him becomes a question: 'Do X, then pick Done'\./);
-  assert.match(context, /A `!` command is the last line of the chat, with no dialog after it\./);
+  assert.match(context, /The dialog asks only decisions: a hands-on step for him \(a manual step, a command or a slash command to type\) ends the turn in the chat, with what to report back, and no dialog after it\./);
+  assert.doesNotMatch(context, /Do X, then pick Done/);
+  assert.match(context, /A `!` command is the last line of the chat\./);
   assert.doesNotMatch(context, /explanation inside the question|an open dialog hides the chat/);
 });
 

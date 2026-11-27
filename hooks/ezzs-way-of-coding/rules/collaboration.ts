@@ -44,7 +44,7 @@ export const collaborationRules: ReminderRule[] = [
     events: promptEvents,
     when: and(typedByUser, (input) => typeof input.prompt === 'string' && asksAQuestion(input.prompt)),
     message:
-      'The prompt asks a question. Answer it first, in the chat, before other work: run only the reads the answer needs, then answer, then go on.',
+      'The prompt asks a question. Answer it first, in the chat, before other work: run only the reads the answer needs, then answer, then go on. A question he types as the answer to a dialog is not consent: leave the decision pending and do not re-ask it.',
   },
   {
     id: 'wait-what-register',
@@ -52,6 +52,6 @@ export const collaborationRules: ReminderRule[] = [
     events: ['SessionStart'],
     when: always,
     message:
-      'Write every reply in the /wait-what register: a little context first, then ASD-STE100 Simplified Technical English. Name each concept by its standard industry term first, then the project’s own term from GLOSSARY.md where the two differ.',
+      'Write every reply in the /wait-what register: a little context first, then ASD-STE100 Simplified Technical English. Name each concept by its standard industry term first, then the project’s own term from GLOSSARY.md where the two differ. Before a choice, show the problem as the user meets it, today and after; define each new term; answer the one question asked.',
   },
 ];

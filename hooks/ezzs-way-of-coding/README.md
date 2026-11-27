@@ -12,7 +12,12 @@ set, so no separate `~/.claude/hooks/session-harvest.sh` copy is required. The
 harvest names the Claude auto-memory and skill-reflection paths on every typed
 prompt, the first one too. It saves only a rule meant to hold in later
 sessions: the 6 of 1060 saves Ezz rejected in four weeks each made a correction
-about one task or one session into a standing rule (#6073).
+about one task or one session into a standing rule (#6073). The coding
+defaults (`session-ezzs-way`) also carry the four lines of section 2b of
+`~/.claude/plans/user-repeats-2026-11-27/consolidation/plan.md` that Ezz
+approved on 2026-11-27: take the newest stable release; use a maintained
+dependency before our own code; list his own packages first and fix their gaps
+in the owning repo; state a cause, gap, cost or speed only after a probe.
 
 The reminder to look for a similar implementation first fires only on a prompt
 that asks to build or change behavior. A reply such as "yes" or "commit it"
@@ -31,7 +36,12 @@ words anywhere in a long prompt. `answer-first` fires when the typed prompt
 asks a question (`asksAQuestion` in `rules/intent.ts`, the same test the Stop
 rules use for a question-only turn) and tells the agent to answer it in the
 chat before other work: in four weeks, "answer my question first" rose from 2
-to 13 sessions a week (#6069).
+to 13 sessions a week (#6069). It adds that a question he types as the answer
+to a dialog is not consent: the decision stays pending and is not asked again.
+`dependency-upgrade-discipline` says to read the manifests, lockfile and
+installed versions, then take the newest stable release and fix what it breaks
+(Ezz's ruling of 2026-11-27; it said "the smallest viable safe upgrade lane"
+before).
 
 ```sh
 printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"Build a custom executor."}' \
@@ -78,7 +88,9 @@ the main agent. It names each concept by its standard industry term first and
 the project's GLOSSARY.md term after it, which differs from the wait-what skill:
 that skill is synced from mattpocock/skills (`~/.agents/.skill-lock.json`), so
 its text stays upstream's and this rule holds Ezz's term order. `/wait-what`
-stays the command to re-pitch one reply.
+stays the command to re-pitch one reply. The rule also says: before a choice,
+show the problem as the user meets it, today and after; define each new term;
+answer the one question asked.
 
 Three Stop rules (root sessions only) keep a turn from ending on the user or on
 an unproven claim. The user reads only AskUserQuestion, and AskUserQuestion
@@ -86,21 +98,21 @@ answers inside the turn, so a turn ends only finished, or parked: machine work
 that will wake the session still runs and every decision for the user has been
 asked. The chat explains, in plain words; the dialog holds only a one-line
 question and short labels (the user, 2026-11-24).
-`ask-in-the-tool` fires when the final message asks the user something, gives
-him a task or waits on him in prose, also after an earlier AskUserQuestion,
+`ask-in-the-tool` fires when the final message holds a decision for the user
+in prose (a choice, a question, "needs your decision", "waits on your go",
+"the choice is yours") or waits on him, also after an earlier AskUserQuestion,
 including an answer format ("Reply **"A"** or **"B"**") and phrasings such as
-"yours, when you choose", "your go" or "type `/x`"; a negation such as "none
-of them waits on you" or "no item waits on you" is a report. A "yours" line is
-a report too when it names a later or conditional ask ("**Yours, later:**",
-"the push is yours once CI is green", "When they pass, … the push is yours")
-or what the user holds without asking for it now ("stays yours", "is yours to
-read"), or when a relative clause only describes a noun ("drop decisions that
-are yours"); "that one is yours", "the next step is yours" and a heading over a
-task list ("**Next, two things that are yours:**") still fire. "Before I
-start" after a wait on the agent's own work ("I wait for those five before I
-start the graders") orders its steps and is a report; "I'll wait for your
-answer before I start" still fires. A `!` command is the last chat line, with
-no dialog after it.
+"yours, when you choose" or "your go"; a negation such as "none of them waits
+on you" or "no item waits on you" is a report. A hands-on step handed to him (a
+manual step, a command or a slash command to type, such as "type
+`/kickoff #6149`", "run this in your terminal, then tell me the output", "the
+push is yours") ends the turn in the chat with what to report back, and gets
+no dialog: an open dialog hides it (Ezz's ruling of 2026-11-27, #6152,
+Projects-study/feedback_hands_on_no_dialogs.md). A message that holds both
+still fires on the decision. "Before I start" after a wait on the agent's own
+work ("I wait for those five before I start the graders") orders its steps and
+is a report; "I'll wait for your answer before I start" still fires. A `!`
+command is the last chat line, with no dialog after it.
 `housekeeping-due` reads a Claude Code transcript: since the last `housekeeping`
 Skill call, it fires on a commit, a push or a close claim in the final message
 ("Safe to close", "Nothing new", "nothing running", "all done"); edits, reads,

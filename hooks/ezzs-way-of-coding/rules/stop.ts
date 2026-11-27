@@ -98,6 +98,7 @@ const MULTI_QUESTION_PATTERNS = [
     'i',
   ),
   /\b(is|stays|remains) your call\b/i,
+  /\b(decision|choice|call|pick)s? (is|are|stays|remains) yours\b/i,
   /\bconfirm\b[^.\n]*\bor (say|tell me|let me know)\b/i,
   // Only as an imperative: at the start of a sentence or line, or after "or"/"so"/"just".
   // Mid-sentence "can't say which items …" describes, it does not ask.
@@ -123,59 +124,15 @@ const MULTI_QUESTION_PATTERNS = [
   /\bnext step is (yours|your)\b/i,
 ];
 
-// A task handed to the user: "**Cleanup that's yours, through Mole:**", "the push is yours".
-const YOURS = /(?<!\b(?:nothing|none)\s)\b(that's|that is|those are|these are|is|are|stays|remains) (all )?yours\b/i;
-// What the user holds, said without asking for it now: "That command stays
-// yours to run", "the root cause above is yours to read" (#5758: 7e65b385:4959,
-// c2896527:6304).
-const HOLDS = /\b(?:stays|remains) (?:all )?yours\b|\byours to read\b/i;
-// A later or conditional ask: the sentence opens with its condition ("When they
-// pass, … the push is yours", "After that, …"), or one follows the "yours"
-// ("**Yours, later:**", "yours once CI is green", "yours after the deploy").
-// A later word before the clause that is not its condition ("running the
-// migration after deploy … are yours") leaves it an ask.
-const CONDITION_FIRST = /^[\s>*_#\-\d.)]*(?:after|once|until|later|when (?!you\b))\b/i;
-const CONDITION_AFTER = /\byours\b[^.!?;]*?\b(?:later|after|once|until|waits? (?:on|for) (?!your?\b)|when (?!you\b))/i;
-// A relative clause that describes a noun: "the agent drop decisions that are
-// yours", "the only decision that is yours (the push rule) is asked in the
-// chat" (#5788: c2896527:4143, fd967b74:1074, e760f78f:6697). After a
-// conjunction, "that" points at a task ("…, and that is yours"); it starts no
-// relative clause.
-const RELATIVE_CLAUSE =
-  /\b(?!(?:and|or|but|so|then|now|yet|because|since)\b)\w+\s+(?:that|which)(?:'s|’s|\s+(?:is|are|stays|remains))\s+(?:all\s+)?yours\b/i;
-// A heading over a task list: the line ends in a colon ("**Next, two things
-// that are yours:**", "**Cleanup that's yours, through Mole:**").
-const HEADING = /\byours\b[^.!?]*:[*_\s]*$/i;
-
-// A sentence that names what is yours only to describe a noun, not to hand it over.
-function describesWhatIsYours(sentence: string): boolean {
-  return RELATIVE_CLAUSE.test(sentence) && !HEADING.test(sentence);
-}
-
-// A sentence that hands the user a task now, not a status line about one.
-function handsOverATask(text: string): boolean {
-  return text
-    .split(/(?<=[.!?])\s+|\n/)
-    .some(
-      (sentence) =>
-        YOURS.test(sentence) &&
-        !HOLDS.test(sentence) &&
-        !CONDITION_FIRST.test(sentence) &&
-        !CONDITION_AFTER.test(sentence) &&
-        !describesWhatIsYours(sentence),
-    );
-}
-
-// A slash command handed to the user to type: "type `/housekeeping`". The
-// prose filter drops code spans, so this one reads the raw final message.
-const SLASH_COMMAND_TO_TYPE = /\btype `\/[\w:-]+/i;
-
 const OFFER_LEAD_PATTERN =
   /\b(want me to|should I|do you want|would you (like|prefer)|which (one|approach|option|of these)|can you (clarify|confirm)|let me know (if|whether))\b/i;
 
-function asksInProse(text: string, raw: string): boolean {
-  if (SLASH_COMMAND_TO_TYPE.test(raw)) return true;
-  if (MULTI_QUESTION_PATTERNS.some((re) => re.test(text)) || handsOverATask(text)) return true;
+// A decision held in prose. A hands-on step handed to the user (a manual step,
+// a command or a slash command to type, "the push is yours") is no ask: it ends
+// the turn in the chat, since an open dialog hides it (Ezz's ruling of
+// 2026-11-27, #6152; Projects-study/feedback_hands_on_no_dialogs.md).
+function asksInProse(text: string): boolean {
+  if (MULTI_QUESTION_PATTERNS.some((re) => re.test(text))) return true;
   // Offer-framing must coexist with a question mark in the SAME paragraph (otherwise an
   // "if you want me to … " mid-prose with a `?` later in an unrelated sentence would
   // fire). But scanning ANY paragraph — not just the last one — is required: real turns
@@ -458,11 +415,10 @@ export const stopRules: ReminderRule[] = [
     continuedStops: 'once',
     when: async (input) => {
       if (runsHeadless(input)) return false;
-      const raw = typeof input.last_assistant_message === 'string' ? input.last_assistant_message : '';
-      return asksInProse(await finalAssistantText(input), raw) && !(await questionOnlyTurn(input));
+      return asksInProse(await finalAssistantText(input)) && !(await questionOnlyTurn(input));
     },
     message:
-      "Your final message asks the user something, gives him a task, or waits on him in prose. He reads only AskUserQuestion. Explain in the chat in plain words, then ask in AskUserQuestion with a one-line question and short labels, your pick first, 2-4 options each. A task for him becomes a question: 'Do X, then pick Done'. A `!` command is the last line of the chat, with no dialog after it. Do not restate the asks as text.",
+      "Your final message asks the user something or waits on him in prose. He reads only AskUserQuestion. Explain in the chat in plain words, then ask in AskUserQuestion with a one-line question and short labels, your pick first, 2-4 options each. The dialog asks only decisions: a hands-on step for him (a manual step, a command or a slash command to type) ends the turn in the chat, with what to report back, and no dialog after it. A `!` command is the last line of the chat. Do not restate the asks as text.",
   },
   {
     id: 'housekeeping-due',
