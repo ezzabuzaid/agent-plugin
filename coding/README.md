@@ -40,6 +40,15 @@ in [`agents/`](./agents) do the reading and the judging:
 
 The scripts have their own tests: `node --test skills/write-test/scripts/*.test.mjs`.
 
+## test-speed skill
+
+[`skills/test-speed`](./skills/test-speed/SKILL.md) finds what makes a test suite slow and fixes it
+one test case at a time. It measures on the host where the tests run (a remote Docker engine is
+seen only through the Docker CLI), with community tools: hyperfine with `--conclude` for repeated
+runs and their artifacts, the Nx profile in Perfetto, JUnit times through `xmllint`, psrecord and
+`docker events`. Its references hold the commands, the traps that cost a wrong claim, and Ezz's
+rulings; its `Brewfile` installs the brew tools (`brew bundle --file skills/test-speed/Brewfile`).
+
 ## remove-code skill
 
 [`skills/remove-code`](./skills/remove-code/SKILL.md) stops you from owning code a

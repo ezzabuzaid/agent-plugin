@@ -1,0 +1,3 @@
+# The brew tools that the test-speed skill runs on a Mac: brew bundle --file <this folder>/Brewfile
+# psrecord and Perfetto run on demand through uvx, speedscope through npx.
+brew "hyperfine"
