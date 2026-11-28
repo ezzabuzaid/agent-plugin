@@ -11,3 +11,9 @@
 # Proof, 2026-11-09: 2,087 real commands that reach rm, replayed in a sandbox under the old
 # and the new shell. None of them changed target, except one the old shell got wrong.
 setopt SH_WORD_SPLIT NO_NOMATCH NO_EQUALS
+
+# The settings env points Claude Code at tools/claude-pool (127.0.0.1:47800), and Claude Code
+# copies its env to every command it runs. A command is not Claude Code: a benchmark such as
+# WindTunnel refuses to run with ANTHROPIC_BASE_URL set, and an SDK script must reach Anthropic
+# itself. A `claude` started here reads the settings again, so it still goes through the pool.
+unset ANTHROPIC_BASE_URL
