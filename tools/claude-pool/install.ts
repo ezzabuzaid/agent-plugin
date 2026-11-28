@@ -1,9 +1,10 @@
-import { readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
+import { poll } from '@zukhruf/async';
+import { atomicWrite } from '@zukhruf/fs';
 import { type AbsolutePath, Launchd, isAbsolutePath } from '@zukhruf/launchd';
 
 import { configPath, readConfig } from './config.ts';
@@ -35,26 +36,18 @@ async function setBaseUrl(url: string | undefined): Promise<void> {
   } else {
     settings.env = { ...settings.env, ANTHROPIC_BASE_URL: url };
   }
-  const temporary = `${path}.${process.pid}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(settings, null, 2)}\n`, { mode: (await stat(path)).mode });
-  await rename(temporary, path);
+  await atomicWrite(path, `${JSON.stringify(settings, null, 2)}\n`, {
+    clock: globalThis,
+    mode: (await stat(path)).mode & 0o777,
+  });
 }
 
-async function answers(origin: string, signal: AbortSignal): Promise<void> {
+/** True once the pool answers its status endpoint; a refused connection means it is still starting. */
+async function answers(origin: string): Promise<true | undefined> {
   try {
-    for (;;) {
-      try {
-        if ((await fetch(`${origin}/_pool/status`, { signal })).ok) return;
-      } catch (error) {
-        if (signal.aborted) throw error;
-      }
-      await sleep(250, undefined, { signal });
-    }
-  } catch (error) {
-    if (!signal.aborted) throw error;
-    throw new Error(`the pool did not answer on ${origin}; settings left unchanged (see ~/Library/Logs/claude-pool.log)`, {
-      cause: error,
-    });
+    return (await fetch(`${origin}/_pool/status`)).ok || undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -74,7 +67,16 @@ export async function install(): Promise<string> {
     StandardErrorPath: log,
   });
   const origin = `http://127.0.0.1:${port}`;
-  await answers(origin, AbortSignal.timeout(15_000));
+  const clock = globalThis;
+  const ready = await poll(() => answers(origin), {
+    interval: 250,
+    signal: undefined,
+    clock,
+    deadline: clock.performance.now() + 15_000,
+  });
+  if (!ready) {
+    throw new Error(`the pool did not answer on ${origin}; settings left unchanged (see ~/Library/Logs/claude-pool.log)`);
+  }
   await setBaseUrl(origin);
   return origin;
 }

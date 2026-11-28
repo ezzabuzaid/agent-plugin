@@ -1,7 +1,8 @@
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+import { atomicWrite } from '@zukhruf/fs';
 import { z } from 'zod';
 
 const alias = z.string().min(1);
@@ -57,9 +58,7 @@ export async function readConfig(path: string): Promise<PoolConfig> {
   return parsed.data;
 }
 
-/** Readers of the file never see half of it: the new content replaces the file by a rename. */
+/** Readers of the file never see half of it. Owner-only: it names each account's email. */
 export async function writeConfig(path: string, config: PoolConfig): Promise<void> {
-  const temporary = `${path}.${process.pid}.tmp`;
-  await writeFile(temporary, `${JSON.stringify(PoolConfig.parse(config), null, 2)}\n`);
-  await rename(temporary, path);
+  await atomicWrite(path, `${JSON.stringify(PoolConfig.parse(config), null, 2)}\n`, { clock: globalThis, mode: 0o600 });
 }

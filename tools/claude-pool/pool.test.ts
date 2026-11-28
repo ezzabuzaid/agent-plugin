@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { request as httpRequest } from 'node:http';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile, rename, stat, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -703,6 +703,19 @@ test('claude-pool exclude of an unknown alias fails and leaves the config as it 
   assert.equal(result.code, 1);
   assert.match(result.stderr, /unknown alias: nobody/);
   assert.equal(await readFile(configPath, 'utf8'), config);
+});
+
+test('a config the CLI writes stays readable by its owner only, since it names each account email', async () => {
+  await using directory = await new TemporaryFiles().directory('claude-pool-');
+  const configPath = join(directory.path, 'accounts.json');
+  await writeFile(configPath, JSON.stringify({ port: 0, rotation: [keychainEntry('a'), keychainEntry('b')], excluded: [] }), {
+    mode: 0o644,
+  });
+
+  const result = await claudePool(configPath, 'exclude', 'b');
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal((await stat(configPath)).mode & 0o777, 0o600);
 });
 
 /** A token store in memory in place of the Keychain: `add` stores the token the user would type at `security`'s prompt, and the pool reads from it. */

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { once } from 'node:events';
 import { parseArgs } from 'node:util';
 
 import { Shutdown } from '@zukhruf/shutdown';
@@ -33,7 +34,10 @@ async function serve(): Promise<void> {
   using shutdown = new Shutdown();
   await using pool = await startPool({ configPath: configPath(), tokens: keychain, now: Date.now });
   console.log(`claude-pool listening on ${pool.origin}`);
-  await new Promise((resolve) => shutdown.signal.addEventListener('abort', resolve, { once: true }));
+  // A signal that came while the pool started emits no 'abort' again (@zukhruf/shutdown README).
+  if (!shutdown.signal.aborted) {
+    await once(shutdown.signal, 'abort');
+  }
 }
 
 async function status(): Promise<void> {
