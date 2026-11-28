@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { type FSWatcher, watch } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import {
   type IncomingHttpHeaders,
   type IncomingMessage,
@@ -10,8 +11,11 @@ import {
   request as httpRequest,
 } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { basename, dirname } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
+
+import { atomicWrite } from '@zukhruf/fs';
+import { z } from 'zod';
 
 import {
   type AccountEntry,
@@ -103,7 +107,45 @@ const localTime = new Intl.DateTimeFormat('en-US', {
   hourCycle: 'h23',
 });
 
-const log = (line: string) => console.log(line);
+type Log = (line: string) => void;
+
+const logOn =
+  (now: () => number): Log =>
+  (line) =>
+    console.log(`${new Date(now()).toISOString()} ${line}`);
+
+/** What a restart keeps: the pins and parks it cannot derive again. Broken and stale come back from the tokens. */
+const PoolState = z.strictObject({
+  pins: z.array(z.strictObject({ session: z.string(), alias: z.string(), lastUsed: z.number() })),
+  accounts: z.array(
+    z.strictObject({
+      alias: z.string(),
+      park: z.strictObject({ until: z.number(), claim: z.string() }).optional(),
+      sevenDayReset: z.number().optional(),
+      fiveHourReset: z.number().optional(),
+    }),
+  ),
+});
+type PoolState = z.infer<typeof PoolState>;
+
+async function readState(path: string, log: Log): Promise<PoolState> {
+  try {
+    return PoolState.parse(JSON.parse(await readFile(path, 'utf8')));
+  } catch (error) {
+    log(`state: starting empty (${stateFailureReason(error)})`);
+    return { pins: [], accounts: [] };
+  }
+}
+
+function stateFailureReason(error: unknown): string {
+  if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    return 'no state file';
+  }
+  if (error instanceof SyntaxError || error instanceof z.ZodError) {
+    return 'the state file does not parse';
+  }
+  return (error as Error).message;
+}
 
 function forwardableHeaders(headers: IncomingHttpHeaders): OutgoingHttpHeaders {
   const listed = new Set(
@@ -155,6 +197,8 @@ async function buffer(response: IncomingMessage): Promise<BufferedResponse> {
 
 class Pool {
   readonly #options: PoolOptions;
+  readonly #log: Log;
+  readonly #statePath: string;
   #config: PoolConfig;
   #members: Member[] = [];
   readonly #knowledge = new Map<string, Knowledge>();
@@ -164,10 +208,74 @@ class Pool {
   /** SHA-256 of each bearer found foreign → when it was last checked; the pool never keeps a foreign token itself. */
   readonly #foreignCheckedAt = new Map<string, number>();
   readonly #brokenRechecks = new Map<string, Promise<void>>();
+  /** At most one state write runs; changes made while it runs ask for one more write after it. */
+  #saving: Promise<void> | null = null;
+  #saveAgain = false;
 
-  constructor(options: PoolOptions, config: PoolConfig) {
+  constructor(options: PoolOptions, config: PoolConfig, statePath: string, log: Log) {
     this.#options = options;
     this.#config = config;
+    this.#statePath = statePath;
+    this.#log = log;
+  }
+
+  /** Takes back what the last run saved, before the first load: a park outlives the restart, an ended park does not. */
+  restore(state: PoolState): void {
+    const now = this.#options.now();
+    for (const { alias, park, sevenDayReset, fiveHourReset } of state.accounts) {
+      const health: Health =
+        park !== undefined && park.until > now ? { state: 'parked', until: park.until, claim: park.claim } : { state: 'ok' };
+      this.#knowledge.set(alias, { health, sevenDayReset, fiveHourReset });
+    }
+    for (const { session, alias, lastUsed } of state.pins) {
+      if (now - lastUsed <= pinIdleLimit) {
+        this.#pins.set(session, { alias, lastUsed });
+      }
+    }
+  }
+
+  #snapshot(): PoolState {
+    return {
+      pins: [...this.#pins].map(([session, { alias, lastUsed }]) => ({ session, alias, lastUsed })),
+      accounts: [...this.#knowledge].map(([alias, { health, sevenDayReset, fiveHourReset }]) => ({
+        alias,
+        ...(health.state === 'parked' ? { park: { until: health.until, claim: health.claim } } : {}),
+        sevenDayReset,
+        fiveHourReset,
+      })),
+    };
+  }
+
+  async #write(): Promise<void> {
+    try {
+      await atomicWrite(this.#statePath, `${JSON.stringify(this.#snapshot())}\n`, { clock: globalThis, mode: 0o600 });
+    } catch (error) {
+      this.#log(`state: not saved (${(error as Error).message})`);
+    }
+  }
+
+  /** A burst of changes costs at most two writes: the one that runs and one more that takes in every change since. */
+  #save(): void {
+    if (this.#saving) {
+      this.#saveAgain = true;
+      return;
+    }
+    this.#saving = (async () => {
+      try {
+        do {
+          this.#saveAgain = false;
+          await this.#write();
+        } while (this.#saveAgain);
+      } finally {
+        this.#saving = null;
+      }
+    })();
+  }
+
+  /** The last write, on close: it also keeps each pin's last use, which alone never asks for a write. */
+  async flush(): Promise<void> {
+    await this.#saving;
+    await this.#write();
   }
 
   get port(): number {
@@ -180,7 +288,7 @@ class Pool {
         try {
           return { entry, credential: await this.#options.tokens.read(entry) } as Member;
         } catch (error) {
-          log(`account ${entry.alias}: token unavailable (${(error as Error).message})`);
+          this.#log(`account ${entry.alias}: token unavailable (${(error as Error).message})`);
           return { entry, credential: null } as Member;
         }
       }),
@@ -204,7 +312,7 @@ class Pool {
       }
     }
     if (config.port !== this.#config.port) {
-      log(`config: port ${config.port} takes effect after a restart`);
+      this.#log(`config: port ${config.port} takes effect after a restart`);
     }
     this.#config = { ...config, port: this.#config.port };
     this.#members = members;
@@ -224,6 +332,7 @@ class Pool {
     const known = this.#knowledgeOf(alias);
     if (known.health.state === 'parked' && known.health.until <= this.#options.now()) {
       known.health = { state: 'ok' };
+      this.#save();
     }
     return known.health;
   }
@@ -255,7 +364,7 @@ class Pool {
       try {
         native.credential = await this.#options.tokens.read(native.entry);
       } catch (error) {
-        log(`account ${native.entry.alias}: token unavailable (${(error as Error).message})`);
+        this.#log(`account ${native.entry.alias}: token unavailable (${(error as Error).message})`);
         return;
       } finally {
         this.#nativeReread = null;
@@ -268,7 +377,7 @@ class Pool {
         credential.expiresAt > this.#options.now()
       ) {
         known.health = { state: 'ok' };
-        log(`account ${native.entry.alias} recovered: new token`);
+        this.#log(`account ${native.entry.alias} recovered: new token`);
       }
     })();
     return this.#nativeReread;
@@ -293,10 +402,10 @@ class Pool {
         if (credential.token !== failedToken && this.#members.includes(member)) {
           member.credential = credential;
           known.health = { state: 'ok' };
-          log(`account ${alias} recovered: new token`);
+          this.#log(`account ${alias} recovered: new token`);
         }
       } catch (error) {
-        log(`account ${alias}: token unavailable (${(error as Error).message})`);
+        this.#log(`account ${alias}: token unavailable (${(error as Error).message})`);
       } finally {
         this.#brokenRechecks.delete(alias);
       }
@@ -315,7 +424,7 @@ class Pool {
         const after = this.#knowledgeOf(member.entry.alias);
         if (member.credential !== null && member.credential.expiresAt <= this.#options.now() && after.health.state === 'ok') {
           after.health = { state: 'stale', failedToken: member.credential.token };
-          log(`account ${member.entry.alias}: stale (token expired; waiting for Claude Code to refresh it)`);
+          this.#log(`account ${member.entry.alias}: stale (token expired; waiting for Claude Code to refresh it)`);
         }
       }
     } else if (this.#healthOf(member.entry.alias).state === 'broken') {
@@ -348,7 +457,7 @@ class Pool {
       return member;
     }
     if (checkedAt === undefined) {
-      log('a token outside the rotation passes through untouched');
+      this.#log('a token outside the rotation passes through untouched');
     }
     this.#foreignCheckedAt.set(digest, now);
     for (const [seen, at] of this.#foreignCheckedAt) {
@@ -366,18 +475,25 @@ class Pool {
     }
   }
 
-  async #choose(session: string | undefined, attempted: ReadonlySet<string>): Promise<Member | undefined> {
+  /**
+   * A session moves only when its account hits a limit: it stays on its pin, or else on the caller's own login.
+   * A session that moved stays on its new pin after its own account resets: moving back would rebuild its cache
+   * for no limit.
+   */
+  async #choose(session: string | undefined, caller: Member, attempted: ReadonlySet<string>): Promise<Member | undefined> {
     const open = this.#members.filter((member) => !attempted.has(member.entry.alias));
     await Promise.all(open.map((member) => this.#recover(member)));
     const usable = open.filter(
       (member) => member.credential !== null && this.#healthOf(member.entry.alias).state === 'ok',
     );
     const pinned = session === undefined ? undefined : this.#pins.get(session);
-    const stay = usable.find((member) => member.entry.alias === pinned?.alias);
+    const stay =
+      usable.find((member) => member.entry.alias === pinned?.alias) ??
+      usable.find((member) => member.entry.alias === caller.entry.alias);
     if (stay) {
       return stay;
     }
-    // The quota that resets soonest is spent first; accounts with no known reset follow in config order.
+    // A session that must move spends the quota that resets soonest; accounts with no known reset follow in config order.
     const reset = (member: Member) => this.#knowledgeOf(member.entry.alias).sevenDayReset ?? Number.POSITIVE_INFINITY;
     return usable.toSorted((left, right) => reset(left) - reset(right))[0];
   }
@@ -400,6 +516,7 @@ class Pool {
     const status = response.statusCode ?? 0;
     if (known.health.state === 'parked' && status >= 200 && status < 300) {
       known.health = { state: 'ok' };
+      this.#save();
     }
   }
 
@@ -408,7 +525,8 @@ class Pool {
     const until =
       unixHeader(response.headers, 'anthropic-ratelimit-unified-reset') ?? this.#options.now() + unknownResetPark;
     this.#knowledgeOf(alias).health = { state: 'parked', until, claim };
-    log(`parked ${alias} until ${localTime.format(until)} (${claim})`);
+    this.#save();
+    this.#log(`parked ${alias} until ${localTime.format(until)} (${claim})`);
   }
 
   #forward(
@@ -473,7 +591,7 @@ class Pool {
     const movedFrom = pinned ?? caller.entry.alias;
     const rejections = new Map<string, BufferedResponse>();
     for (;;) {
-      const target = await this.#choose(session, attempted);
+      const target = await this.#choose(session, caller, attempted);
       if (!target?.credential) {
         await this.#answerWhenNoneIsOpen(request, body, client, rejections, abort.signal);
         return;
@@ -492,19 +610,22 @@ class Pool {
         const failedToken = target.credential.token;
         if (target.entry.source === 'native') {
           this.#knowledgeOf(alias).health = { state: 'stale', failedToken };
-          log(`account ${alias}: stale (401 on its cached token)`);
+          this.#log(`account ${alias}: stale (401 on its cached token)`);
           void this.#rereadNative();
         } else {
           this.#knowledgeOf(alias).health = { state: 'broken', failedToken, checkedAt: Number.NEGATIVE_INFINITY };
-          log(`account ${alias}: broken (401)`);
+          this.#log(`account ${alias}: broken (401)`);
         }
         continue;
       }
       if (movedFrom !== alias) {
-        log(`session ${session?.slice(0, 8) ?? '(none)'} ${movedFrom} → ${alias} (${this.#why(movedFrom)})`);
+        this.#log(`session ${session?.slice(0, 8) ?? '(none)'} ${movedFrom} → ${alias} (${this.#why(movedFrom)})`);
       }
       if (session !== undefined) {
         this.#pins.set(session, { alias, lastUsed: this.#options.now() });
+        if (pinned !== alias) {
+          this.#save();
+        }
       }
       await this.#relay(response, client);
       return;
@@ -577,9 +698,14 @@ export type PoolStatus = Awaited<ReturnType<Pool['status']>>;
 
 export async function startPool(options: PoolOptions): Promise<PoolHandle> {
   await using resources = new AsyncDisposableStack();
+  const log = logOn(options.now);
   const config = await readConfig(options.configPath);
-  const pool = new Pool(options, config);
+  const statePath = join(dirname(options.configPath), 'state.json');
+  const pool = new Pool(options, config, statePath, log);
+  pool.restore(await readState(statePath, log));
   await pool.load(config);
+  // Disposed after the server closes, so no request changes the state after its last write.
+  resources.defer(() => pool.flush());
 
   let reloading = Promise.resolve();
   let debounce: NodeJS.Timeout | undefined;
@@ -594,6 +720,7 @@ export async function startPool(options: PoolOptions): Promise<PoolHandle> {
     });
   };
   // The directory, not the file: an atomic write replaces the file, and a watch on the old file sees nothing after it.
+  // The filter on the config's name keeps the pool's own state.json writes from reloading the config.
   const watcher: FSWatcher = watch(dirname(options.configPath), (_event, file) => {
     if (file === basename(options.configPath)) {
       clearTimeout(debounce);

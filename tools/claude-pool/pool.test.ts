@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { watch } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { readFile, rename, stat, writeFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { promisify } from 'node:util';
 
@@ -101,10 +102,12 @@ async function startTestPool(setup: {
   now: () => number;
   /** Records the alias of each token read: each one is a Keychain access in production. */
   reads?: string[];
+  /** The config directory of an earlier pool, so this one starts as that pool restarted; the caller removes it. */
+  directory?: string;
 }) {
   await using resources = new AsyncDisposableStack();
-  const directory = resources.use(await new TemporaryFiles().directory('claude-pool-'));
-  const configPath = join(directory.path, 'accounts.json');
+  const directory = setup.directory ?? resources.use(await new TemporaryFiles().directory('claude-pool-')).path;
+  const configPath = join(directory, 'accounts.json');
   const config = { port: 0, upstream: setup.upstream, rotation: setup.rotation, excluded: setup.excluded ?? [] };
   await writeFile(configPath, JSON.stringify(config));
   const pool = resources.use(
@@ -148,9 +151,10 @@ async function poolStatus(origin: string): Promise<PoolStatus> {
 
 const accountIn = (status: PoolStatus, alias: string) => status.accounts.find((account) => account.alias === alias);
 
-async function rewriteConfig(configPath: string, upstream: string, rotation: AccountEntry[], excluded: AccountEntry[] = []) {
+/** `port` is the pool's real port when a reader of the config (the menu plugin) must reach the running test pool. */
+async function rewriteConfig(configPath: string, upstream: string, rotation: AccountEntry[], excluded: AccountEntry[] = [], port = 0) {
   const temporary = `${configPath}.test.tmp`;
-  await writeFile(temporary, JSON.stringify({ port: 0, upstream, rotation, excluded }));
+  await writeFile(temporary, JSON.stringify({ port, upstream, rotation, excluded }));
   await rename(temporary, configPath);
 }
 
@@ -217,21 +221,22 @@ test('a per-minute 429 reaches the client and moves no account', async () => {
 test('a 401 on a swapped-in account marks it broken and resends on the next account', async () => {
   const now = Date.now();
   await using upstream = await fakeAnthropic((seen, response) => {
-    if (seen.authorization === 'Bearer token-a') unauthorized(response);
+    if (seen.authorization === 'Bearer token-c') rejected(response, '{}', { claim: 'seven_day', reset: now + day, sevenDay: now + day });
+    else if (seen.authorization === 'Bearer token-a') unauthorized(response);
     else allowed(response, 'from b', { sevenDay: now + day, fiveHour: now + hour });
   });
   await using pool = await startTestPool({
     upstream: upstream.origin,
-    rotation: [keychainEntry('a'), keychainEntry('b')],
-    tokens: new Map([['a', setupToken('token-a')], ['b', setupToken('token-b')]]),
+    rotation: [keychainEntry('a'), keychainEntry('b'), keychainEntry('c')],
+    tokens: new Map([['a', setupToken('token-a')], ['b', setupToken('token-b')], ['c', setupToken('token-c')]]),
     now: () => now,
   });
 
-  const response = await message(pool.origin, 'token-b', session1);
+  const response = await message(pool.origin, 'token-c', session1);
 
   assert.equal(response.status, 200);
   assert.equal(await response.text(), 'from b');
-  assert.deepEqual(upstream.tokens(), ['Bearer token-a', 'Bearer token-b']);
+  assert.deepEqual(upstream.tokens(), ['Bearer token-c', 'Bearer token-a', 'Bearer token-b']);
   assert.equal(accountIn(await poolStatus(pool.origin), 'a')?.state, 'broken');
 });
 
@@ -278,7 +283,13 @@ test('an excluded or unknown token goes upstream untouched and is never rotated'
 
 test("a pool member's non-inference request keeps the caller's own token", async () => {
   const now = Date.now();
-  await using upstream = await fakeAnthropic((_seen, response) => allowed(response, '{}', { sevenDay: now + day, fiveHour: now + hour }));
+  await using upstream = await fakeAnthropic((seen, response) => {
+    if (seen.method === 'POST' && seen.authorization === 'Bearer token-b') {
+      rejected(response, '{}', { claim: 'seven_day', reset: now + day, sevenDay: now + day });
+    } else {
+      allowed(response, '{}', { sevenDay: now + day, fiveHour: now + hour });
+    }
+  });
   await using pool = await startTestPool({
     upstream: upstream.origin,
     rotation: [keychainEntry('a'), keychainEntry('b')],
@@ -295,6 +306,7 @@ test("a pool member's non-inference request keeps the caller's own token", async
   assert.deepEqual(
     upstream.seen.map((seen) => [seen.method, seen.path, seen.authorization]),
     [
+      ['POST', '/v1/messages?beta=true', 'Bearer token-b'],
       ['POST', '/v1/messages?beta=true', 'Bearer token-a'],
       ['GET', '/api/oauth/profile', 'Bearer token-b'],
     ],
@@ -391,22 +403,22 @@ async function arrangeTwoKnownResets() {
   };
 }
 
-test('a new session goes to the account whose weekly quota resets soonest', async () => {
+test("a new session whose own account works stays on it, though another account's weekly quota resets sooner", async () => {
   await using arranged = await arrangeTwoKnownResets();
 
   const response = await message(arranged.pool.origin, 'token-a', session3);
 
-  assert.equal(await response.text(), 'from b');
-  assert.deepEqual(arranged.upstream.tokens(), ['Bearer token-b']);
-});
-
-test('a session stays on its pinned account while that account works', async () => {
-  await using arranged = await arrangeTwoKnownResets();
-
-  const response = await message(arranged.pool.origin, 'token-a', session1);
-
   assert.equal(await response.text(), 'from a');
   assert.deepEqual(arranged.upstream.tokens(), ['Bearer token-a']);
+});
+
+test("a session that moved stays on its new account after its own account's limit resets", async () => {
+  await using arranged = await arrangeTwoKnownResets();
+
+  const response = await message(arranged.pool.origin, 'token-a', session2);
+
+  assert.equal(await response.text(), 'from b');
+  assert.deepEqual(arranged.upstream.tokens(), ['Bearer token-b']);
 });
 
 test('a session pin is forgotten after 24 hours idle', async () => {
@@ -414,10 +426,37 @@ test('a session pin is forgotten after 24 hours idle', async () => {
   arranged.advance(day + 60_000);
 
   const status = await poolStatus(arranged.pool.origin);
-  const response = await message(arranged.pool.origin, 'token-a', session1);
+  const response = await message(arranged.pool.origin, 'token-a', session2);
 
   assert.equal(status.pinnedSessions, 0);
-  assert.equal(await response.text(), 'from b');
+  assert.equal(await response.text(), 'from a');
+});
+
+test('a new session whose own account is at its limit goes to the account whose weekly quota resets soonest', async () => {
+  const now = Date.now();
+  await using upstream = await fakeAnthropic((seen, response) => {
+    if (seen.authorization === 'Bearer token-a') {
+      rejected(response, '{}', { claim: 'seven_day', reset: now + 3 * day, sevenDay: now + 3 * day });
+    } else if (seen.authorization === 'Bearer token-b') {
+      allowed(response, 'from b', { sevenDay: now + 5 * day, fiveHour: now + hour });
+    } else {
+      allowed(response, 'from c', { sevenDay: now + 2 * day, fiveHour: now + hour });
+    }
+  });
+  await using pool = await startTestPool({
+    upstream: upstream.origin,
+    rotation: [keychainEntry('a'), keychainEntry('b'), keychainEntry('c')],
+    tokens: new Map([['a', setupToken('token-a')], ['b', setupToken('token-b')], ['c', setupToken('token-c')]]),
+    now: () => now,
+  });
+  await (await message(pool.origin, 'token-b', session1)).text();
+  await (await message(pool.origin, 'token-c', session2)).text();
+  upstream.seen.length = 0;
+
+  const response = await message(pool.origin, 'token-a', session3);
+
+  assert.equal(await response.text(), 'from c');
+  assert.deepEqual(upstream.tokens(), ['Bearer token-a', 'Bearer token-c']);
 });
 
 test('a streamed answer reaches the client event by event, intact and in order', async () => {
@@ -547,7 +586,9 @@ test('a broken setup-token account comes back once its Keychain item holds a new
   const start = now;
   await using upstream = await fakeAnthropic((seen, response) => {
     if (seen.authorization === 'Bearer token-a-old') unauthorized(response);
-    else if (seen.authorization === 'Bearer token-b' && seen.body.includes('"second"')) {
+    else if (seen.authorization === 'Bearer token-b' && seen.body.includes('"first"')) {
+      rejected(response, '{}', { claim: 'five_hour', reset: start + 60_000, sevenDay: start + day });
+    } else if (seen.authorization === 'Bearer token-b' && seen.body.includes('"second"')) {
       rejected(response, '{}', { claim: 'seven_day', reset: start + day, sevenDay: start + day });
     } else allowed(response, seen.authorization!, { sevenDay: start + day, fiveHour: start + hour });
   });
@@ -558,7 +599,7 @@ test('a broken setup-token account comes back once its Keychain item holds a new
     tokens,
     now: () => now,
   });
-  await (await message(pool.origin, 'token-b', session1)).text();
+  await (await message(pool.origin, 'token-b', session1, '{"first":true}')).text();
   const broken = accountIn(await poolStatus(pool.origin), 'a')?.state;
 
   tokens.set('a', setupToken('token-a-new'));
@@ -574,8 +615,8 @@ test('an expired native token is skipped as stale until Claude Code stores a fre
   let now = Date.now();
   const start = now;
   await using upstream = await fakeAnthropic((seen, response) => {
-    if (seen.authorization === 'Bearer token-b' && seen.body.includes('"second"')) {
-      rejected(response, '{}', { claim: 'seven_day', reset: start + day, sevenDay: start + day });
+    if (seen.authorization === 'Bearer token-b') {
+      rejected(response, '{"out":"b"}', { claim: 'seven_day', reset: start + day, sevenDay: start + day });
     } else allowed(response, seen.authorization!, { sevenDay: start + day, fiveHour: start + hour });
   });
   const tokens = new Map([['claude', { token: 'native-old', expiresAt: now - 1000 }], ['b', setupToken('token-b')]]);
@@ -592,7 +633,7 @@ test('an expired native token is skipped as stale until Claude Code stores a fre
   now += 31_000;
   const afterRefresh = await (await message(pool.origin, 'token-b', session2, '{"second":true}')).text();
 
-  assert.equal(whileStale, 'Bearer token-b');
+  assert.equal(whileStale, '{"out":"b"}');
   assert.equal(stale, 'stale');
   assert.equal(afterRefresh, 'Bearer native-new');
   assert.equal(upstream.tokens().includes('Bearer native-old'), false);
@@ -601,17 +642,18 @@ test('an expired native token is skipped as stale until Claude Code stores a fre
 test('a 401 on a swapped-in native token makes it stale, never broken', async () => {
   const now = Date.now();
   await using upstream = await fakeAnthropic((seen, response) => {
-    if (seen.authorization === 'Bearer native') unauthorized(response);
+    if (seen.authorization === 'Bearer token-c') rejected(response, '{}', { claim: 'seven_day', reset: now + day, sevenDay: now + day });
+    else if (seen.authorization === 'Bearer native') unauthorized(response);
     else allowed(response, 'b', { sevenDay: now + day, fiveHour: now + hour });
   });
   await using pool = await startTestPool({
     upstream: upstream.origin,
-    rotation: [nativeEntry('claude'), keychainEntry('b')],
-    tokens: new Map([['claude', { token: 'native', expiresAt: now + hour }], ['b', setupToken('token-b')]]),
+    rotation: [nativeEntry('claude'), keychainEntry('b'), keychainEntry('c')],
+    tokens: new Map([['claude', { token: 'native', expiresAt: now + hour }], ['b', setupToken('token-b')], ['c', setupToken('token-c')]]),
     now: () => now,
   });
 
-  const response = await message(pool.origin, 'token-b', session1);
+  const response = await message(pool.origin, 'token-c', session1);
 
   assert.equal(response.status, 200);
   assert.equal(await response.text(), 'b');
@@ -643,11 +685,12 @@ test('a native login that Claude Code refreshed is still recognised as a pool me
 });
 
 const cli = new URL('./cli.ts', import.meta.url).pathname;
+const menu = new URL('./menu/claude-pool.ts', import.meta.url).pathname;
 
-/** Runs the real CLI against the test's config file. */
-async function claudePool(configPath: string, ...args: string[]) {
+/** Runs one of the pool's scripts (the CLI, the SwiftBar menu plugin) against the test's config file. */
+async function runScript(script: string, configPath: string, ...args: string[]) {
   try {
-    const { stdout, stderr } = await promisify(execFile)(process.execPath, [cli, ...args], {
+    const { stdout, stderr } = await promisify(execFile)(process.execPath, [script, ...args], {
       env: { ...process.env, CLAUDE_POOL_CONFIG: configPath },
     });
     return { code: 0, stdout, stderr };
@@ -656,6 +699,8 @@ async function claudePool(configPath: string, ...args: string[]) {
     return { code: failed.code, stdout: failed.stdout, stderr: failed.stderr };
   }
 }
+
+const claudePool = (configPath: string, ...args: string[]) => runScript(cli, configPath, ...args);
 
 const reloaded = (origin: string, check: (status: PoolStatus) => boolean) =>
   waitFor(async () => assert.ok(check(await poolStatus(origin))), { signal: AbortSignal.timeout(3000) });
@@ -817,7 +862,10 @@ test('claude-pool remove stops requests from going to that account', async () =>
 
 test("Claude Code's headers reach upstream on a swapped request, and hop-by-hop headers do not", async () => {
   const now = Date.now();
-  await using upstream = await fakeAnthropic((_seen, response) => allowed(response, 'ok', { sevenDay: now + day, fiveHour: now + hour }));
+  await using upstream = await fakeAnthropic((seen, response) => {
+    if (seen.authorization === 'Bearer token-b') rejected(response, '{}', { claim: 'seven_day', reset: now + day, sevenDay: now + day });
+    else allowed(response, 'ok', { sevenDay: now + day, fiveHour: now + hour });
+  });
   await using pool = await startTestPool({
     upstream: upstream.origin,
     rotation: [keychainEntry('a'), keychainEntry('b')],
@@ -848,7 +896,8 @@ test("Claude Code's headers reach upstream on a swapped request, and hop-by-hop 
   });
 
   assert.equal(status, 200);
-  const [seen] = upstream.seen;
+  assert.deepEqual(upstream.tokens(), ['Bearer token-b', 'Bearer token-a']);
+  const seen = upstream.seen.at(-1);
   assert.equal(seen?.authorization, 'Bearer token-a');
   assert.equal(seen?.headers['anthropic-beta'], 'claude-code-20250219,oauth-2025-04-20');
   assert.equal(seen?.headers['anthropic-version'], '2023-06-01');
@@ -904,15 +953,18 @@ test('an upstream that drops the connection before answering gives the client a 
 
 test('an account whose token cannot be read at start is broken, and the others serve', async () => {
   const now = Date.now();
-  await using upstream = await fakeAnthropic((seen, response) => allowed(response, seen.authorization!, { sevenDay: now + day, fiveHour: now + hour }));
+  await using upstream = await fakeAnthropic((seen, response) => {
+    if (seen.authorization === 'Bearer token-c') rejected(response, '{}', { claim: 'seven_day', reset: now + day, sevenDay: now + day });
+    else allowed(response, seen.authorization!, { sevenDay: now + day, fiveHour: now + hour });
+  });
   await using pool = await startTestPool({
     upstream: upstream.origin,
-    rotation: [keychainEntry('a'), keychainEntry('b')],
-    tokens: new Map([['b', setupToken('token-b')]]),
+    rotation: [keychainEntry('a'), keychainEntry('b'), keychainEntry('c')],
+    tokens: new Map([['b', setupToken('token-b')], ['c', setupToken('token-c')]]),
     now: () => now,
   });
 
-  const response = await message(pool.origin, 'token-b', session1);
+  const response = await message(pool.origin, 'token-c', session1);
 
   assert.equal(await response.text(), 'Bearer token-b');
   assert.equal(accountIn(await poolStatus(pool.origin), 'a')?.state, 'broken');
@@ -991,4 +1043,297 @@ test('a client that leaves before the first byte ends the upstream request', asy
   await pending;
 
   await waitFor(() => upstreamClosed.promise, { signal: AbortSignal.timeout(3000) });
+});
+
+/** a hits its weekly limit, b answers with a weekly reset in 5 days, c with one in 2 days. */
+function threeAccounts(now: number): Answer {
+  return (seen, response) => {
+    if (seen.authorization === 'Bearer token-a') {
+      rejected(response, '{"out":"a"}', { claim: 'seven_day', reset: now + 3 * day, sevenDay: now + 3 * day });
+    } else if (seen.authorization === 'Bearer token-b') {
+      allowed(response, 'from b', { sevenDay: now + 5 * day, fiveHour: now + hour });
+    } else {
+      allowed(response, 'from c', { sevenDay: now + 2 * day, fiveHour: now + hour });
+    }
+  };
+}
+
+const threeTokens = () => new Map([['a', setupToken('token-a')], ['b', setupToken('token-b')], ['c', setupToken('token-c')]]);
+
+test('after a restart a parked account gets no request, and a session keeps the account it moved to', async () => {
+  const now = Date.now();
+  await using upstream = await fakeAnthropic(threeAccounts(now));
+  await using directory = await new TemporaryFiles().directory('claude-pool-');
+  const setup = {
+    upstream: upstream.origin,
+    rotation: [keychainEntry('a'), keychainEntry('b'), keychainEntry('c')],
+    tokens: threeTokens(),
+    now: () => now,
+    directory: directory.path,
+  };
+  {
+    await using first = await startTestPool(setup);
+    // a reaches its limit and session 1 moves to b; c then reports the sooner weekly reset.
+    await (await message(first.origin, 'token-a', session1)).text();
+    await (await message(first.origin, 'token-c', session2)).text();
+  }
+  upstream.seen.length = 0;
+
+  await using restarted = await startTestPool(setup);
+  const response = await message(restarted.origin, 'token-a', session1);
+
+  assert.equal(await response.text(), 'from b');
+  assert.deepEqual(upstream.tokens(), ['Bearer token-b']);
+  assert.equal(accountIn(await poolStatus(restarted.origin), 'a')?.state, 'parked');
+});
+
+test('a park that ended while the pool was down is dropped at start, so the account is judged by its token again', async () => {
+  let now = Date.now();
+  const start = now;
+  await using upstream = await fakeAnthropic((seen, response) => {
+    if (seen.authorization === 'Bearer token-a') {
+      rejected(response, '{}', { claim: 'five_hour', reset: start + hour, sevenDay: start + day });
+    } else {
+      allowed(response, 'from b', { sevenDay: start + day, fiveHour: start + hour });
+    }
+  });
+  await using directory = await new TemporaryFiles().directory('claude-pool-');
+  const tokens = new Map([['a', setupToken('token-a')], ['b', setupToken('token-b')]]);
+  const setup = { upstream: upstream.origin, rotation: [keychainEntry('a'), keychainEntry('b')], tokens, now: () => now, directory: directory.path };
+  {
+    await using first = await startTestPool(setup);
+    await (await message(first.origin, 'token-a', session1)).text();
+  }
+  now += 2 * hour;
+  tokens.delete('a');
+
+  await using restarted = await startTestPool(setup);
+
+  // Kept as a park, the account would skip the token check at start and show ok with no token to send.
+  assert.equal(accountIn(await poolStatus(restarted.origin), 'a')?.state, 'broken');
+});
+
+test('a state file that does not parse starts the pool with no pins and no parks', async () => {
+  const now = Date.now();
+  await using upstream = await fakeAnthropic((seen, response) => allowed(response, seen.authorization!, { sevenDay: now + day, fiveHour: now + hour }));
+  await using directory = await new TemporaryFiles().directory('claude-pool-');
+  await writeFile(join(directory.path, 'state.json'), '{"pins": [');
+
+  await using pool = await startTestPool({
+    upstream: upstream.origin,
+    rotation: [keychainEntry('a'), keychainEntry('b')],
+    tokens: new Map([['a', setupToken('token-a')], ['b', setupToken('token-b')]]),
+    now: () => now,
+    directory: directory.path,
+  });
+  const response = await message(pool.origin, 'token-a', session1);
+
+  assert.equal(await response.text(), 'Bearer token-a');
+  const status = await poolStatus(pool.origin);
+  assert.deepEqual(status.accounts.map((account) => account.state), ['ok', 'ok']);
+});
+
+test('a burst of new sessions writes the state file a few times, not once per session', async () => {
+  const now = Date.now();
+  const sessions = Array.from({ length: 20 }, (_, index) => `burst-${index}-0000-4000-8000-000000000000`);
+  const arrived = Promise.withResolvers<void>();
+  let waiting = 0;
+  await using upstream = await fakeAnthropic(async (_seen, response) => {
+    // Every request is held until all have arrived, so the pool pins all the sessions at once.
+    if (++waiting === sessions.length) arrived.resolve();
+    await arrived.promise;
+    allowed(response, 'ok', { sevenDay: now + day, fiveHour: now + hour });
+  });
+  await using pool = await startTestPool({
+    upstream: upstream.origin,
+    rotation: [keychainEntry('a'), keychainEntry('b')],
+    tokens: new Map([['a', setupToken('token-a')], ['b', setupToken('token-b')]]),
+    now: () => now,
+  });
+  const statePath = join(dirname(pool.configPath), 'state.json');
+  let writes = 0;
+  let live = false;
+  const watcher = watch(dirname(pool.configPath), (_event, file) => {
+    if (file === 'state.json') writes++;
+    if (file === 'watch-probe') live = true;
+  });
+  try {
+    // A watch misses changes made before it runs; a file of its own, written until the watch sees it, shows it runs.
+    await waitFor(
+      async () => {
+        await writeFile(join(dirname(pool.configPath), 'watch-probe'), '');
+        assert.ok(live);
+      },
+      { signal: AbortSignal.timeout(3000) },
+    );
+    await Promise.all(sessions.map(async (session) => (await message(pool.origin, 'token-a', session)).text()));
+    await waitFor(
+      async () => assert.equal(JSON.parse(await readFile(statePath, 'utf8')).pins.length, sessions.length),
+      { signal: AbortSignal.timeout(3000) },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    assert.ok(writes >= 1, `no write seen`);
+    assert.ok(writes <= sessions.length / 4, `${writes} writes for ${sessions.length} new sessions`);
+  } finally {
+    watcher.close();
+  }
+});
+
+test("the pool's own state writes never reload the config", async () => {
+  const now = Date.now();
+  const reads: string[] = [];
+  await using upstream = await fakeAnthropic(threeAccounts(now));
+  await using pool = await startTestPool({
+    upstream: upstream.origin,
+    rotation: [keychainEntry('a'), keychainEntry('b'), keychainEntry('c')],
+    tokens: threeTokens(),
+    reads,
+    now: () => now,
+  });
+  // The config was written just before the start, and its change event can still arrive and reload it once.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const readsAtStart = reads.length;
+  const statePath = join(dirname(pool.configPath), 'state.json');
+
+  // A park and a pin: both write the state file.
+  await (await message(pool.origin, 'token-a', session1)).text();
+  await waitFor(async () => assert.equal(JSON.parse(await readFile(statePath, 'utf8')).pins.length, 1), {
+    signal: AbortSignal.timeout(3000),
+  });
+  // A reload reads the config 50 ms after the change and then every token; give it time to run.
+  await new Promise((resolve) => setTimeout(resolve, 300));
+
+  // Each token read is a Keychain access; a reload would read every account again.
+  assert.equal(reads.length, readsAtStart);
+});
+
+test('the state file is readable by its owner only, since it names each account', async () => {
+  const now = Date.now();
+  await using upstream = await fakeAnthropic(threeAccounts(now));
+  await using pool = await startTestPool({
+    upstream: upstream.origin,
+    rotation: [keychainEntry('a'), keychainEntry('b'), keychainEntry('c')],
+    tokens: threeTokens(),
+    now: () => now,
+  });
+  const statePath = join(dirname(pool.configPath), 'state.json');
+
+  await (await message(pool.origin, 'token-a', session1)).text();
+  await waitFor(async () => assert.equal(JSON.parse(await readFile(statePath, 'utf8')).pins.length, 1), {
+    signal: AbortSignal.timeout(3000),
+  });
+
+  assert.equal((await stat(statePath)).mode & 0o777, 0o600);
+});
+
+test("a session's last use before a restart keeps its pin, though that use alone wrote no state", async () => {
+  let now = Date.now();
+  await using upstream = await fakeAnthropic(threeAccounts(now));
+  await using directory = await new TemporaryFiles().directory('claude-pool-');
+  const setup = {
+    upstream: upstream.origin,
+    rotation: [keychainEntry('a'), keychainEntry('b'), keychainEntry('c')],
+    tokens: threeTokens(),
+    now: () => now,
+    directory: directory.path,
+  };
+  {
+    await using first = await startTestPool(setup);
+    await (await message(first.origin, 'token-a', session1)).text();
+    await (await message(first.origin, 'token-c', session2)).text();
+    now += 23 * hour;
+    await (await message(first.origin, 'token-a', session1)).text();
+  }
+  // 25 hours after the move, 2 hours after the last use: the pin is idle less than a day.
+  now += 2 * hour;
+  upstream.seen.length = 0;
+
+  await using restarted = await startTestPool(setup);
+  const response = await message(restarted.origin, 'token-a', session1);
+
+  assert.equal(await response.text(), 'from b');
+  assert.deepEqual(upstream.tokens(), ['Bearer token-b']);
+});
+
+test('more requests of a pinned session on the same account leave the state file as it was', async () => {
+  const now = Date.now();
+  await using upstream = await fakeAnthropic(threeAccounts(now));
+  await using pool = await startTestPool({
+    upstream: upstream.origin,
+    rotation: [keychainEntry('a'), keychainEntry('b'), keychainEntry('c')],
+    tokens: threeTokens(),
+    now: () => now,
+  });
+  const statePath = join(dirname(pool.configPath), 'state.json');
+  await (await message(pool.origin, 'token-a', session1)).text();
+  await waitFor(async () => assert.equal(JSON.parse(await readFile(statePath, 'utf8')).pins.length, 1), {
+    signal: AbortSignal.timeout(3000),
+  });
+  // The park and the pin may each write; let both land before the file is read.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const before = await stat(statePath);
+
+  for (let request = 0; request < 5; request++) {
+    await (await message(pool.origin, 'token-a', session1)).text();
+  }
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  // Each write replaces the file, so a new inode would mean a write.
+  assert.equal((await stat(statePath)).ino, before.ino);
+});
+
+test('the menu lists each account with its state and offers the action that fits its list', async () => {
+  const now = Date.now();
+  await using upstream = await fakeAnthropic((_seen, response) => allowed(response, 'ok', { sevenDay: now + day, fiveHour: now + hour }));
+  const rotation = [keychainEntry('a'), keychainEntry('b')];
+  const excluded = [keychainEntry('d')];
+  await using pool = await startTestPool({
+    upstream: upstream.origin,
+    rotation,
+    excluded,
+    tokens: new Map([['a', setupToken('token-a')], ['b', setupToken('token-b')]]),
+    now: () => now,
+  });
+  await rewriteConfig(pool.configPath, upstream.origin, rotation, excluded, Number(new URL(pool.origin).port));
+
+  const result = await runScript(menu, pool.configPath);
+
+  assert.equal(result.code, 0, result.stderr);
+  const lines = result.stdout.split('\n');
+  assert.equal(lines[0], '2 | sfimage=person.2');
+  assert.ok(lines.includes('a  rotation  ok'), result.stdout);
+  assert.ok(lines.includes('d  excluded  ok'), result.stdout);
+  assert.match(result.stdout, /^--exclude \| .* param2=exclude param3=a /m);
+  assert.match(result.stdout, /^--include \| .* param2=include param3=d /m);
+  assert.match(result.stdout, /^Add account… \| .* param2=add terminal=true /m);
+});
+
+test('a menu exclude moves the account out of the rotation', async () => {
+  await using directory = await new TemporaryFiles().directory('claude-pool-');
+  const configPath = join(directory.path, 'accounts.json');
+  await writeFile(configPath, JSON.stringify({ port: 0, rotation: [keychainEntry('a'), keychainEntry('b')], excluded: [] }));
+
+  const result = await runScript(menu, configPath, 'exclude', 'b');
+
+  assert.equal(result.code, 0, result.stderr);
+  const config = JSON.parse(await readFile(configPath, 'utf8')) as { rotation: AccountEntry[]; excluded: AccountEntry[] };
+  assert.deepEqual(config.rotation.map((entry) => entry.alias), ['a']);
+  assert.deepEqual(config.excluded.map((entry) => entry.alias), ['b']);
+});
+
+test('the menu says the pool is down when nothing answers on its port', async () => {
+  await using directory = await new TemporaryFiles().directory('claude-pool-');
+  const configPath = join(directory.path, 'accounts.json');
+  let port: number;
+  {
+    await using closed = await new HttpServer().start((_request: IncomingMessage, response: ServerResponse) => response.end());
+    port = Number(new URL(closed.origin).port);
+  }
+  await writeFile(configPath, JSON.stringify({ port, rotation: [keychainEntry('a')], excluded: [] }));
+
+  const result = await runScript(menu, configPath);
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.stdout.split('\n')[0], 'pool down | sfimage=exclamationmark.triangle');
 });
