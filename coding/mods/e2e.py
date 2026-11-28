@@ -6,7 +6,7 @@ real engine instead: a terminal session (in a pseudo-terminal, with the user's o
 and hooks) loads this checkout's coding plugin with a low `rolloverPercent`, gets pushed past
 it, and must write a continuation, /clear, and resume from it in a new conversation.
 
-    python3 -I coding/mods/e2e.py <empty work folder> [--percent 12] [--wait 420] [--claude ~/.local/bin/lclaude] [--model haiku] [--effort low]
+    python3 -I coding/mods/e2e.py <empty work folder> [--percent 12] [--wait 420] [--claude ~/.local/bin/claude] [--model haiku] [--effort low]
 
 It spends the plan's quota (about 10 model requests) and ends within about 10 minutes. It prints one JSON verdict and exits 0
 only when every check holds. The child session and its pseudo-terminal are stopped at the end;
@@ -25,8 +25,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('work')
 parser.add_argument('--percent', type=int, default=12)
 parser.add_argument('--wait', type=int, default=420, help='seconds to wait for the rollover')
-# Ezz's working login (memory real-runs-use-lclaude): the proof spends its quota, never the native login's.
-parser.add_argument('--claude', default=f'{HOME}/.local/bin/lclaude')
+# Plain claude: tools/claude-pool sends each request to a subscription with quota left (memory claude-pool).
+parser.add_argument('--claude', default=f'{HOME}/.local/bin/claude')
 # The proof checks the mod's mechanics, so the cheapest model and effort serve (Ezz, 2026-11-28).
 parser.add_argument('--model', default='haiku')
 parser.add_argument('--effort', default='low')
